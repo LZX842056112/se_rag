@@ -6,7 +6,7 @@ from __future__ import annotations
 import os
 
 from dotenv import load_dotenv
-# todo
+# override=True：以 .env 覆盖进程已存在的同名环境变量，保证配置一致性
 load_dotenv(override=True)
 
 _TRUE_VALUES = {"1", "true", "yes", "on"}

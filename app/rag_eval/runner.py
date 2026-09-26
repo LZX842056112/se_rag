@@ -182,7 +182,6 @@ def insert_batch_eval_dataset() -> dict:
 
     # 2. 固定主体识别结果，保证测试数据每次都稳定。
     # 这里不让大模型自由识别，是为了避免测试数据每次导入出来的主体名称不一致。
-    # todo:  with patch("app.rag.import_.item_name_service.recognize_item_name_by_chunks - 执行",  返回必须 return_value=TEST_ITEM_NAME):
     with patch("app.rag.import_.item_name_service.recognize_item_name_by_chunks", return_value=TEST_ITEM_NAME):
         state = node_item_name_recognition(state)  # item_name  item_name存储到向量数据库
 

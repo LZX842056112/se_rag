@@ -34,8 +34,7 @@ def use_by_rrf(rrf_list:list,top:int=NODE_RRF_LIMIT_TOP,k:int=NODE_RRF_K):
         for rank,chunk in enumerate(current_chunks_list,start=1):
             # rrf => 排名 -> 循环的顺序就是排名的顺序
             # chunk => {id,title,content,item_name,score,type,url...}
-            # 上一次计算的得分  + 权重 * 1 / k + rank
-            # todo
+            # 上一次计算的得分 + 权重 * 1 / (k + rank)
             score_dict[chunk.get('chunk_id')] = score_dict.get(chunk.get("chunk_id"),0.0)+weight * (1/(k+rank))
             # chunk_dict[chunk.get('chunk_id')] = chunk # 每次覆盖 保留最后一次数据
             chunk_dict.setdefault(chunk.get('chunk_id'),chunk)  # 每次检查 保留第一次数据 [优雅]

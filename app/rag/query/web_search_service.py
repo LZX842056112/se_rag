@@ -59,7 +59,7 @@ def search_by_web(state: QueryGraphState) -> QueryGraphState:
     rewritten_query = get_data_and_validate(state)
     # 4. async 使用openai提供mcp方式进行调用(rewritten_query) -> 查询结果
     mcp_result = asyncio.run(open_ai_mcp(rewritten_query))
-    # 5. 结果解析 todo 注意: 外层都是属性,不是字典
+    # 5. 结果解析：注意 mcp 返回对象的字段是属性，不是字典
     text = mcp_result.content[0].text
     # {pages:[{snippet,title,url},{},{}]}
     text_dict = json.loads(text)

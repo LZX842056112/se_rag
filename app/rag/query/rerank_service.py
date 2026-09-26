@@ -145,40 +145,33 @@ def dyn_limit_reranker_docs(reranker_docs):
     :param reranker_docs:
     :return:
     """
-    # 第一个版本! 只考虑 前后指针断崖判断即可
-    top_max:int=get_rerank_topk()
-    top_min:int=RERANK_MIN_TOPK
-    gap_abs:float=RERANK_GAP_ABS # 0.2
-    gap_ratio:float=RERANK_GAP_RATIO # 0.2
-    # todo: 累计断崖 第一个(min-1)-> 最新一个判断
-    #情况1: max > len -> max = len
-    top_max = min(top_max,len(reranker_docs))
-    # 情况3: topk可能没有值 场景1: min > max  场景2: 没有断崖
-    # 准备topk 要动态截取的数量
-    topk:int= top_max
-    # 情况2: min > max  正常人 min 小于 max ! max = len
-    if top_max > top_min:
-        # 循环指针
-        # pre_index 从最小值开始
-        #       到max的前一个(top_max-2)
-        for pre_index in range(top_min-1,top_max-1):
-            # 获取pre_index对应前置分数
-            pre_score = reranker_docs[pre_index].get("score",0.0)
-            # 获取next_index对应后置分数
-            next_score = reranker_docs[pre_index+1].get("score", 0.0)
-            # 分差
-            abs_score = pre_score - next_score
-            ratio     = abs_score / pre_score
-            # 判断断崖
-            if abs_score > gap_abs or ratio > gap_ratio:
-                # 出现了断崖!
-                # 就可以截取到前置指针的位置
-                topk = pre_index + 1
-                break
-    # 获取top k (动态)
-    final_reranker_docs = reranker_docs[:topk]
-    # 返回结果
-    return final_reranker_docs
+    # 累计断崖：以重排峰值(第 1 名)作基准，逐项累计与其的相对下跌，达到阈值即截断。
+    # 相比仅“相邻两指针对比”，它能捕捉相邻分差细小、但相对头部已明显下滑的慢坡，
+    # 避免把头尾质量接近的低分长尾一并保留进作答上下文。
+    top_max: int = min(get_rerank_topk(), len(reranker_docs))
+    top_min: int = RERANK_MIN_TOPK
+    gap_abs: float = RERANK_GAP_ABS      # 0.2 绝对分差阈值
+    gap_ratio: float = RERANK_GAP_RATIO  # 0.2 相对比例阈值
+
+    # 缺省截断数取满 top_max；前 top_min 个作为召回下限无条件保留
+    topk: int = top_max
+
+    # 已见到的最高分（累计基准）。重排后按分数倒序，故初始通常即为 docs[0]
+    running_max = reranker_docs[0].get("score", 0.0)
+
+    # 从 top_min 起向后累计判断：分数未创新高且相对峰值累计下跌达到阈值 → 在此截断
+    for i in range(top_min, top_max):
+        score = reranker_docs[i].get("score", 0.0)
+        if score > running_max:            # 分数回升，刷新峰值基准
+            running_max = score
+            continue
+        abs_score = running_max - score    # 相对峰值的累计下跌
+        ratio = abs_score / running_max if running_max else 0.0
+        if abs_score > gap_abs or ratio > gap_ratio:
+            topk = i
+            break
+    # 截取前 topk 个
+    return reranker_docs[:topk]
 
 
 @step_log("rerank_documents")
