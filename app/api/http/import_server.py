@@ -78,7 +78,14 @@ def invoke_import_graph(task_id:str,local_file_path:str,local_dir:str):
         state:ImportGraphState = create_default_state(
             task_id=task_id,local_file_path=local_file_path,local_dir=local_dir
          )
-        import_app.invoke(state)
+        # LangGraph invoke 返回的是新的 final state，原地 state 不会同步图上写回的字段
+        final_state = import_app.invoke(state)
+        # 防御：图对不支持的文档类型会静默走到 END，这里显式校验是否真的完成了解析。
+        # 只有填入了 md_path 或 pdf_path 才算真正处理过该文件，否则视为“类型不支持已失败”。
+        if not (final_state.get("md_path") or final_state.get("pdf_path")):
+            update_task_status(task_id,status_name=TASK_STATUS_FAILED)
+            logger.warning(f"导入任务[{task_id}]中止: 文件类型不支持(md/pdf以外)，已标记失败")
+            return
         # completed
         update_task_status(task_id,status_name=TASK_STATUS_COMPLETED)
     except Exception as e:
@@ -122,6 +129,9 @@ def uploads(backgroundtasks:BackgroundTasks,files:list[UploadFile]):
     safe_name = Path(raw_name).name  # 仅取 basename，防路径穿越
     if not safe_name or safe_name in (".", ".."):
         raise HTTPException(status_code=422, detail="invalid filename")
+    # 类型校验：仅支持 md / pdf，其余直接在入口拒绝并给出明确提示，避免静默“已完成”却未入库
+    if Path(safe_name).suffix.lower() not in (".md", ".pdf"):
+        raise HTTPException(status_code=422, detail="仅支持 md / pdf 格式文件")
     local_file_path_obj:Path =  local_dir_obj / safe_name
 
     # 2.上传文件存储到地址存储文件 [后续就可以读取和解析]

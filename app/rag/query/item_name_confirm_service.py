@@ -15,7 +15,7 @@ from app.rag.query.config import (
     ITEM_NAME_SEARCH_LIMIT,
 )
 from app.rag.query.history_utils import build_history_context
-from app.rag.query.item_name_catalog import match_catalog_exact
+from app.rag.query.item_name_catalog import match_catalog_exact, normalize_item_name
 
 
 @step_log("get_data_and_validates")
@@ -139,10 +139,17 @@ def search_by_item_names(item_names:list[str]) -> dict[str,list[dict]]:
     return final_result
 
 def _best_other_score(ranked: list[dict], anchor_name: str) -> float | None:
-    """取"非锚点主体"中的最高分，用于计算 top1 与次优主体（不同 item_name）的间距。"""
+    """取"非锚点主体"中的最高分，用于计算 top1 与次优主体（不同 item_name）的间距。
+
+    关键：对"归一化后等价"的近重复名（如 `HAK 180 烫金机` 与 `HAK 180烫金机`，
+    仅空格差异）视为同一主体，不参与"次优主体"计分。
+    否则这类词条的向量分几乎相同，间距恒为 0，导致永远无法自动确认，用户手动确认也消解不了（死循环）。
+    """
+    anchor_key = normalize_item_name(anchor_name)
     best: float | None = None
     for hit in ranked:
-        if hit.get("item_name") == anchor_name:
+        if normalize_item_name(hit.get("item_name")) == anchor_key:
+            # 与锚点等价（含近重复词条）：视为同一主体，跳过
             continue
         score = float(hit.get("score") or 0.0)
         if best is None or score > best:
@@ -210,7 +217,17 @@ def select_item_names(milvus_result:dict[str,list[dict]]) -> dict[str,list]:
             continue
 
         # 3) 可选区间：不自动确认，交给用户二次确认（反问）
-        option_hits = [hit for hit in ranked if float(hit.get("score") or 0.0) >= ITEM_NAME_OPTION_MIN_SCORE]
+        #    按归一化名去重，避免把"仅空格差异"的近重复名同时列出，让用户无法区分、形成死循环
+        option_hits = []
+        seen_key: set[str] = set()
+        for hit in ranked:
+            if float(hit.get("score") or 0.0) < ITEM_NAME_OPTION_MIN_SCORE:
+                break  # 已按分数降序，后续都不达标
+            key = normalize_item_name(hit.get("item_name"))
+            if key in seen_key:
+                continue
+            seen_key.add(key)
+            option_hits.append(hit)
         if option_hits:
             option_list.extend(option_hits[:2])
             logger.info(

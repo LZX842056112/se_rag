@@ -12,6 +12,7 @@
 - [二、架构设计与技术栈](#二架构设计与技术栈)
 - [三、主要业务流程说明](#三主要业务流程说明)
 - [四、面向最终用户的使用操作手册](#四面向最终用户的使用操作手册)
+- [五、变更记录](#五变更记录)
 
 ---
 
@@ -332,6 +333,7 @@ flowchart LR
    | `IMPORT_APP_PORT` / `QUERY_APP_PORT` | 两个服务端口 | `8000` / `8001` |
    | `EVOLUTION_ENABLED` | 自进化总开关 | `true` |
    | `EVOLUTION_ADMIN_TOKEN` | 审批写操作 Token | `evoadmin_xxx` |
+   | `EVOLUTION_SCHEDULE_ENABLED` | 自动调度器开关（受 `EVOLUTION_ENABLED` 总开关双重约束） | `true` |
    | `EVOLUTION_SCHEDULE_INTERVAL_MINUTES` | 自动调度间隔（分钟） | `30` |
 
 ### 4.3 启动服务
@@ -402,13 +404,14 @@ python -m app.api.http.import_server
 
 ### 4.6 注意事项与常见问题
 
-- **只支持 md / pdf 上传**：上传其它类型文件会得到 `completed` 但实际**不导入任何数据**，且当前版本前端无明确报错。请上传 md 或 pdf 格式。
+- **只支持 md / pdf 上传（入口即拒绝）**：上传其它类型文件时，`/upload` 会在写盘前直接返回 **HTTP 422**（`detail="仅支持 md / pdf 格式文件"`），导入页对应条目显示红色「失败」徽标（当前前端未把 `detail` 文案透出到界面）。图执行后另有一层防御：若最终状态既无 `md_path` 也无 `pdf_path`，任务会被标记为 `FAILED`，不会再出现「已完成但未入库」的静默成功。
+- **反馈入口始终渲染**：每条回答下方的「👍 有帮助 / 👎 没帮助」不依赖引用或置信度是否存在。即使回答是「无法作答 / 无引用」，也保留反馈入口——自进化链路把这类回答视为重要负反馈来源。引用来源块与置信度条则按各自数据条件显示。
 - **自进化需显式开启**：仅当 `EVOLUTION_ENABLED=true` 时，反馈才会落库、缺口才会扫描、进化条目才会参与召回；默认 `false` 时反馈接口仅幂等接受不落库。
 - **审批写操作鉴权**：未配置或未正确携带 `EVOLUTION_ADMIN_TOKEN`（`X-Internal-Token`）时，通过 / 驳回 / 编辑将被拒绝。
 - **兜底话术是缺口依据**：若检索到内容但模型仍回复「未查询到该问题相关信息 / 无法作答」，也会被记录为未解决信号并进入缺口扫描。
 - **反馈幂等**：同一会话、问题、反馈类型在 30 秒内的重复提交会被去重，避免信号放大。
 - **首次启动较慢**：BGE-M3 / BGE-Reranker 首次加载或下载耗时较长，属正常现象。
-- **调度器间隔**：`EVOLUTION_SCHEDULE_INTERVAL_MINUTES` 控制自动扫描频率（本项目示例为 1 分钟，生产建议提高至 30 分钟及以上）。
+- **调度器开关与间隔**：自动扫描需同时满足 `EVOLUTION_ENABLED=true` 与 `EVOLUTION_SCHEDULE_ENABLED=true`（后者默认开启），间隔由 `EVOLUTION_SCHEDULE_INTERVAL_MINUTES` 控制（默认 30 分钟；本项目示例配为 1 分钟，生产建议 ≥30 分钟）。调度器随查询服务进程的 `lifespan` 启停，因此仅在**单 worker** 部署下有效。
 - **离线评估会写库**：`app/rag_eval` 的批量评估会把合成测试数据写入共享 Milvus 并加载重排大模型，请在确认不影响线上库后再执行。
 
 ### 4.7 常用开发 / 验证命令
@@ -423,3 +426,42 @@ python -c "from app.rag_eval import runner; print(runner.insert_env_ready(), run
 # 运行测试
 uv run pytest
 ```
+
+---
+
+## 五、变更记录
+
+### 2026-09-27
+
+**① 反馈按钮渲染修复（重要）**
+
+- **现象**：客服页回答下方「👍 有帮助 / 👎 没帮助」按钮不出现，且浏览器控制台**没有任何报错**；引用来源块、置信度条也一并缺失。
+- **根因**：消息骨架中 `.meta` 位于内层容器 `div[min-width:180px]` 内，并非消息根节点 `.msg.bot` 的直接子节点。`renderCitationsAndFeedback` 用 `msgEl.insertBefore(wrap, metaEl)` 插入引用/反馈块时抛 `NotFoundError: ... is not a child of this node`，而该异常被 SSE 回调的 `try{...}catch(_){}` 静默吞掉——表现为「代码完整但 UI 元素凭空消失、无日志」。
+- **修复**：改为 `metaEl.parentNode.insertBefore(wrap, metaEl)`；并移除「无引用且无置信度即不渲染反馈栏」的守卫，保证「无法作答 / 无引用」的回答同样保留反馈入口。
+- **验证**：真实 Chrome 点按回归 R1–R6 全部通过——渲染 → 点按 → 置灰与「已反馈」标记 → 重复点击去重 → 跨回答独立性（DOM 校验 `["DD#done","DD#done"]`）→ 落库一致。
+- **排查经验**：凡「函数存在但元素不渲染且无报错」，优先怀疑被 `try/catch` 吞掉的 DOM 异常；在 DevTools 控制台依次执行 `typeof <fn>`（排除缓存旧版）→ `document.querySelectorAll('<sel>').length`（确认未渲染）→ 手动调用函数读异常堆栈，三步即可收敛到具体缺陷。
+
+**② 上传类型校验（L1）**
+
+- `/upload` 在写盘前校验扩展名，非 `.md / .pdf` 直接返回 `HTTP 422`（`detail="仅支持 md / pdf 格式文件"`）。
+- `invoke_import_graph` 在 `invoke` 后增加结果防御：最终状态既无 `md_path` 也无 `pdf_path` 时置为 `FAILED`。
+- 效果：杜绝「已完成但未入库」的静默成功。
+
+**③ 接地性（groundedness）评估修复**
+
+- **根因**：评估 prompt 模板中的 JSON 结构示例花括号未转义，被 `.format()` 当作占位符解析并抛 `KeyError`，异常被吞后分数长期恒为 `0`。
+- **修复**：示例花括号双写转义（`{{...}}`），保留真实的 `{context}` / `{answer}` 占位符。
+
+**④ 演进知识召回链路修复**
+
+- **写入端**：`item_names` 贯通「反馈 → 缺口 → 候选」三层，落库 Milvus 的 `item_name` 为真实商品名，而非占位符 `default_item_name`。
+- **读取端**：对 `item_name == 'default_item_name'` 的条目兜底放行，避免被商品名过滤剔除导致召回为空。
+- **融合层**：`rrf_service` 在 RRF 融合后把未收录的演进条目强制并入候选集，避免权威 FAQ 因缺少主库双路命中加分而被泛化分片挤出 top-N。
+
+**⑤ 商品名近重复归一**
+
+- `item_name_confirm_service` 对「仅空格 / 全半角差异」的主体名（如 `HAK 180 烫金机` 与 `HAK 180烫金机`）按归一化名视为同一主体，消除因主体间距恒为 0 导致的二次确认死循环。
+
+**⑥ 离线评估导入修复**
+
+- `rag_eval/runner.py` 补 `from app.infra.config.providers import infra_config`，修复 `NameError: name 'infra_config' is not defined`（此类运行期错误 `py_compile` 无法发现）。

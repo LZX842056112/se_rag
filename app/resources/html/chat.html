@@ -757,7 +757,8 @@
       if(msgEl.querySelector('.cit-wrap')) return;
       const cit = meta.citations || [];
       const g = meta.groundedness;
-      if(cit.length === 0 && g === null) return;
+      // 说明：反馈栏不因“无引用且无置信度”而隐藏——自进化链路把「无法作答/无引用」的回答作为
+      // 重要负反馈来源，必须始终提供点赞/点踩入口。引用块、置信度条仍按各自数据条件渲染。
 
       const wrap = document.createElement('div');
       wrap.className = 'cit-wrap';
@@ -819,9 +820,11 @@
       bar.appendChild(down);
       wrap.appendChild(bar);
 
-      // 插到 .meta 之前
+      // 插到 .meta 之前（注意：.meta 在骨架的内层容器 `div[min-width:180px]` 中，
+      // 并非 msgEl 的直接子节点，必须用其父节点调用 insertBefore，否则抛 NotFoundError
+      // 且被外层 try/catch 吞掉，导致反馈栏静默不渲染）
       const metaEl = msgEl.querySelector('.meta');
-      if(metaEl) msgEl.insertBefore(wrap, metaEl);
+      if(metaEl) metaEl.parentNode.insertBefore(wrap, metaEl);
       else msgEl.appendChild(wrap);
     }
 
