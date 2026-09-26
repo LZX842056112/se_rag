@@ -1,0 +1,30 @@
+{
+  "tag": "baseline_m0",
+  "summary": {
+    "case_count": 2,
+    "avg_item_name_hit_rate": 1.0,
+    "layers": {
+      "embedding_chunks": {
+        "avg_precision": 0.9,
+        "avg_recall": 1.0,
+        "avg_must_hit_rate": 1.0
+      },
+      "hyde_embedding_chunks": {
+        "avg_precision": 0.7,
+        "avg_recall": 0.8,
+        "avg_must_hit_rate": 0.6666
+      },
+      "rrf_chunks": {
+        "avg_precision": 0.8,
+        "avg_recall": 0.9,
+        "avg_must_hit_rate": 0.8334
+      },
+      "reranked_docs": {
+        "avg_precision": 0.8,
+        "avg_recall": 0.9,
+        "avg_must_hit_rate": 0.8334
+      }
+    }
+  },
+  "diff_vs_baseline": null
+}
