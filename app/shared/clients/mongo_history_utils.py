@@ -110,6 +110,8 @@ def save_chat_message(
         rewritten_query: str = "",
         item_names: list[str] | None = None,
         image_urls: list[str] | None = None,
+        citations: list[dict] | None = None,
+        groundedness: float = 0.0,
         message_id: str | None = None
 ) -> str:
     """
@@ -121,6 +123,8 @@ def save_chat_message(
     :param rewritten_query: 重写后的查询语句（可选，用于检索增强等场景，默认空字符串）
     :param item_names: 关联的商品名称列表（可选，支持多商品，默认None）
     :param image_urls: 关联的图片URL列表（可选，默认None）
+    :param citations: 引用来源列表（可选，元素形如 {faq_id, source}，默认None）
+    :param groundedness: 答案接地性 0~1（可选，默认0.0）
     :param message_id: 记录主键ID（可选，有值则更新，无值则新增）
     :return: 插入/更新的记录唯一标识（新增返回ObjectId字符串，更新返回传入的message_id）
     """
@@ -135,6 +139,8 @@ def save_chat_message(
         "rewritten_query": rewritten_query or "",  # 重写查询，空值处理为空字符串
         "item_names": item_names,  # 关联商品名称列表
         "image_urls": image_urls,  # 关联图片URL列表
+        "citations": citations or [],  # 引用来源列表（供历史刷新后回显）
+        "groundedness": groundedness or 0.0,  # 答案接地性
         "ts": ts  # 时间戳，排序和时间筛选维度
     }
 

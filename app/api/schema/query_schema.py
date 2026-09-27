@@ -46,6 +46,8 @@ class HistoryItemResponseSchema(BaseModel):
     rewritten_query:str = None
     item_names:list[str]=Field(description="关联的item_name", default_factory=list)
     image_urls:list[str]=Field(description="关联的图片地址", default_factory=list)
+    citations:list[CitationModel]=Field(description="引用来源", default_factory=list)
+    groundedness:float=0.0
     ts:Any
 
 class HistoryListResponseSchema(BaseModel):

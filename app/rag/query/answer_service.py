@@ -8,6 +8,7 @@ from app.rag.query.config import SUPPORTED_IMAGE_EXTENSIONS
 from app.rag.query.history_utils import build_history_context
 from app.evolution.config import evolution_config
 from app.evolution.online_eval.grounding import compute_groundedness
+from app.evolution.schema import CitationModel
 from app.shared.runtime.load_prompt import load_prompt
 from app.shared.utils.task_utils import push_to_session
 from app.shared.utils.sse_utils import SSEEvent
@@ -121,7 +122,9 @@ def save_answer_message_history(state):
         text=state.get("answer"),
         rewritten_query=state.get("rewritten_query"),
         item_names=state.get("item_names",[]),
-        image_urls=state.get("image_urls",[])
+        image_urls=state.get("image_urls",[]),
+        citations=state.get("citations",[]),
+        groundedness=state.get("groundedness",0.0)
     )
 
 
@@ -138,6 +141,15 @@ def backfill_evolution_outputs(state: QueryGraphState) -> QueryGraphState:
             evo_ids.append(cid)
     state["cited_chunk_ids"] = cited
     state["faq_evo_ids"] = evo_ids
+    # 对外引用列表（落库 + 历史回显 + 实时 SSE 共用同一份，保证两路一致）
+    evo_set = {str(i) for i in evo_ids}
+    state["citations"] = [
+        CitationModel(
+            faq_id=str(cid),
+            source="evolution" if str(cid) in evo_set else "kb",
+        ).model_dump()
+        for cid in cited
+    ]
     state["retrieval_signals"] = {
         "zero_hit": len(reranked_docs) == 0,
         "no_retrieval": not state.get("embedding_chunks") and not state.get("hyde_embedding_chunks"),
@@ -163,8 +175,8 @@ def generate_answer(state: QueryGraphState) -> QueryGraphState:
         call_llm_deal_answer(state,answer_prompt_text)
         # 使用正则或者图片url匹配获取image_urls
         extract_text_image_url(state)
-    # 3.历史聊天记录记录
-    save_answer_message_history(state)
-    # 4. 回填自进化输出（引用 / 信号 / 接地性）
+    # 3.回填自进化输出（引用 / 信号 / 接地性）
     backfill_evolution_outputs(state)
+    # 4.历史聊天记录记录（须在回填之后，保证 citations/groundedness 可持久化）
+    save_answer_message_history(state)
     return state

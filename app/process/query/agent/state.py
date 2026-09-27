@@ -32,6 +32,7 @@ class QueryGraphState(TypedDict):
     groundedness: float  # 答案接地性 0~1
     retrieval_signals: dict  # 零命中 / 无检索直达 / 进化命中 等信号
     faq_evo_ids: list  # 命中的自进化条目 id 列表
+    citations: list  # 对外引用列表 [{faq_id, source}]，供落库与历史回显
 
     # 辅助信息
     item_names: List[str]  # 提取出的商品名称
@@ -59,6 +60,7 @@ query_graph_default_state: QueryGraphState = {
     "groundedness": 0.0,
     "retrieval_signals": {},
     "faq_evo_ids": [],
+    "citations": [],
     "item_names": [],
     "rewritten_query": "",
     "history": [],

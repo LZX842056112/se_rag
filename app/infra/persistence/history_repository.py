@@ -19,6 +19,8 @@ class HistoryRepository:
         rewritten_query: str = "",
         item_names: list[str] | None = None,
         image_urls: list[str] | None = None,
+        citations: list[dict] | None = None,
+        groundedness: float = 0.0,
         message_id: str | None = None,
     ) -> str:
         return save_chat_message(
@@ -28,6 +30,8 @@ class HistoryRepository:
             rewritten_query=rewritten_query,
             item_names=item_names,
             image_urls=image_urls,
+            citations=citations,
+            groundedness=groundedness,
             message_id=message_id,
         )
 

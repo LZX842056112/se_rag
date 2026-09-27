@@ -117,7 +117,10 @@ def health():
     )
 
 def _build_citations(state: QueryGraphState) -> list[CitationModel]:
-    """将状态中的引用 id 转为对外 CitationModel。"""
+    """将状态中的引用转为对外 CitationModel；优先复用答案回填结果，未回填时按 id 现算。"""
+    cached = state.get("citations")
+    if cached:
+        return [CitationModel(**c) for c in cached]
     ids = state.get("cited_chunk_ids", []) or []
     evo = set(str(i) for i in (state.get("faq_evo_ids", []) or []))
     return [
@@ -256,6 +259,8 @@ def get_history(session_id:str, limit:int=10):
                 rewritten_query=item.get("rewritten_query"),
                 item_names=item.get("item_names",[]),
                 image_urls=item.get("image_urls",[]),
+                citations=item.get("citations",[]),
+                groundedness=item.get("groundedness",0.0),
                 ts=item.get("ts")
             )
             for item in history_list

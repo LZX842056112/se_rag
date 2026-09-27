@@ -624,7 +624,7 @@
       scrollToBottom();
     }
 
-    function addBotMsgWithTime(text, ts, imageUrls){
+    function addBotMsgWithTime(text, ts, imageUrls, citations, groundedness, query){
       const id = 'bot-his-' + Math.random().toString(36).slice(2);
       const html = `
         <div class="msg bot" id="${id}">
@@ -640,6 +640,8 @@
       if(el){
         const answerEl = el.querySelector('.answer');
         renderAnswerWithImages(answerEl, text || '', imageUrls || []);
+        // 历史消息同样渲染引用来源 / 置信度 / 反馈，保证刷新后不丢失
+        renderCitationsAndFeedback(el, buildBotMeta(citations, groundedness, sessionId, query));
       }
       scrollToBottom();
     }
@@ -890,11 +892,14 @@
         const nodes = Array.from(chatEl.querySelectorAll('.msg'));
         for(let i=1;i<nodes.length;i++) nodes[i].remove();
         items.reverse()
+        let lastUserQuery = '';
         for(const item of items){
           if(item.role === 'user'){
+            lastUserQuery = item.text || '';
             addUserMsgWithTime(item.text || '', item.ts);
           }else{
-            addBotMsgWithTime(item.text || '', item.ts, item.image_urls || []);
+            addBotMsgWithTime(item.text || '', item.ts, item.image_urls || [],
+                              item.citations || [], item.groundedness, lastUserQuery);
           }
         }
         scrollToBottom();
