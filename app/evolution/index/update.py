@@ -13,9 +13,24 @@ from app.shared.clients import register_vector_fields_and_indexes
 from app.shared.runtime.logger import logger
 
 
-def _embedding_text(item: KnowledgeCandidate) -> str:
-    subject = ",".join(item.item_names) or "default_item_name"
-    return f"主体:{subject},内容:{item.faq_answer}"
+def _canonical_subject(item_names: list[str]) -> str:
+    """把候选主体名对齐到目录规范名，避免写入端/读取端主体名口径不一致。"""
+    from app.rag.item_name.catalog import match_catalog_name
+
+    resolved: list[str] = []
+    for raw in item_names or []:
+        name = str(raw or "").strip()
+        if not name:
+            continue
+        hit = match_catalog_name(name)
+        canonical = hit[0] if hit else name
+        if canonical not in resolved:
+            resolved.append(canonical)
+    return ",".join(resolved) or "default_item_name"
+
+
+def _embedding_text(subject: str, answer: str) -> str:
+    return f"主体:{subject},内容:{answer}"
 
 
 def create_evolution_collection() -> bool:
@@ -45,13 +60,14 @@ def upsert_item(evo_doc_id: str, item: KnowledgeCandidate) -> bool:
     """按显式主键 upsert 一条候选（幂等）。"""
     try:
         create_evolution_collection()
-        emb = llm_providers.generate_embeddings([_embedding_text(item)])
+        subject = _canonical_subject(item.item_names)
+        emb = llm_providers.generate_embeddings([_embedding_text(subject, item.faq_answer)])
         row = {
             "evo_doc_id": evo_doc_id,
             "faq_question": item.faq_question,
             "faq_answer": item.faq_answer,
             "source_refs": ",".join(item.source_refs),
-            "item_name": ",".join(item.item_names) or "default_item_name",
+            "item_name": subject,
             "status": item.status,
             "file_title": "__evolution__",
             "dense_vector": emb["dense"][0],

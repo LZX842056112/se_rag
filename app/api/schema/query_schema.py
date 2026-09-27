@@ -1,7 +1,7 @@
 # query模块所有json相关的类型
-from typing import Any
+from typing import Annotated, Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
 from app.evolution.schema import CitationModel
 
@@ -13,7 +13,8 @@ class HealthResponseSchema(BaseModel):
 
 # 查询接口的请求参数json
 class QueryRequestSchema(BaseModel):
-    query: str = Field(min_length=1, max_length=4096)
+    # strip_whitespace 先于长度校验：纯空白 query 会被去空后触发 min_length 校验而拒绝
+    query: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4096)]
     session_id: str | None = Field(default=None, max_length=128)
     is_stream: bool = False
 

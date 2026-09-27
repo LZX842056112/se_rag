@@ -13,14 +13,16 @@ from app.shared.runtime.logger import logger, step_log
 from app.shared.clients import register_vector_fields_and_indexes
 from app.infra.llm.providers import llm_providers
 from app.infra.vector_store.milvus_gateway import milvus_gateway
+from app.rag.item_name.catalog import normalize_item_name
+from app.rag.item_name.match import resolve_existing_item_name
 
 
 # 1. 获取并且校验参数(state) -> chunks , file_title
 #              1.1 获取参数 file_title chunks md_path
 #              1.2 非空校验 file_title -> md_path chunks -> md_path / json -> 读取..
 #              1.3 返回结果
-@step_log("get_data_and_validates")
-def get_data_and_validates(state:ImportGraphState) -> tuple[list[dict[str,Any]],str]:
+@step_log("_require_chunks_and_file_title")
+def _require_chunks_and_file_title(state:ImportGraphState) -> tuple[list[dict[str,Any]],str]:
     """
      获取并且校验
     :param state:
@@ -96,6 +98,23 @@ def recognize_item_name_by_chunks(chunks, file_title)->str:
         logger.warning(f"模型未识别到item_name使用file_title:{file_title}赋予默认值!")
     # 2.7 返回item_name
     return item_name
+
+@step_log("resolve_item_name_against_catalog")
+def resolve_item_name_against_catalog(item_name: str) -> str:
+    """写入端主体归并：库内已有同一实体时复用其标准名，避免多次导入产生近重复主体名。
+
+    与读取端共用同一套阈值/间距口径（见 app/rag/item_name/match.py），
+    因此"导入时归并到什么名字"与"提问时能确认到什么名字"天然一致。
+    归并会打 warning 日志，便于事后抽查是否发生了误合并。
+    """
+    resolved, evidence = resolve_existing_item_name(item_name)
+    if evidence and normalize_item_name(resolved) != normalize_item_name(item_name):
+        logger.warning(
+            f"主体名归并: 新识别[{item_name}] 命中库内同一实体[{resolved}],"
+            f"依据={evidence.get('matched_by')},分={evidence.get('score')},复用库内标准名"
+        )
+    return resolved
+
 
 @step_log("chunk_update_item_name")
 def chunk_update_item_name(chunks, item_name):
@@ -189,20 +208,23 @@ def recognize_and_index_item_name(state: ImportGraphState) -> ImportGraphState:
     主体识别服务：
     1. 基于 chunks 构造上下文
     2. 调用 LLM 识别 item_name
-    3. 将 item_name 回填到 state 和 chunks
-    4. 同步写入主体名称索引
+    3. 归并到库内已有同一实体的标准名
+    4. 将 item_name 回填到 state 和 chunks
+    5. 同步写入主体名称索引
     """
     # 1. 获取并且校验参数(state) -> chunks , file_title
-    chunks , file_title= get_data_and_validates(state)
+    chunks , file_title= _require_chunks_and_file_title(state)
     # 2. 识别item_name
     item_name = recognize_item_name_by_chunks(chunks,file_title)
-    # 3. 给chunks的切块补全item_name属性
-    chunk_update_item_name(chunks,item_name)
-    # 4. 提前准备对应的集合数据
+    # 3. 提前准备对应的集合数据（归并检索要求集合已存在）
     prepared_milvus_item_name_collection()
-    # 5. 插入item_name数据
+    # 4. 归并到库内已有同一实体的标准名，避免同一产品多次导入留下近重复主体名
+    item_name = resolve_item_name_against_catalog(item_name)
+    # 5. 给chunks的切块补全item_name属性
+    chunk_update_item_name(chunks,item_name)
+    # 6. 插入item_name数据
     delete_and_insert_item_name(item_name, file_title)
-    # 6. 更新state
+    # 7. 更新state
     state['chunks'] = chunks
     state['item_name'] = item_name
     return state

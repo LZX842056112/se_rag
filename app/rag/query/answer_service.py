@@ -10,8 +10,7 @@ from app.evolution.config import evolution_config
 from app.evolution.online_eval.grounding import compute_groundedness
 from app.evolution.schema import CitationModel
 from app.shared.runtime.load_prompt import load_prompt
-from app.shared.utils.task_utils import push_to_session
-from app.shared.utils.sse_utils import SSEEvent
+from app.shared.utils.sse_utils import SSEEvent, push_to_session
 from app.shared.runtime.logger import logger
 from app.infra.llm.providers import llm_providers
 

@@ -42,7 +42,7 @@ from app.rag_eval.dataset import (
     write_batch_eval_cases,
 )
 from app.rag_eval.metrics import evaluate_query_state
-from app.shared.clients import mongo_history_utils
+from app.shared.clients import peek_history_mongo_tool
 
 
 LAYER_LABELS = {
@@ -103,7 +103,7 @@ def close_mongo_client() -> None:
     """
     关闭评测过程中可能创建的 Mongo 连接。
     """
-    mongo_tool = getattr(mongo_history_utils, "_history_mongo_tool", None)
+    mongo_tool = peek_history_mongo_tool()
     if mongo_tool is not None:
         mongo_tool.client.close()
 

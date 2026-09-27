@@ -23,20 +23,17 @@
 import sys
 import inspect
 from pathlib import Path
-import os
-from dotenv import load_dotenv
 from loguru import logger
 
+from app.shared.config.common import env_bool, env_str
 
-# -------------------------- 第一步：加载.env配置文件 --------------------------
-load_dotenv()
 
-# -------------------------- 第二步：读取.env配置（带默认值，防止配置缺失） --------------------------
-LOG_CONSOLE_ENABLE = os.getenv("LOG_CONSOLE_ENABLE", "True").lower() == "true"
-LOG_CONSOLE_LEVEL = os.getenv("LOG_CONSOLE_LEVEL", "INFO").upper()
-LOG_FILE_ENABLE = os.getenv("LOG_FILE_ENABLE", "True").lower() == "true"
-LOG_FILE_LEVEL = os.getenv("LOG_FILE_LEVEL", "INFO").upper()
-LOG_FILE_RETENTION = os.getenv("LOG_FILE_RETENTION", "7 days")
+# -------------------------- 第一步：读取.env配置（.env 由 common 统一加载） --------------------------
+LOG_CONSOLE_ENABLE = env_bool("LOG_CONSOLE_ENABLE", True)
+LOG_CONSOLE_LEVEL = env_str("LOG_CONSOLE_LEVEL", "INFO").upper()
+LOG_FILE_ENABLE = env_bool("LOG_FILE_ENABLE", True)
+LOG_FILE_LEVEL = env_str("LOG_FILE_LEVEL", "INFO").upper()
+LOG_FILE_RETENTION = env_str("LOG_FILE_RETENTION", "7 days")
 
 # -------------------------- 第三步：定义日志路径（自动推导项目根） --------------------------
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent

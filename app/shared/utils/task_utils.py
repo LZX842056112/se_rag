@@ -194,23 +194,25 @@ def clear_task(task_id: str):
 
 
 # 节点任务追踪装饰器：消除各节点内 add_running_task/add_done_task 的重复样板代码。
-def track_node_task(node_name: str):
+def track_node_task(node_name: str, id_key: str = "session_id", stream_key: str = "is_stream"):
     """
     在节点执行前后自动记录 running/done 任务状态。
 
-    用法：@track_node_task("node_search_embedding")
-    要求被装饰的节点函数签名为 func(state: dict) -> dict，且 state 中需含
-    session_id 与 is_stream 字段。异常时仍会先记 done（finally 保证）。
+    用法：
+        @track_node_task("node_search_embedding")                # 查询图：state 含 session_id / is_stream
+        @track_node_task("node_entry", id_key="task_id")         # 导入图：state 含 task_id，无流式
+    要求被装饰的节点函数签名为 func(state: dict) -> dict。
+    异常时仍会先记 done（finally 保证）。
     """
     def decorator(func):
         @wraps(func)
         def wrapper(state, *args, **kwargs):
-            session_id = state.get("session_id")
-            is_stream = state.get("is_stream", False)
-            add_running_task(session_id, node_name, is_stream)
+            task_id = state.get(id_key)
+            is_stream = state.get(stream_key, False)
+            add_running_task(task_id, node_name, is_stream)
             try:
                 return func(state, *args, **kwargs)
             finally:
-                add_done_task(session_id, node_name, is_stream)
+                add_done_task(task_id, node_name, is_stream)
         return wrapper
     return decorator

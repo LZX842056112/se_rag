@@ -12,6 +12,7 @@ from app.shared.clients.mongo_history_utils import (
     clear_history,
     get_history_mongo_tool,
     get_recent_messages,
+    peek_history_mongo_tool,
     save_chat_message,
     update_message_item_names,
 )
@@ -24,6 +25,7 @@ __all__ = [
     "get_minio_client",
     "clear_history",
     "get_history_mongo_tool",
+    "peek_history_mongo_tool",
     "get_recent_messages",
     "save_chat_message",
     "update_message_item_names",

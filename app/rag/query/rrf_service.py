@@ -1,12 +1,10 @@
-import time
-
 from app.process.query.agent.state import QueryGraphState
 from app.rag.query.config import NODE_RRF_K, NODE_RRF_LIMIT_TOP, get_rrf_k, get_rrf_top
 from app.evolution.config import evolution_config
 from app.shared.runtime.logger import logger, step_log
 
-@step_log("get_data_and_validates")
-def get_data_and_validates(state:QueryGraphState):
+@step_log("_require_retrieval_chunks")
+def _require_retrieval_chunks(state:QueryGraphState):
     #1.获取参数
     embedding_chunks = state.get("embedding_chunks",[])
     hyde_embedding_chunks = state.get("hyde_embedding_chunks",[])
@@ -64,7 +62,7 @@ def fuse_by_rrf(state: QueryGraphState) -> QueryGraphState:
     4. 回写 rrf_chunks
     """
     # 1. 获取并且校验参数 (state )embedding_chunks  hyde_embedding_chunks
-    embedding_chunks , hyde_embedding_chunks = get_data_and_validates(state)
+    embedding_chunks , hyde_embedding_chunks = _require_retrieval_chunks(state)
     # 2. 封装数据结构 -> list -> [( 权重,list -> 有顺序 -> 向量数据库查询 -> 分高),(权重,list)]
     # 目标方便遍历和获取对应的权重
     rrf_list = [(1.0,embedding_chunks),(1.0,hyde_embedding_chunks)]

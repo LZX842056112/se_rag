@@ -1,5 +1,3 @@
-import time
-
 from langchain_core.messages import HumanMessage
 from langchain_core.output_parsers import StrOutputParser
 
@@ -39,16 +37,18 @@ from app.infra.llm.providers import llm_providers
 #                reranker_list  min  max  topk
 #                  1 2 3 4 5 6 7 8
 #                    断崖值 0.3
-@step_log("get_data_and_validates")
-def get_data_and_validates(state):
+@step_log("_require_rerank_inputs")
+def _require_rerank_inputs(state):
     #1.获取参数
     rewritten_query = state.get("rewritten_query")
     rrf_chunks = state.get("rrf_chunks",[])
     web_search_docs = state.get("web_search_docs",[])
-    #2.非空判断
-    if not rewritten_query or len(rrf_chunks) == 0 or len(web_search_docs) == 0:
-        logger.error(f"rewritten_query,rrf_chunks,web_search_docs可能为空,业务无法继续进行,提前终止!")
-        raise ValueError(f"rewritten_query,rrf_chunks,web_search_docs可能为空,业务无法继续进行,提前终止!")
+    #2.非空判断：rewritten_query / rrf_chunks 为硬依赖；网络检索结果允许为空（联网失败时降级为纯本地召回）
+    if not rewritten_query or len(rrf_chunks) == 0:
+        logger.error(f"rewritten_query或者rrf_chunks为空,业务无法继续进行,提前终止!")
+        raise ValueError(f"rewritten_query或者rrf_chunks为空,业务无法继续进行,提前终止!")
+    if len(web_search_docs) == 0:
+        logger.warning("web_search_docs为空,本次仅使用本地召回结果参与重排")
     return rewritten_query,rrf_chunks,web_search_docs
 
 @step_log("deal_rrf_and_web_result")
@@ -184,7 +184,7 @@ def rerank_documents(state: QueryGraphState) -> QueryGraphState:
     4. 回写 reranked_docs
     """
     # 1.获取并且校验参数(state) rewritten_query  rrf_chunks  web_search_docs
-    rewritten_query,rrf_chunks,web_search_docs = get_data_and_validates(state)
+    rewritten_query,rrf_chunks,web_search_docs = _require_rerank_inputs(state)
     # 2. 数据格式化处理
     reranker_docs = deal_rrf_and_web_result(rrf_chunks,web_search_docs)
     # 3. 组装问题和答案的列表(rewritten_query,reranker_list) -> question_answer_pair_list [[],[],[]]

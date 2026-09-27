@@ -158,13 +158,13 @@
     const toastEl = document.getElementById('toast');
     const tokenEl = document.getElementById('adminToken');
 
-    // 审批写操作令牌：页面加载从 localStorage 恢复，输入时即时持久化
-    let adminToken = localStorage.getItem('evo_admin_token') || '';
+    // 审批写操作令牌：仅当前会话有效（sessionStorage），输入时即时持久化
+    let adminToken = sessionStorage.getItem('evo_admin_token') || '';
     if(tokenEl){
       tokenEl.value = adminToken;
       tokenEl.addEventListener('input', () => {
         adminToken = tokenEl.value.trim();
-        try{ localStorage.setItem('evo_admin_token', adminToken); }catch(_){}
+        try{ sessionStorage.setItem('evo_admin_token', adminToken); }catch(_){}
       });
     }
 

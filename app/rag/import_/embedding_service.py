@@ -7,8 +7,8 @@ from app.rag.import_.config import EMBEDDING_BATCH_SIZE
 from app.shared.runtime.logger import logger, step_log
 from app.infra.llm.providers import llm_providers
 
-@step_log("get_data_and_validates")
-def get_data_and_validates(state:ImportGraphState) -> tuple[list[dict[str,Any]],str]:
+@step_log("_require_chunks_and_item_name")
+def _require_chunks_and_item_name(state:ImportGraphState) -> tuple[list[dict[str,Any]],str]:
     """
      获取并且校验
     :param state:
@@ -79,7 +79,7 @@ def generate_chunk_embeddings(state: ImportGraphState) -> ImportGraphState:
     3. 将向量结果补充回 chunks
     """
     #   1. 获取并校验参数(state) -> chunks / item_name
-    chunks,item_name=get_data_and_validates(state)
+    chunks,item_name=_require_chunks_and_item_name(state)
 
     # 2. 批量进行向量生成 (chunks , item_name , batch_number:int = 6) -> chunks
     embeddings_content = batch_generate_embeddings(chunks,item_name,EMBEDDING_BATCH_SIZE)

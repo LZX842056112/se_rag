@@ -1,25 +1,22 @@
-import os
-
-from dotenv import load_dotenv
-
 from app.shared.runtime.logger import node_log
-from app.shared.utils.task_utils import add_done_task, add_running_task
+from app.shared.utils.task_utils import track_node_task
 from app.process.import_.agent.state import ImportGraphState
 from app.rag.import_.embedding_service import generate_chunk_embeddings
 
 @node_log("node_bge_embedding")
+@track_node_task("node_bge_embedding", id_key="task_id")
 def node_bge_embedding(state: ImportGraphState) -> ImportGraphState:
     """
     节点: 向量化 (node_bge_embedding)
     为什么叫这个名字: 使用 BGE-M3 模型将文本转换为向量 (Embedding)。
     """
-    add_running_task(state["task_id"], "node_bge_embedding")
-    state = generate_chunk_embeddings(state)
-    add_done_task(state["task_id"], "node_bge_embedding")
-    return state
+    return generate_chunk_embeddings(state)
 
 
 if __name__ == '__main__':
+    import os
+    from dotenv import load_dotenv
+
     # 加载环境变量：定位项目根目录下的.env，读取模型路径/设备等配置
     current_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.dirname(os.path.dirname(current_dir))

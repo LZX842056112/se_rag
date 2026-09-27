@@ -1,6 +1,5 @@
 import asyncio
 import json
-import time
 
 from agents.mcp import MCPServerStreamableHttp
 
@@ -9,7 +8,7 @@ from app.shared.runtime.logger import logger
 from app.infra.config.providers import infra_config
 
 
-def get_data_and_validate(state) -> str:
+def _require_rewritten_query(state) -> str:
     rewritten_query = state.get("rewritten_query")
     if not rewritten_query:
         logger.error(f"重写的问题为空,业务无法继续,提前终止!")
@@ -43,6 +42,7 @@ async def open_ai_mcp(rewritten_query):
         return mcp_result
     except Exception as e:
         logger.exception(f"mcp调用发生问题,问题:{str(e)}")
+        return None
     finally:
         # 4. 清空链接
         await mcp_server.cleanup()
@@ -56,13 +56,17 @@ def search_by_web(state: QueryGraphState) -> QueryGraphState:
     4. 回写 web_search_docs
     """
     #3. 获取并校验参数(state) -> rewritten_query
-    rewritten_query = get_data_and_validate(state)
+    rewritten_query = _require_rewritten_query(state)
     # 4. async 使用openai提供mcp方式进行调用(rewritten_query) -> 查询结果
     mcp_result = asyncio.run(open_ai_mcp(rewritten_query))
-    # 5. 结果解析：注意 mcp 返回对象的字段是属性，不是字典
+    # 5. 联网失败降级：不抛异常，返回空列表，交由重排阶段仅用本地召回结果
+    if mcp_result is None or not mcp_result.content:
+        logger.warning("联网搜索未返回有效结果,本次仅使用本地召回结果")
+        return []
+    # 6. 结果解析：注意 mcp 返回对象的字段是属性，不是字典
     text = mcp_result.content[0].text
     # {pages:[{snippet,title,url},{},{}]}
     text_dict = json.loads(text)
     web_search_docs = text_dict.get("pages",[])
-    #6. 返回列表即可
+    #7. 返回列表即可
     return web_search_docs

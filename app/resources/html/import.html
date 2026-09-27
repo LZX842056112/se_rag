@@ -212,6 +212,16 @@
         }
     }
 
+    // 兼容后端 detail 为 string / FastAPI 422 数组 / 对象三种形态
+    function detailText(detail) {
+        if (!detail) return '';
+        if (typeof detail === 'string') return detail;
+        if (Array.isArray(detail)) {
+            return detail.map(d => (d && (d.msg || d.message)) || JSON.stringify(d)).join('；');
+        }
+        return JSON.stringify(detail);
+    }
+
     async function uploadFile(file) {
         // 创建文件项UI
         const id = 'file-' + Math.random().toString(36).substr(2, 9);
@@ -253,7 +263,14 @@
                 body: formData
             });
 
-            if (!response.ok) throw new Error('Upload failed');
+            if (!response.ok) {
+                let detail = '';
+                try {
+                    const body = await response.json();
+                    detail = detailText(body && (body.detail || body.message));
+                } catch (_) {}
+                throw new Error(detail || ('HTTP ' + response.status));
+            }
             
             const result = await response.json();
             const ids = Array.isArray(result.task_ids) ? result.task_ids : [];
@@ -271,6 +288,14 @@
             console.error(error);
             statusBadge.textContent = '失败';
             statusBadge.className = 'status-badge status-error';
+            // 将失败原因写入日志区并展开，便于用户自助排查
+            const reason = (error && error.message) ? error.message : String(error);
+            logSummary.textContent = '日志（失败，点击展开）';
+            logListEl.innerHTML = '';
+            const li = document.createElement('li');
+            li.textContent = reason;
+            logListEl.appendChild(li);
+            logDetails.open = true;
         } finally {
             refreshEmptyHint();
         }

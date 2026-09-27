@@ -1,17 +1,13 @@
 """
 工具模块，负责提供 mongo history 相关的辅助能力。
 """
-import os
 from typing import Any
 from datetime import datetime
 from pymongo import MongoClient
 from bson import ObjectId
-from dotenv import load_dotenv
 
+from app.shared.config.common import env_str
 from app.shared.runtime.logger import logger
-
-# 加载.env文件中的环境变量，使os.getenv能读取到配置
-load_dotenv()
 
 
 class HistoryMongoTool:
@@ -27,9 +23,9 @@ class HistoryMongoTool:
         """
         try:
             # 从环境变量读取MongoDB连接地址（敏感配置，不硬编码）
-            self.mongo_url = os.getenv("MONGO_URL")
+            self.mongo_url = env_str("MONGO_URL")
             # 从环境变量读取要使用的数据库名称
-            self.db_name = os.getenv("MONGO_DB_NAME")
+            self.db_name = env_str("MONGO_DB_NAME")
 
             # 创建MongoDB客户端实例，建立与数据库的连接
             self.client = MongoClient(self.mongo_url)
@@ -79,6 +75,13 @@ def get_history_mongo_tool() -> HistoryMongoTool:
     # 返回单例实例
     return _history_mongo_tool
 
+
+def peek_history_mongo_tool() -> HistoryMongoTool | None:
+    """
+    返回当前已初始化的单例实例；未初始化时返回 None，且不触发新建连接。
+    适用于清理/关闭等"只处理已存在连接"的场景。
+    """
+    return _history_mongo_tool
 
 
 def clear_history(session_id: str) -> int:

@@ -5,26 +5,23 @@
 """
 from __future__ import annotations
 
-import os
 import time
 from typing import Any
 
-from dotenv import load_dotenv
 from pymongo import MongoClient
 from pymongo.collection import Collection
 from pymongo.database import Database
 
+from app.shared.config.common import env_str
 from app.shared.runtime.logger import logger
-
-load_dotenv()
 
 
 class EvolutionMongoTool:
     """基于原生 PyMongo 的自进化数据读写工具，仿 HistoryMongoTool 单例模式。"""
 
     def __init__(self) -> None:
-        self.mongo_url: str = os.getenv("MONGO_URL", "")
-        self.db_name: str = os.getenv("MONGO_DB_NAME", "")
+        self.mongo_url: str = env_str("MONGO_URL")
+        self.db_name: str = env_str("MONGO_DB_NAME")
         if not self.mongo_url:
             raise ValueError("MONGO_URL 未配置，无法建立自进化持久层连接")
         self.client: MongoClient = MongoClient(self.mongo_url)
