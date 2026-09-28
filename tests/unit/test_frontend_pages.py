@@ -57,9 +57,17 @@ def test_page_is_markup_only(page_name: str):
     """页面不得再包含内联 <style> / <script> 代码块，也不得引用已删除的 common.js。"""
     source = (PAGES_DIR / page_name).read_text(encoding="utf-8")
     assert "<style" not in source, f"{page_name} 仍有内联样式，请移到 /static/*.css"
+    assert 'style="' not in source, f"{page_name} 仍有行内 style 属性，请改为样式表里的 class"
     assert not re.search(r"<script(?![^>]*\bsrc=)[^>]*>", source), f"{page_name} 仍有内联脚本"
     assert "/js/common.js" not in source
     assert "<script src=" in source and "app.js" in source
+
+
+@pytest.mark.parametrize("script_name", sorted(p.name for p in JS_DIR.glob("*.js")))
+def test_scripts_generate_no_inline_style_attributes(script_name: str):
+    """脚本拼出的 DOM 也不得带行内 style 属性（运行时 `el.style.x=` 不受限于此）。"""
+    source = (JS_DIR / script_name).read_text(encoding="utf-8")
+    assert 'style="' not in source, f"{script_name} 生成的标记里仍有行内 style 属性"
 
 
 @pytest.mark.parametrize("page_name,assets", PAGE_ASSETS.items())

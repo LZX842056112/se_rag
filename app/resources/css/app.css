@@ -128,7 +128,7 @@ input[type="password"]:focus{border-color:rgba(26,167,255,.6);box-shadow:0 0 0 3
 
 /* ---------- 页面骨架：三页共用的顶栏 / 品牌 / 栅格 ---------- */
 .page{max-width:1060px;margin:0 auto}
-.page.narrow{max-width:820px}
+.page.narrow{max-width:820px;width:100%}
 
 .topbar{
   display:flex;

@@ -62,7 +62,7 @@
     scrollToBottom();
   }
 
-  function addBotMsgWithTime(text, ts, imageUrls, citations, groundedness, query) {
+  function addBotMsgWithTime(text, ts, imageUrls, citations, groundedness, query, itemNames) {
     const id = 'bot-his-' + Math.random().toString(36).slice(2);
     chatEl.insertAdjacentHTML('beforeend', `
       <div class="msg bot" id="${id}">
@@ -77,7 +77,7 @@
     if (!el) return;
     App.renderAnswerWithImages(el.querySelector('.answer'), text || '', imageUrls || []);
     // 历史消息同样渲染引用来源 / 置信度 / 反馈，保证刷新后不丢失
-    renderCitationsAndFeedback(el, buildBotMeta(citations, groundedness, sessionId, query));
+    renderCitationsAndFeedback(el, buildBotMeta(citations, groundedness, sessionId, query, itemNames));
     scrollToBottom();
   }
 
@@ -86,7 +86,7 @@
     chatEl.insertAdjacentHTML('beforeend', `
       <div class="msg bot" id="${id}">
         <div class="avatar bot">掌柜智库</div>
-        <div style="min-width: 180px;">
+        <div class="msg-body">
           <div class="bubble">
             <span class="typing"><span class="dot"></span><span class="dot"></span><span class="dot"></span></span>
             <details class="progress" open>
@@ -126,12 +126,14 @@
     lines.forEach(line => ul.insertAdjacentHTML('beforeend', `<li>${escapeHtml(line)}</li>`));
   }
 
-  function buildBotMeta(citations, groundedness, sid, query) {
+  function buildBotMeta(citations, groundedness, sid, query, itemNames) {
     return {
       citations: Array.isArray(citations) ? citations : [],
       groundedness: (typeof groundedness === 'number' && isFinite(groundedness)) ? groundedness : null,
       sessionId: sid || '',
-      query: query || ''
+      query: query || '',
+      // 该回答关联的主体：点踩时回传后端，保证缺口/候选能带上正确 item_name
+      itemNames: Array.isArray(itemNames) ? itemNames : []
     };
   }
 
@@ -145,6 +147,7 @@
           session_id: meta.sessionId,
           query: meta.query,
           cited_chunk_ids: meta.citations.map(c => c && c.faq_id).filter(Boolean),
+          item_names: meta.itemNames || [],
           thumbs: value
         })
       });
@@ -270,7 +273,8 @@
           addUserMsgWithTime(item.text || '', item.ts);
         } else {
           addBotMsgWithTime(item.text || '', item.ts, item.image_urls || [],
-                            item.citations || [], item.groundedness, lastUserQuery);
+                            item.citations || [], item.groundedness, lastUserQuery,
+                            item.item_names || []);
         }
       });
       scrollToBottom();
@@ -298,6 +302,49 @@
     return answerEl;
   }
 
+  /**
+   * 点选主体后该问什么：
+   * - 原问题本身就是在指这个主体（如只输入了 “hak180”）→ 直接用主体名提问；
+   * - 否则把主体名与原问题拼起来（如 “HAK 180 烫金机 怎么换膜”）。
+   */
+  function optionQuestion(name, originalQuery) {
+    const subject = String(name || '').trim();
+    const asked = String(originalQuery || '').trim();
+    if (!asked || !subject) return subject || asked;
+    const compactAsked = asked.replace(/\s+/g, '').toLowerCase();
+    const compactSubject = subject.replace(/\s+/g, '').toLowerCase();
+    if (compactAsked.length <= 12 || compactSubject.includes(compactAsked) || compactAsked.includes(compactSubject)) {
+      return subject;
+    }
+    return subject + ' ' + asked;
+  }
+
+  function askSubject(name, originalQuery) {
+    inputEl.value = optionQuestion(name, originalQuery);
+    onSend();
+  }
+
+  /** 渲染「没确认到主体」时的相似主体选项：点一下即以该主体重新提问。 */
+  function renderItemNameOptions(msgEl, options, originalQuery) {
+    const list = (Array.isArray(options) ? options : []).filter(o => o && o.item_name);
+    if (!msgEl || !list.length || msgEl.querySelector('.option-bar')) return;
+    const bar = App.create('div', 'option-bar');
+    bar.appendChild(App.create('span', 'option-hint', '请选择主体：'));
+    const seen = new Set();
+    list.forEach(option => {
+      const name = String(option.item_name);
+      if (seen.has(name)) return;
+      seen.add(name);
+      const btn = App.create('button', 'option-btn', name);
+      btn.type = 'button';
+      btn.addEventListener('click', () => askSubject(name, originalQuery));
+      bar.appendChild(btn);
+    });
+    const metaEl = msgEl.querySelector('.meta');
+    if (metaEl) metaEl.parentNode.insertBefore(bar, metaEl);
+    else msgEl.appendChild(bar);
+  }
+
   async function onSend() {
     if (sendBtn.disabled) return; // 按钮禁用时拦截重复提交（含 Enter 快捷键）
     const text = (inputEl.value || '').trim();
@@ -316,7 +363,9 @@
         // 非流式：直接渲染完整结果
         renderProgress(botMsgEl, data.done_list || [], [], 'completed');
         finalizeBotAnswer(botMsgEl, data.answer, data.error, data.image_urls || [],
-                          buildBotMeta(data.citations, data.groundedness, data.session_id, text));
+                          buildBotMeta(data.citations, data.groundedness, data.session_id, text,
+                                       data.item_names));
+        renderItemNameOptions(botMsgEl, data.item_name_options, text);
         sendBtn.disabled = false;
         return;
       }
@@ -348,7 +397,8 @@
                                      hasFinal ? d.answer : (rawText || answerEl.textContent || ''),
                                      (d && d.image_urls) || []);
           renderCitationsAndFeedback(botMsgEl, buildBotMeta(
-            d && d.citations, d && d.groundedness, sessionId, text));
+            d && d.citations, d && d.groundedness, sessionId, text, d && d.item_names));
+          renderItemNameOptions(botMsgEl, d && d.item_name_options, text);
           sendBtn.disabled = false;
         },
         onClose() { sendBtn.disabled = false; },

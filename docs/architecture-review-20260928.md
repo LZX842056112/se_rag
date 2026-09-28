@@ -282,3 +282,58 @@ parseAnswerAndImages / renderAnswerWithImages`，三页共用；页面用 `?v=<�
 - 使用与接口速查：`README.md`
 - 真机端到端用例：`tests/e2e/test_import_query_flow.py`
 - 交互式架构视图：本次会话生成的 Canvas（架构总览 / 模块依赖 / 优化对照 / 接口映射）
+
+## 15. 第三轮全量代码复查（2026-09-28 夜，附录）
+
+> 触发：用户要求「代码有修改，请重新全面检查整个项目的代码」，并新增一条业务诉求
+> 「没有主体时，回答可以让用户选择相似的主体」。本节记录该轮复查的**量化口径、清理项与残留观察**；
+> 业务改动 D16 的现象/根因/复验见 `docs/verification-report-20260928.md` 第 10 节。
+
+### 15.1 复查口径（离线门禁，全部通过）
+
+| 门禁 | 命令 | 结果 |
+| --- | --- | --- |
+| 静态检查 | `python -m pyflakes app tests` | **0 输出**（无未使用导入 / 未定义名 / f-string 缺占位符） |
+| 语法编译 | `python -m compileall -q app tests` | exit 0 |
+| 离线单测 | `pytest -q`（`-m e2e` 需显式开关） | **125 passed / 1 deselected** |
+| 导入冒烟 | 遍历 `app/**` 127 个模块逐个 `import` | 0 失败；导入两个服务入口**不发起任何外部连接** |
+| 目录结构 | 全仓 `rg` | `app.infra` **零引用**（双底座已彻底收敛为 `app/shared`） |
+| 前端 | 全仓 `rg '<style\|<script\|style=\|onclick='` | 三个页面**零内联**（`<style>`/`<script>` 代码块与行内 `style=` 属性都没有），资源全部走 `/static/*` + 内容指纹 |
+| 死代码 | 304 个 `def` 全量引用计数 | 无「仅定义未引用」的私有函数；公开路由函数由装饰器注册（计数为 1 属预期） |
+| 单一口径 | `rg is_no_answer\|NO_ANSWER_MARKERS` | 「无法作答」判定只有 `app/shared/utils/answer.py` 一份 |
+
+### 15.2 规模盘点（供后续维护决策）
+
+| 分层 | 文件数 | 行数 | 定位 |
+| --- | --- | --- | --- |
+| `app/rag` | 30 | 2134 | 导入/查询业务实现（唯一业务细节层） |
+| `app/resources` | 18 | 1783 | 前端三页 HTML + 共享 CSS/JS + 提示词 |
+| `app/shared` | 26 | 1446 | 唯一基础设施底座（配置/客户端/模型/工具） |
+| `app/evolution` | 26 | 1138 | 自进化闭环（反馈→缺口→候选→审批→回流） |
+| `app/rag_eval` | 5 | 866 | 离线评估（包边界独立，仅导入路径随重构更新） |
+| `app/api` | 14 | 535 | HTTP 组装、路由、错误体 |
+| `app/process` | 25 | 388 | LangGraph 图与节点（薄编排，node 文件 9 行/个） |
+
+单文件行数 Top：`app/resources/js/chat.js` 413、`app/rag_eval/runner.py` 355、
+`app/resources/js/app.js` 323、`app/rag/import_/split_service.py` 318。
+`app/process` 平均 15 行/文件，说明“节点只做编排、逻辑下沉 `app/rag`”的分工已经落地。
+
+### 15.3 本轮清理项
+
+| 文件 | 清理内容 | 理由 |
+| --- | --- | --- |
+| `app/process/query/agent/state.py` | 删除 `if __name__ == "__main__":` 演示块（含 `print("初始化状态：", state)`） | 计划中列入的删除项；`print` 属调试残留，且 `print` 会绕过 loguru 落到 stdout |
+| `app/process/import_/agent/state.py` | 同上，并连带删除仅被该块使用的 `import json`、`from app.shared.runtime.logger import logger` | 演示块删除后二者即成为死导入（pyflakes 会报） |
+| `app/resources/html/{chat,import}.html`、`app/resources/js/chat.js`、`app/resources/css/{app,chat}.css` | 3 处行内 `style=` 属性收敛为样式表里的 class（`.stream-toggle`、`.page.narrow{width:100%}`、`.msg-body{min-width:180px}`） | 上一轮只外链了 `<style>` 代码块，行内属性仍留 3 处，样式口径不统一 |
+| `tests/unit/test_frontend_pages.py` | 新增 2 条守卫：页面与脚本生成的标记均不得出现 `style="`（运行时 `el.style.x=` 不受限） | 把「无内联样式」从人工约定变成可回归的不变量 |
+
+### 15.4 残留观察与建议（本轮**未**改动，需产品/运维决策）
+
+| 优先级 | 观察 | 影响 | 建议 |
+| --- | --- | --- | --- |
+| **P1（本轮最高优先级发现）** | **联网结果会与本地知识同场重排，且不产出引用**：`cap_web_docs` 只在「本地有命中」时把联网结果截到 2 条，但**不约束它的排名**；实测日志 `Top3=[{chunk_id: None, 0.997}, {chunk_id: None, 0.9946}, {chunk_id: 469389094813929820, 0.8856}]` —— 前两条是联网文档。而 `build_citations` 只为 `kb`/`evolution` 生成引用，`type == "web"` 在 `backfill_evolution_outputs` 里被 `continue` 跳过 | 若答案主要由联网片段支撑，界面就是**「答了却没有引用」**；`groundedness` 又由 LLM 判定、异常即降级 0 → 显示「回答置信度 0%」，用户无法区分「答得不好」与「评估失败」。本轮真实浏览器实测出现过一次「一行答案 + 0 引用 + 0%」（同一问题换一次运行即为完整答案 + 3 引用 + 100%） | ① 把「联网可否压过本地知识」显式化为策略（例如联网文档排名不得高于第 `RERANK_MIN_TOPK` 名，或要求其分数需显著高于最高本地分才保留）；② 联网来源补 `source="web"` 的引用并在前端标「联网」；③ `groundedness` 引入「未知」态，失败时不显示 0% |
+| P1 | `app/evolution/backtest/runner.run_backtest`、`tuning/controller.adjust_step`、`online_eval/metrics.record_metric`/`latest_metrics` 定义完整但**无任何调用方**（仅文档描述为闭环的一环） | 自调参/回测/在线指标实际未运行，「闭环」目前止于「候选入库→检索命中」 | 要么在 `evolution_scheduler_loop` 里按天接线（先跑 `record_metric` → `adjust_step`），要么在文档中标注为预留能力，避免误判为已生效 |
+| P2 | `detector.scan_unresolved_feedbacks` 用 `.sort("ts", -1).limit(batch)`（默认 50）取「最新 N 条」 | 反馈事件长期堆积时，较早的未解决信号可能被新事件挤出窗口而**永远扫不到** | 把「是否未解决」下推到 Mongo 查询条件后按 `ts` 升序处理，或加 `seen` 标记 |
+| P2 | `LLMProvider.bge_m3_embedding`、`HistoryRepository.update_item_names`、`task_state.task_count` 无调用方 | 少量死代码（合计约 15 行） | 保留（对外门面/后续扩展）或随下次改动一并移除 |
+| P2 | `app/resources/js/chat.js` 单文件 413 行，承担消息渲染 + 流式 + 反馈 + 主体点选 | 继续加功能会变难维护 | 后续若再扩展，按「渲染 / 流式 / 反馈」拆分为多个 IIFE 文件（`pages.py` 已是白名单化静态路由，加文件成本低） |
+| P3 | `uvicorn` 日志在 PowerShell 重定向下按 GBK 落盘，中文出现乱码（`logs/verify-*.log`） | 只影响人工排查可读性 | 启动脚本加 `PYTHONIOENCODING=utf-8`（或 `-u` + 显式编码） |

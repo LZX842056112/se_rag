@@ -33,6 +33,7 @@ class QueryGraphState(TypedDict):
     retrieval_signals: dict  # 零命中 / 无检索直达 / 进化命中 等信号
     faq_evo_ids: list  # 命中的自进化条目 id 列表
     citations: list  # 对外引用列表 [{faq_id, source}]，供落库与历史回显
+    item_name_options: list  # 没确认到主体时的相似主体选项 [{item_name, score, matched_by}]
 
     # 辅助信息
     item_names: List[str]  # 提取出的商品名称
@@ -60,6 +61,7 @@ query_graph_default_state: QueryGraphState = {
     "retrieval_signals": {},
     "faq_evo_ids": [],
     "citations": [],
+    "item_name_options": [],
     "item_names": [],
     "rewritten_query": "",
     "is_stream": False,
@@ -87,13 +89,3 @@ def get_query_default_state() -> QueryGraphState:
     返回一个新的状态实例，避免全局变量污染。
     """
     return copy.deepcopy(query_graph_default_state)
-
-
-if __name__ == "__main__":
-    # 测试
-    state = create_query_default_state(
-        session_id="test_001",
-        original_query="华为P60怎么样?",
-        is_stream=False
-    )
-    print("初始化状态：", state)

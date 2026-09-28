@@ -36,10 +36,13 @@ def invoke_query_graph(session_id: str, original_query: str, is_stream: bool) ->
                 "answer": result_state.get("answer"),
                 "status": "completed",
                 "image_urls": result_state.get("image_urls", []),
+                # 回传已识别主体：前端点踩时原样回传，保证 反馈→缺口→候选 的 item_names 贯通
+                "item_names": result_state.get("item_names", []),
                 "citations": result_state.get("citations") or build_citations(
                     result_state.get("cited_chunk_ids"), result_state.get("faq_evo_ids")
                 ),
                 "groundedness": result_state.get("groundedness", 0.0),
+                "item_name_options": result_state.get("item_name_options", []),
             })
             publish(session_id, SSEEvent.CLOSE, {})
 

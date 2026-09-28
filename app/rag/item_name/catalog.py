@@ -22,7 +22,7 @@ import time
 from app.rag.item_name.config import ITEM_NAME_CATALOG_TTL_SECONDS
 from app.shared.clients.milvus_gateway import milvus_gateway
 from app.shared.runtime.logger import logger
-from app.shared.utils.text import is_same_entity, normalize_item_name
+from app.shared.utils.text import is_same_entity, name_tokens, normalize_item_name, token_prefix_match
 
 # 目录缓存：names 为去重后的库内标准名；raws 为库内全部原始写法（用于同一实体召回扩展）
 _CACHE: dict[str, object] = {"names": [], "raws": [], "ts": 0.0}
@@ -140,3 +140,41 @@ def match_catalog_name(name: object) -> tuple[str, str] | None:
         if is_same_entity(candidate, name):
             return candidate, "catalog_entity"
     return None
+
+
+# 子串相似的最短长度：过短（如 "机"、"180"）会匹配到一切，必须设下限
+_MIN_CONTAINS_LEN = 3
+
+
+def find_similar_names(name: object, *, limit: int = 3) -> list[tuple[str, str]]:
+    """在库内主体名目录中找「相似主体」，用于没确认到主体时让用户点选。
+
+    与 ``match_catalog_name`` 的区别：那里只认「同名 / 同一实体」，命中就自动确认；
+    这里更宽松，专门处理「型号前缀」这类不足以自动确认、但明显指向同一主体的写法：
+
+    - ``catalog_contains``：归一化后互为子串（``hak180`` ⊂ ``brotherhak180烫金机``），
+      要求较短的一方至少 3 个字符，避免 ``机`` / ``180`` 这类噪声；
+    - ``catalog_token_prefix``：token 前缀等价（``HAK 180`` vs ``HAK 180 烫金机``）。
+
+    :return: ``[(库内标准名, 命中方式), ...]``，按相似强度排序（子串 > token 前缀）
+    """
+    key = normalize_item_name(name)
+    if not key:
+        return []
+
+    matched: list[tuple[int, str, str]] = []
+    seen: set[str] = set()
+    for candidate in load_item_names():
+        candidate_key = normalize_item_name(candidate)
+        if not candidate_key or candidate_key in seen:
+            continue
+        seen.add(candidate_key)
+        shorter = min(len(key), len(candidate_key))
+        if shorter >= _MIN_CONTAINS_LEN and (key in candidate_key or candidate_key in key):
+            matched.append((2, candidate, "catalog_contains"))
+            continue
+        if token_prefix_match(name_tokens(candidate), name_tokens(name)):
+            matched.append((1, candidate, "catalog_token_prefix"))
+
+    matched.sort(key=lambda item: (-item[0], len(item[1])))
+    return [(candidate, how) for _, candidate, how in matched[:limit]]

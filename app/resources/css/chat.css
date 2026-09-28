@@ -178,6 +178,35 @@ body{
 .fb-btn:disabled{opacity:.55;cursor:not-allowed}
 .fb-done{font-size:11px;color:var(--muted)}
 
+/* 相似主体选项：用户点一下即以该主体重新提问 */
+.option-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px}
+.option-hint{font-size:12px;color:var(--muted)}
+.option-btn{
+  border:1px solid rgba(26,167,255,.5);
+  background:rgba(26,167,255,.08);
+  color:var(--brand);
+  font-size:13px;
+  padding:6px 12px;
+  border-radius:999px;
+  cursor:pointer;
+  transition:all .15s;
+}
+.option-btn:hover{background:var(--brand);border-color:var(--brand);color:#fff}
+
+/* 顶栏「流式输出」开关：原为行内 style，统一收敛到样式表 */
+.stream-toggle{
+  font-size:12px;
+  display:flex;
+  align-items:center;
+  gap:4px;
+  cursor:pointer;
+  user-select:none;
+  color:var(--muted);
+}
+
+/* 等待回答时的占位气泡：给个最小宽度，避免三点动画把气泡压成一条 */
+.msg-body{min-width:180px}
+
 .typing{display:inline-flex;gap:6px;align-items:center}
 .dot{
   width:7px;height:7px;border-radius:50%;

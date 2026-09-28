@@ -156,3 +156,248 @@
 - `logs/verify-import.out.log` / `verify-import.err.log`
 - `logs/verify-query.out.log` / `verify-query.err.log`（含 `GET /api/history/... 200 OK`、
   `DELETE /api/history/... 200 OK`、缺口扫描与自进化条目写入等下架记录）
+
+---
+
+## 8. 第二轮复验（代码改动后，2026-09-28 晚）
+
+> 触发：第一轮验证后又修复了 D11–D14（工作区 7 个文件改动 + 2 个新增回归用例），需**重扫改动面**并在
+> **真实浏览器**中对「导入 → 问答 → 反馈 → 缺口 → 候选 → 审批 → 回流」再做一次端到端复验。
+
+### 8.1 环境与工具
+
+| 项 | 值 |
+| --- | --- |
+| 查询服务 | `http://127.0.0.1:8001`（以当前工作区代码重启，清空 60s 主体名目录缓存） |
+| 导入服务 | `http://127.0.0.1:8000`（同批重启） |
+| 浏览器 | **外部 Chrome（TRAE Chrome 扩展）**，真实可见标签页 |
+| 浏览器能力 | `browser_navigate/snapshot/click/type/evaluate/console_messages`；文件上传用页内 `DataTransfer` 模拟（原生 `filechooser` 被桥接拒绝） |
+| 测试文档 | `output/verify_ui/e2e_ui_20260928c.md`（唯一主体 `e2e_ui_20260928c烫金机` + 唯一事实：`12~28 摄氏度` / `55W` / 包装清单） |
+| 外部依赖 | 真实 Milvus `192.168.200.10:19530` / MongoDB `kb002` / MinIO / DashScope Qwen，无 mock |
+
+### 8.2 改动面（本轮复验对象）
+
+| 文件 | 改动 |
+| --- | --- |
+| `app/resources/prompts/rewritten_query_and_itemnames.prompt` | 新增「主体以当前问题为准」最高优先级规则；示例型号名去掉真实主体 `HAK180` |
+| `app/resources/js/app.js` | `formatDateTime` 修复秒级时间戳被渲染成 1970 年 |
+| `app/rag/query/answer_service.py` | `cited_chunk_ids` / `faq_evo_ids` 落状态前统一 `str()` 归一 |
+| `app/api/routers/query.py`、`app/api/schema/query_schema.py`、`app/rag/query/pipeline.py` | 查询响应与 SSE `final` 暴露 `item_names` |
+| `app/resources/js/chat.js` | 反馈载荷透传 `item_names`；历史回显同步带主体 |
+| `tests/unit/test_item_name_prompt.py`、`tests/unit/test_evolution_signal_integrity.py` | 新增回归守卫 |
+
+### 8.3 结果总览
+
+| 流程 | 结果 | 说明 |
+| --- | --- | --- |
+| P1 导入（md 上传 → 落库） | PASS | 7 节点全绿；Milvus `kb_chunks=6`、`kb_item_names` 主体 = `e2e_ui_20260928c烫金机` |
+| P2 问答（流式 / 引用 / 置信度 / 反馈栏） | PASS | 答案逐字含导入事实 `55W`；`引用来源（4）`（标签 `知识库`）；置信度 100% |
+| P3 反馈与缺口 | PASS | 兜底话术写入未解决信号 → 调度器产出缺口 + `need_info` 候选 |
+| P4 审批后台（渲染 / 鉴权 / 控制台） | PASS | 列表正常、写操作仍受 `X-Internal-Token` 约束、控制台 0 error |
+| P5 自进化回流 | PASS | 早段复验：查询命中 `evo_d805489677bc`，日志「重排截断后补回 1 条自进化权威条目」 |
+| P6 历史与会话 | PASS | 刷新完整回显；清空走页内浮层且服务端删除计数一致；不存在会话返回 0 |
+| P7 边界与降级 | PASS | 库外问题走兜底话术且反馈栏仍在；三页控制台 0 error；服务端无异常堆栈 |
+| 离线回归 | PASS | `pyflakes` 0 告警、164 个 py 文件 AST 解析无语法错误、`pytest` **114 passed / 1 deselected** |
+| 数据清理 | PASS | `e2e_` 残留全部为 0，生产数据计数不变 |
+
+### 8.4 逐流程明细（本轮实测证据）
+
+**P1 导入**：上传 `e2e_ui_20260928c.md` → 徽标 `上传中…→处理中…→已完成`，7 个节点依次完成
+（开始上传文件 / 检查文件 / Markdown图片处理 / 文档切分 / 主体名称识别 / 向量生成 / 导入向量库）；
+导入服务日志 `知识库写入完成：insert_count=3`（页内 `DataTransfer` 模拟触发两次 `change`，故落 2 份共 6 条切片）；
+回查 `kb_chunks=6`（`item_name=e2e_ui_20260928c烫金机`）、`kb_item_names=2`。
+
+**P2 问答**：流式提问「e2e_ui_20260928c烫金机的额定功率是多少？」→ 阶段进度 7 节点完成 →
+答案 `e2e_ui_20260928c 烫金机的额定功率为 55W。`（与导入事实逐字一致）→ `引用来源（4）`（标签 `知识库`）→
+`回答置信度 100%` → 反馈栏（👍/👎）渲染。
+
+**P3 反馈 → 缺口**：兜底话术路径命中「现有参考内容与历史对话中未查询到该问题相关信息，无法作答」，
+查询服务日志 `flush_session_signals … 已写入未解决信号到 fb_events`；随后调度器产出缺口
+`6aba753a…c63`（`status=candidate`, `confidence=0.7`）与候选 `6aba753c…c64`（`status=need_info`，符合 D8 质量闸门）。
+
+**P6 历史与会话**（本轮浏览器实测）：
+
+| 验证项 | 预期 | 实际 |
+| --- | --- | --- |
+| 刷新回显 | 历史消息 + 引用块 + 反馈栏完整恢复 | 一致：用户问题 + 答案（含 `55W`）+ `引用来源（4）` + `回答置信度 100%` + 👍/👎 全部回显 |
+| 清空对话 | 页内确认浮层（非原生 `confirm`）→ 后端与界面同时清空 | 一致：浮层文案「确定要清空当前会话的历史记录吗？这将无法恢复。」；服务端 `已清空会话 e2e_sess_20260928b 的 2 条记录`；界面 2 条消息 → 仅剩欢迎语（`.msg.user=0`、`.feedback-bar=0`） |
+| 不存在会话 | 正常返回 0，不报错 | 一致：`DELETE /api/history/no-such-session-xyz` → 200，`deleted_count=0` |
+
+**P7 边界与降级**：提问库外事实「e2e_ui_20260928c烫金机的防水等级是多少？」→ 兜底话术
+`现有参考内容与历史对话中未查询到该问题相关信息，无法作答`、`回答置信度 0%`、反馈栏仍在；
+三页（客服 / 审批 / 导入）`browser_console_messages` 均为 `(none)`（0 error / 0 warn）；
+查询与导入服务日志按 `ERROR|Traceback|Exception` 检索无命中。
+
+### 8.5 发现的问题与处理（D11–D14）
+
+| 编号 | 问题 | 根因 | 处理 | 复验结果 |
+| --- | --- | --- | --- | --- |
+| D11 | 历史会话在讨论 A 主体后，用户改问 B 主体，模型把主体**替换成历史里的 A**，召回按错误主体过滤 → 答「无法作答」 | ① 提示词缺少「当前问题主体优先、禁止用历史主体替换」的强约束；② 规则示例直接用了库内真实主体名 `HAK180`，既污染识别又诱导模型照抄 | 提示词新增「主体以当前问题为准」最高优先级段（含反例）；示例型号名改为中性占位（`XYZ-123`/`UI0928`/`A1B2`）；新增 `tests/unit/test_item_name_prompt.py` 三条静态守卫 | 用 B 主体提问一次命中并正确作答；守卫用例断言提示词不得出现 `HAK180`/`HAK 180` |
+| D12 | 前端时间显示为 **1970 年** | 秒级时间戳是**合法的毫秒值**（落在 1970），`new Date()` 不会得到 `Invalid Date`，因此「仅在 Invalid 时才纠正」的兜底逻辑永远不触发 | `app.js::formatDateTime` 改为**先按量级判定**秒/毫秒（`n > 1e11` 视作毫秒，否则 `×1000`），不再依赖 `Invalid Date` 分支 | 审批页 / 客服页时间戳显示为当前时间，不再是 1970 |
+| D13 | 自动会话信号被**静默丢弃**，缺口漏检 | Milvus 数值型主键被解析成 `int`，`FeedbackEvent.cited_chunk_ids(list[str])` 校验失败抛异常，被上层 catch 吞掉 | `answer_service.backfill_evolution_outputs` 落状态前 `[str(c) for c in …]` 归一；新增 `test_evolution_signal_integrity.py` 断言数值主键必须转 str | 回归用例通过；浏览器点踩后 `fb_events` 正常落库且带 `cited_chunk_ids` |
+| D14 | 显式 👎 反馈未携带 `item_names` → 缺口/候选**主体丢失** | 查询响应与 SSE `final` 未回传已识别主体，前端反馈载荷因此无从携带 | 非流式响应 schema 与 SSE `final` 增加 `item_names`；`chat.js` 的 `buildBotMeta` / 历史回显 / 反馈载荷全链路透传；新增回归用例 | 浏览器点踩后 Mongo `fb_events.item_names` 为真实主体（如 `["e2e_ui_20260928b"]`） |
+
+> 说明：D11–D14 的修复**均在本轮复验前已完成**，本轮职责是「改动后重新联调复验 + 数据清理 + 报告」，未再引入新缺陷。
+
+### 8.6 数据清理记录
+
+| 目标 | 清理前 | 清理后 |
+| --- | --- | --- |
+| Milvus `kb_chunks`（`item_name like "e2e_%"`） | 10 | 0 |
+| Milvus `kb_item_names`（同上） | 3 | 0 |
+| Milvus `kb_evolution_items`（同上） | 1 | 0 |
+| Mongo `chat_message`（测试会话） | 4 | 0 |
+| Mongo `fb_events`（测试会话） | 8 | 0 |
+| Mongo `k_gaps`（测试会话） | 5 | 0 |
+| Mongo `k_candidates`（本轮自建 5 条，按 `_id` 精确删除） | 5 | 0 |
+
+清理脚本 `output/verify_ui/cleanup_e2e.py`（Milvus 走「删除 → 等待 → 复核」，Mongo 按会话 ID 与候选 `_id` 精确删除）；
+审计脚本 `output/verify_ui/residue_audit.py` 复核：`e2e_` 残留**全部为 0**，生产数据不变
+（`k_candidates=2`、`chat_message=10`、`kb_evolution_items=2` 条 HAK 180 条目）。
+
+### 8.7 结论（第二轮）
+
+- 改动后的「导入 → 问答 → 反馈 → 缺口 → 候选 → 审批 → 回流」全链路在**外部真实浏览器**与真实依赖下再次跑通；
+  D11–D14 四条修复链路各有针对性回归断言，离线 **114 例**全绿。
+- 本轮最有价值的教训：**「只在异常分支兜底」的逻辑会漏掉语义合法但取值错误的输入**——D12 的秒级时间戳是合法毫秒值，
+  D13 的数值主键是合法主键，二者都不抛错却都渲染/落库错误；应改为「按量级/类型显式判定」而非「出错才纠正」。
+
+---
+
+## 9. 追加复验：D15「答不出却给出图」
+
+> 触发：第二轮复验后用户反馈——提问「烫金机怎么安装」时，回答是
+> `现有参考内容与历史对话中未查询到该问题相关信息，无法作答。`，**下方却渲染出了安装示意图**。
+
+### 9.1 根因
+
+说明书类切片是「**零碎文字 + 多张配图**」形态。实测库内命中切片（`hak180使用说明书`）：
+
+| chunk_id | 文字（去图后） | 配图数 |
+| --- | --- | --- |
+| `469389094813929834` | `## 重要事项 / 请务必使用随机附带的电源线。/ b 安装进纸托板。/ 打开前盖。` | 3 |
+| `469389094813929835` | `## 重要事项 / 打开前盖。/ e 将烫金膜盒装入烫金膜盒支架中。…` | 3 |
+| `469389094813929837` | `## 3.4.1 装入全幅烫金膜盒 / a 打开烫金膜盒支架盖。…` | 2 |
+
+链路：① `answer_out.prompt` 规则 2 限定模型**只能用「文字信息」**、规则 5 规定无匹配即输出固定兜底话术；
+② 模型读到零碎步骤文字 + 图片 Markdown 链接（**看不到图像像素**），判为「文字不足以回答」→ 输出兜底话术；
+③ 但 `answer_service.extract_text_image_url` **独立地**从同一批切片抽出图片 → `image_urls` 非空 →
+前端 `renderAnswerWithImages` 照常渲染。于是「嘴上说答不出、手上却给出图」自相矛盾，
+并因兜底话术命中 `_NO_ANSWER_MARKERS` 而产出**假缺口/假候选**，污染自进化闭环。
+
+### 9.2 处理（按用户选定的取向：不展示图片，只说答不出）
+
+| 文件 | 改动 |
+| --- | --- |
+| `app/shared/utils/answer.py` | **新增**：`NO_ANSWER_MARKERS` + `is_no_answer()`，查询端与自进化端**共用一份口径** |
+| `app/rag/query/answer_service.py` | `extract_text_image_url` 命中兜底话术时**不回填** `image_urls` 并记日志 |
+| `app/evolution/feedback/collector.py` | 删除本地 `_NO_ANSWER_MARKERS`，改用共享 `is_no_answer`（避免两处口径漂移） |
+| `tests/unit/test_answer_image_fallback.py` | **新增** 4 条回归：兜底话术抑制图片、正常作答仍抽取、图片型 `url` 同样抑制、标记判定 |
+
+### 9.3 复验结果
+
+| 验证项 | 结果 |
+| --- | --- |
+| 离线用例 | `pytest` **118 passed / 1 deselected**（较此前 114 增加 4 条 D15 回归） |
+| 真实库 + 真实模型（进程内跑图） | 提问 `HAK 180 烫金机怎么安装` → 主体确认 `HAK 180 烫金机 → Brother HAK 180 烫金机`；模型正常作答安装步骤、`image_urls` 非空 → **无矛盾**（正常链路未被误伤） |
+| 边界（裸「烫金机」） | 走「主体未确认」反问短路，`image_urls=[]` → 同样无矛盾 |
+| 数据清理 | 本轮 `e2e_d15_verify` 会话的 `chat_message`/`fb_events`/`k_gaps`/`k_candidates` 均已清零 |
+
+> 说明：兜底话术是否出现取决于模型对「文字是否足以作答」的判断，属模型侧不确定性；
+> 因此「兜底话术 ⇒ 不展示图片」这条**不变量**以确定性单测锁定，而非依赖某次真实提问复现。
+
+## 10. 第三轮复验：D16「没识别到主体 → 让用户点选相似主体」
+
+### 10.1 现象与复现（用户报告）
+
+用户只输入**型号前缀** `hak180`（截图 `codex-clipboard-3174bd1f`），页面回：
+
+> 本次问题没有关联到任何主体,有没有相似可选的主体! 请您明确主体再提问!
+
+而库内主体目录里**只有一个** `Brother HAK 180 烫金机`。用户随后手打 `HAK 180 烫金机` 才拿到答案——
+说明链路“认识这个主体”，只是**在阈值判定那一步把候选整批丢掉了**，用户无法自救。
+
+### 10.2 根因（终端实测数据）
+
+| 环节 | 实测 |
+| --- | --- |
+| 主体识别 | LLM 正确抽出 `item_names=["hak180"]` |
+| 向量召回 | `kb_item_names` 命中 `Brother HAK 180 烫金机`，但稠密+稀疏融合分仅 **0.4093** |
+| 阈值判定 | 确认阈值（`ITEM_NAME_CONFIRM_MIN_SCORE`）与可选阈值（`ITEM_NAME_OPTION_MIN_SCORE`=0.60）**双双未达** |
+| 旧行为 | 走进「4) 其余丢弃」分支 → `confirmed/option` 皆空 → `apply_item_name_result` 输出「请您明确主体再提问」 |
+
+即：**阈值是合理的**（0.409 确实不足以自动确认主体），缺的是「够不上阈值时把相似主体列出来让用户点选」
+这一层降级，而不是放宽阈值（放宽会引入误召回）。
+
+### 10.3 改动（最小改动，不动数据契约）
+
+| 文件 | 改动 |
+| --- | --- |
+| `app/rag/item_name/catalog.py` | 新增 `find_similar_names(name, limit=3)`：目录归一化互子串（较短方 ≥3 字符）→ token 前缀等价；按相似强度排序 |
+| `app/rag/item_name/match.py` | 新增 `_similar_fallback()`（目录相似 → 低分向量命中 → 小库直接列目录，`CATALOG_SUGGEST_MAX=5`）；`select_item_names` 增加 `similar_list`，并补上「向量零命中 + 目录未命中」分支 |
+| `app/rag/query/item_name_confirm_service.py` | `apply_item_name_result` 把候选写入 `state["item_name_options"]`，文案改为「以下可能是您要找的：X。请点击下方主体直接提问。」 |
+| `app/process/query/agent/state.py`、`app/api/schema/query_schema.py`、`app/api/routers/query.py`、`app/rag/query/pipeline.py` | 新增并透出 `item_name_options`（非流式响应 + SSE `final`） |
+| `app/resources/js/chat.js`、`app/resources/css/chat.css` | `renderItemNameOptions()` 渲染 `.option-bar/.option-btn`；点击 → 填充输入框并自动提问（`optionQuestion()` 负责“只输型号就按主体问、否则主体+原问题”） |
+| `tests/unit/test_item_name_options.py` | **新增 7 条**：相似召回 3 类判据、零命中兜底、状态透传、前端选项渲染与反馈仍带 `item_names` 的静态守卫 |
+
+### 10.4 真实浏览器复验（本轮，临时端口 8011 跑修复后代码）
+
+| 步骤 | 预期 | 实际 | 证据 |
+| --- | --- | --- | --- |
+| 输入 `hak180` | 不再只说“请明确主体”，而是给出可点选主体 | 一致：`没有识别到明确的主体，以下可能是您要找的：Brother HAK 180 烫金机。请点击下方主体直接提问。`；`.option-hint`=`请选择主体：`，按钮 `Brother HAK 180 烫金机` | 截图 `verify-22-subject-options.png` |
+| 点击该按钮 | 自动以该主体重新提问并正常作答 | 一致：得到真实说明书内容（A4 90–350g/m²、15ppm/7ppm、44 页 ADF）+ 安装示意图 + `引用来源（3）`（全部 `知识库`）+ `回答置信度 90%` | 截图 `verify-23-after-option-click.png` |
+| 控制台 / 服务端日志 | 无 error、无未处理异常 | 一致（`logs/verify-query.out.log` 无 `Traceback`/`ERROR`） | 服务日志 |
+
+### 10.5 本轮数据清理记录（精确清理，先打印计数后复核）
+
+| 目标 | 清理前 | 清理后 |
+| --- | --- | --- |
+| 本轮临时会话 `sess-1d4055ow9kpmul7i6v5`（8011 复验产生） | `chat_message=4`、`fb_events=1`、`k_gaps=0`、`k_candidates=0` | **全部 0（复核通过）** |
+| 用户会话 `e2e_sess_20260928b`（浏览器 localStorage 里沿用第一轮联调留下的会话 id，内容是用户真实提问） | `chat_message=6`、`fb_events=2`、`k_gaps=2` | **原样保留**（判定为用户数据，未做任何删除） |
+| Milvus `kb_evolution_items` | 0 条 | 0 条（本轮未产生进化条目） |
+| 临时 uvicorn（端口 8011） | 监听中 | 已停止（端口不再监听） |
+
+> 说明：`e2e_sess_20260928b` 虽带 `e2e_` 前缀，但其中的问题是用户本人输入的真实问题，且已产出 2 条
+> `candidate` 缺口与 2 条 `draft` 候选（可在审批页直接处理）。按「绝不触碰既有数据」原则保留原状；
+> 如需清空，可在问答页点「清空对话」后再删除 2 条 draft 候选。
+
+### 10.6 结论（第三轮）
+
+「没识别到主体」不再是一条死路：能确认就确认，够不上阈值就给**可点选的相似主体**，点一下即可继续。
+离线门禁 `pyflakes` 0 告警、`compileall` 通过、**129 passed / 1 deselected**（含 2 条新增前端「无行内样式」守卫）；
+浏览器实测两步走通，并在用户实际使用的 `:8001` 端口上复现一致（见 10.7）。
+
+### 10.7 在用户端口 `:8001` 上的复核
+
+本轮复查时发现 `:8000` / `:8001` 均未在监听（用户此前看到的还是**旧代码**的进程输出），因此用当前工作区代码
+重新启动两个服务（后台、`-WindowStyle Hidden`，日志 `logs/ui-{import,query}.{out,err}.log`），随后：
+
+| 验证项 | 预期 | 实际 |
+| --- | --- | --- |
+| `/api/health` | 200 | 两个端口均 `200 {"code":200,"message":"ok"}` |
+| 资源指纹 | 与已验证版本一致 | `app.css/chat.css/app.js/chat.js` 均为 `?v=<内容哈希>`（每次启动按内容重算） |
+| 接口直查（独立会话 `e2e_sess_verify_d16`） | 返回可点选主体 | `answer`=`没有识别到明确的主体，以下可能是您要找的：Brother HAK 180 烫金机。请点击下方主体直接提问。`；`item_name_options`=`[{"item_name":"Brother HAK 180 烫金机","matched_by":"catalog_contains"}]` |
+| 页面控制台 | 0 error | `dev.logs()` 长度 0；`#apiPill`=`API: 已连接` |
+| 清理 | 测试会话清零 | `e2e_sess_verify_d16` 的 `chat_message=2`/`fb_events=1` 已删，复核为 0；用户会话未动 |
+
+> 提示：服务由本轮复查处后台启动；若用户自行用 `uvicorn` 再启一次会端口占用，先停掉即可
+> （`Get-NetTCPConnection -LocalPort 8000,8001 -State Listen` 查 PID → `Stop-Process -Id <pid>`）。
+
+### 10.8 本轮观察（非缺陷判定，已记录待决策）
+
+同一条链路在真实浏览器里出现过一次**「一行答案 + 0 引用 + 回答置信度 0%」**（`消费电力(烫印中): 少于340W`），
+而同一问题随后用接口复跑得到**完整答案 + 3 条引用 + 100%**。定位到两个放大不确定性的机制：
+
+1. **联网结果不产出引用**：重排日志显示 `Top3` 前两条是 `chunk_id=None` 的联网文档（`cap_web_docs`
+   只限条数、不限排名）；`build_citations` 只为 `kb`/`evolution` 生成引用，联网来源在
+   `backfill_evolution_outputs` 中被跳过 → 答案若主要由联网片段支撑，界面表现为「答了却无引用」。
+2. **接地性由 LLM 判定、异常即降级 0**：`compute_groundedness` 的空证据 / 解析失败 / 调用异常都返回 `0.0`，
+   前端把它渲染成「回答置信度 0%」，与「答案确实不接地」不可区分。
+
+复现尝试：用独立会话按浏览器同样的顺序（先 `hak180` → 再点选主体提问）连查两次，
+结果正常（第二轮 378 字答案 / 2 条引用 / 置信度 80%），因此判定为**模型侧不确定性放大**，
+而非确定性缺陷；处理建议已写入 `docs/architecture-review-20260928.md` 第 15.4 节（含「联网排名策略」
+「联网引用标签」「groundedness 未知态」三项），待与用户确认后实施。
+
+本轮全部自建测试数据（`e2e_sess_verify_d16`~`d19` 与浏览器测试会话）已精确清理，复核残留为 0；
+用户会话 `e2e_sess_20260928b` 的 6 条消息、2 条反馈、2 条缺口与其 2 条 draft 候选**原样保留**。

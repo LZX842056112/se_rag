@@ -422,6 +422,60 @@ E2E_ENABLED=1 uv run pytest -m e2e tests/e2e -s
   `resolved`/`rejected`，缺口不再永久残留。
 - 复验：用真实未解决信号复跑调度得到 `{"scanned":1,"generated":1}`（修复前恒为 0），并产出对应缺口与候选。
 
+**⑪ 第二轮浏览器联调复验（D11–D14，2026-09-28 晚）**
+
+> 背景：上述 ⑧⑨⑩ 修复后工作区又有 7 处改动，需在**外部真实浏览器**中对「导入 → 问答 → 反馈 →
+> 缺口 → 候选 → 审批 → 回流」重做一次端到端复验（详见 `docs/verification-report-20260928.md` 第 8 节）。
+
+- **D11**：历史会话讨论过 A 主体后，用户改问 B 主体，模型会把主体**替换成历史里的 A**，导致按错误主体
+  召回 → 答「无法作答」。根因有二：提示词缺少「当前问题主体优先」的强约束；且规则示例直接用了库内真实
+  主体名 `HAK180`，既污染识别又诱导模型照抄。修复：`rewritten_query_and_itemnames.prompt` 新增
+  「主体以当前问题为准、禁止用历史主体替换」最高优先级段，示例型号名改为中性占位；新增
+  `tests/unit/test_item_name_prompt.py` 三条静态守卫（断言提示词不得出现真实主体名）。
+- **D12**：前端时间显示成 **1970 年**。根因：秒级时间戳本身是**合法的毫秒值**，`new Date()` 不会得到
+  `Invalid Date`，故「仅在 Invalid 时才纠正」的兜底永不触发。修复：`app.js::formatDateTime` 改为
+  **按量级判定**秒/毫秒（`n > 1e11` 视作毫秒，否则 ×1000）。
+- **D13**：自动会话信号被**静默丢弃**、缺口漏检。根因：Milvus 数值型主键被解析成 `int`，
+  `FeedbackEvent.cited_chunk_ids(list[str])` 校验失败抛异常后被上层 `catch` 吞掉。修复：
+  `answer_service.backfill_evolution_outputs` 落状态前统一 `str()` 归一；新增
+  `tests/unit/test_evolution_signal_integrity.py` 回归断言。
+- **D14**：显式 👎 反馈未携带 `item_names` → 缺口/候选**主体丢失**。修复：非流式响应 schema 与 SSE
+  `final` 增加 `item_names`，`chat.js` 的 `buildBotMeta` / 历史回显 / 反馈载荷全链路透传，并补回归用例。
+- 复验结果：全链路再次跑通；离线 `pytest` **114 passed / 1 deselected**、`pyflakes` 0 告警；测试数据
+  `e2e_` 残留全部为 0，生产数据未受影响。
+
+**⑫ 兜底话术与图片互斥（D15）**
+
+- 现象：提问「烫金机怎么安装」，回答是「现有参考内容与历史对话中未查询到该问题相关信息，无法作答」，
+  **下方却渲染出了安装示意图**——「说答不出、却给出图」自相矛盾，并会产出假缺口/假候选。
+- 根因：说明书切片是「零碎文字 + 多张配图」形态。作答提示词限定模型**只能用文字信息**，模型读到零碎
+  步骤文字（看不到图像像素）判为答不出而输出兜底话术；但 `extract_text_image_url` **独立地**从同一批
+  切片抽出图片并回填，前端照常渲染。
+- 修复：新增共享口径 `app/shared/utils/answer.py`（`NO_ANSWER_MARKERS` / `is_no_answer`），查询端
+  `extract_text_image_url` 命中兜底话术时**不回填图片**，自进化端 `collector` 改用同一判定（此前各写一份，
+  易漂移）。新增 `tests/unit/test_answer_image_fallback.py` 4 条回归。
+- 复验：离线 **118 passed / 1 deselected**；真实库 + 真实模型跑图，明确主体时正常作答且图片正常回传
+  （正常链路未误伤），全程无「答不出却给图」的矛盾。
+
+**⑬ 第三轮全量复查 + 「没主体时给相似主体点选」（D16）**
+
+- 背景：用户提问只有一个**型号前缀**（如 `hak180`）时，主体向量分只有 `0.409`（低于可选阈值 `0.60`），
+  旧实现把候选**整批丢弃**，只回一句「本次问题没有关联到任何主体……请您明确主体再提问」——
+  库里明明只有一个 `Brother HAK 180 烫金机`，用户仍然问不下去（死路）。
+- 修复：主体匹配新增**相似兜底链路** `find_similar_names()`（目录归一化子串 → token 前缀 → 低分向量命中 →
+  小知识库直接列目录），由 `select_item_names` 返回 `similar_list`；`apply_item_name_result` 把它写进
+  `state["item_name_options"]`，经 API 非流式响应与 SSE `final` 透出，前端渲染成**可点选主体按钮**，
+  点一下即以该主体重新提问。文案也从「请您明确主体再提问」改为「以下可能是您要找的：X。请点击下方主体直接提问。」
+- 复验：真实浏览器实测 `hak180` → 出选项按钮 `Brother HAK 180 烫金机` → 点选后得到真实说明书答案
+  （A4 90–350g/m²、15ppm/7ppm、44 页 ADF）+ `引用来源（3）` + 置信度 90%；见
+  `docs/verification-report-20260928.md` 第 10 节与截图 `verify-22`/`verify-23`。
+- 同轮全量复查（`pyflakes` 0 告警、`compileall` 通过、**129 passed / 1 deselected**、127 模块导入冒烟 0 失败）：
+  删除两处遗留的 `__main__` 演示块（`app/process/{import_,query}/agent/state.py`，其中一处含 `print` 调试输出）
+  及随之失效的 `import json` / `logger` 导入；把最后 3 处行内 `style=` 属性收敛为样式表 class，
+  并新增 2 条前端守卫用例（页面与脚本生成的标记均不得出现 `style="`）；确认 `app.infra` 已无任何引用、
+  「无法作答」判定只有 `app/shared/utils/answer.py` 一份口径。详见
+  `docs/architecture-review-20260928.md` 第 15 节。
+
 ### 2026-09-27
 
 - 反馈按钮渲染修复、上传类型校验（L1）、接地性（groundedness）评估修复、演进知识召回链路修复、

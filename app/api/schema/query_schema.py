@@ -29,10 +29,14 @@ class QueryNotStreamResponseSchema(BaseModel):
     answer:str
     done_list:list[str]
     image_urls:list[str]
+    # 已识别主体：前端点踩时原样回传，保证 反馈→缺口→候选 的 item_names 贯通
+    item_names:list[str] = Field(default_factory=list)
     # 自进化输出
     citations:list[CitationModel] = Field(default_factory=list)
     groundedness:float = 0.0
     retrieval_signals:dict = Field(default_factory=dict)
+    # 没确认到主体时的相似主体选项（前端渲染成可点选按钮）
+    item_name_options:list[dict] = Field(default_factory=list)
 
 # 会话记录
 class HistoryClearResponseSchema(BaseModel):

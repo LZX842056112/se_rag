@@ -19,6 +19,7 @@ from app.shared.config import settings
 from app.shared.models import llm_providers
 from app.shared.runtime.logger import logger
 from app.shared.runtime.prompts import load_prompt
+from app.shared.utils.answer import is_no_answer
 from app.shared.utils.sse_broker import SSEEvent, publish
 
 _IMAGE_MARKDOWN_RE = re.compile(r"!\[.*?\]\((.*?)\)")
@@ -76,7 +77,16 @@ def call_llm_deal_answer(state: QueryGraphState, answer_prompt_text: str) -> Non
 
 
 def extract_text_image_url(state: QueryGraphState) -> None:
-    """从重排结果中抽取图片地址（图片类型 URL + Markdown 图片语法）。"""
+    """从重排结果中抽取图片地址（图片类型 URL + Markdown 图片语法）。
+
+    若模型已给出「无法作答」兜底话术，则不再回填图片：切片正文常是「零碎文字 + 配图」
+    （如说明书安装步骤），模型据文字判为答不出、图片却会被照常渲染，形成
+    「说答不出、界面却给出图」的自相矛盾。兜底话术与图片互斥，二者只保留其一。
+    """
+    if is_no_answer(state.get("answer")):
+        state["image_urls"] = []
+        logger.info("命中无法作答兜底话术，已抑制检索图片回填")
+        return
     image_urls: list[str] = []
     for doc in state.get("reranked_docs", []):
         url = doc.get("url")
@@ -100,8 +110,10 @@ def backfill_evolution_outputs(state: QueryGraphState) -> QueryGraphState:
             if doc.get("source") == "evolution":
                 evolution_ids.append(chunk_id)
 
-    state["cited_chunk_ids"] = cited
-    state["faq_evo_ids"] = evolution_ids
+    # Milvus 数值型主键会被解析成 int，必须统一转 str 再落状态：
+    # 否则 FeedbackEvent.cited_chunk_ids(list[str]) 校验失败，自动会话信号被静默丢弃（缺口漏检）
+    state["cited_chunk_ids"] = [str(c) for c in cited]
+    state["faq_evo_ids"] = [str(c) for c in evolution_ids]
     state["citations"] = build_citations(cited, evolution_ids)
     state["retrieval_signals"] = {
         "zero_hit": len(reranked_docs) == 0,

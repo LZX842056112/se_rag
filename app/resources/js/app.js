@@ -119,11 +119,16 @@
   /** 兼容秒级/毫秒级时间戳与 Mongo 扩展 JSON（{$date:...}） */
   function formatDateTime(value) {
     if (value == null) return '';
-    var date = new Date(value);
-    if (isNaN(date.getTime())) {
-      if (value && value.$date != null) date = new Date(value.$date);
-      else if (typeof value === 'number') date = new Date(value > 1e11 ? value : value * 1000);
+    var raw = (typeof value === 'object' && value.$date != null) ? value.$date : value;
+    var ms = raw;
+    // 数字（或纯数字字符串）按量级判定秒/毫秒：秒级需 *1000。
+    // 不能只在 new Date() 得到 Invalid Date 时才纠正——秒级时间戳是合法的毫秒值（落在 1970），
+    // 会被静默当成毫秒渲染成 1970 年（实测审批页时间显示缺陷）。
+    if (typeof raw === 'number' || (typeof raw === 'string' && /^\d+$/.test(raw.trim()))) {
+      var n = Number(raw);
+      ms = n > 1e11 ? n : n * 1000;
     }
+    var date = new Date(ms);
     return isNaN(date.getTime()) ? '' : date.toLocaleString('zh-CN', { hour12: false });
   }
 

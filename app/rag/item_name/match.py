@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 from app.rag.item_name.catalog import match_catalog_name
+from app.rag.item_name.catalog import find_similar_names, load_item_names
 from app.rag.item_name.config import (
     ITEM_NAME_CONFIRM_MARGIN,
     ITEM_NAME_CONFIRM_MIN_SCORE,
@@ -19,6 +20,46 @@ from app.shared.clients.milvus_gateway import milvus_gateway
 from app.shared.models import llm_providers
 from app.shared.runtime.logger import logger, step_log
 from app.shared.utils.text import is_same_entity, normalize_item_name
+
+# 相似兜底最多给几个选项（用点选而不是让用户重新组织语言）
+SIMILAR_OPTION_LIMIT = 3
+# 目录条目很少时（小知识库），直接把目录作为选项列出
+CATALOG_SUGGEST_MAX = 5
+
+
+def _similar_fallback(item_name: str, ranked: list[dict]) -> list[dict]:
+    """没到可选阈值时的相似主体兜底（目录相似 + 低分向量候选）。
+
+    事故背景：用户输入 ``hak180``（型号前缀）时，主体向量分只有 0.409，低于可选阈值 0.60，
+    旧实现直接丢弃候选、只回一句「请您明确主体再提问」；其实库里只有一个
+    ``Brother HAK 180 烫金机``，应当直接列出来让用户点选。
+    """
+    options: list[dict] = []
+    seen_keys: set[str] = set()
+
+    def _add(name: str, score: float | None, matched_by: str) -> None:
+        key = normalize_item_name(name)
+        if not key or key in seen_keys:
+            return
+        seen_keys.add(key)
+        options.append({"item_name": name, "score": score, "matched_by": matched_by})
+
+    for name, how in find_similar_names(item_name, limit=SIMILAR_OPTION_LIMIT):
+        _add(name, None, how)
+
+    for hit in ranked or []:
+        if len(options) >= SIMILAR_OPTION_LIMIT:
+            break
+        _add(str(hit.get("item_name") or ""), hit.get("score"), "vector_low_score")
+
+    # 小知识库：连相似都算不上时，直接把目录列出来，避免只给一句“请明确主体”
+    if not options:
+        catalog = load_item_names()
+        if 0 < len(catalog) <= CATALOG_SUGGEST_MAX:
+            for name in catalog:
+                _add(name, None, "catalog_all")
+
+    return options[:SIMILAR_OPTION_LIMIT]
 
 
 @step_log("search_by_item_names")
@@ -114,6 +155,7 @@ def select_item_names(milvus_result: dict[str, list[dict]]) -> dict[str, list]:
     """
     confirmed_list = []
     option_list = []
+    similar_list: list[dict] = []
 
     # 思路: item_name -> [{item_name:"向量数据库中的item_name",score:0.8},...]
     # 循环处理
@@ -137,6 +179,17 @@ def select_item_names(milvus_result: dict[str, list[dict]]) -> dict[str, list]:
             if hit:
                 confirmed_list.append({"item_name": hit[0], "score": None, "matched_by": hit[1]})
                 logger.info(f"模型识别item_name:{item_name},向量无命中但目录命中:{hit[0]},直接确认")
+            else:
+                # 零命中 + 目录未命中：同样要给用户可点选的相似主体，而不是直接丢弃
+                fallback = _similar_fallback(item_name, ranked)
+                if fallback:
+                    similar_list.extend(fallback)
+                    logger.info(
+                        f"模型识别item_name:{item_name},向量零命中,"
+                        f"给出相似主体供点选:{[h.get('item_name') for h in fallback]}"
+                    )
+                else:
+                    logger.info(f"模型识别item_name:{item_name},向量零命中且目录无相似主体")
             continue
 
         # 锚点主体：库内标准名（归一化精确同名 / 同一实体）优先于向量排名结果
@@ -184,12 +237,21 @@ def select_item_names(milvus_result: dict[str, list[dict]]) -> dict[str, list]:
                 f"但是有可选的:{','.join([str(hit.get('item_name')) for hit in option_hits[:2]])}")
             continue
 
-        # 4) 其余丢弃
+        # 4) 相似兜底：给不出确认/可选时，列出相似主体让用户点选（不再直接丢弃）
+        fallback = _similar_fallback(item_name, ranked)
+        if fallback:
+            similar_list.extend(fallback)
+            logger.info(
+                f"模型识别item_name:{item_name},未达阈值(分={anchor_score}),"
+                f"给出相似主体供点选:{[h.get('item_name') for h in fallback]}"
+            )
+            continue
         logger.info(f"模型识别item_name:{item_name},无任何候选(分={anchor_score},间距={margin}),丢弃")
 
     return {
         "confirmed_list": confirmed_list,
-        "option_list": option_list
+        "option_list": option_list,
+        "similar_list": similar_list,
     }
 
 

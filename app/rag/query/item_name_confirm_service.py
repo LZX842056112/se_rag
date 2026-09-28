@@ -42,14 +42,20 @@ def call_llm_item_name_and_rewritten(history_text: str, original_query: str) -> 
 
 @step_log("apply_item_name_result")
 def apply_item_name_result(state: QueryGraphState, list_dict: dict[str, list], rewritten_query: str) -> None:
-    """根据「确认列表 / 可选列表」改写 state 的 answer、item_names 与 rewritten_query。
+    """根据「确认 / 可选 / 相似」三类结果改写 state 的 answer、item_names 与选项。
 
     - 确认列表非空：正常进入多路召回（answer 置空）；
-    - 可选列表非空：写入候选主体与改写问题并回问用户（候选主体落库后，下一轮才能消解）；
-    - 均为空：提示用户补充主体后再提问，直接作答后结束本轮。
+    - 可选列表非空：写入候选主体与改写问题，并把候选作为**可点选选项**回给用户；
+    - 相似列表非空：没到阈值（如只输入型号前缀 ``hak180``）时列出相似主体供点选；
+    - 都没有：提示用户补充主体后再提问。
+
+    选项会放进 ``state["item_name_options"]``，由 API/SSE 透出、前端渲染成按钮，
+    用户点选即可直接以该主体重新提问——不再只回一句「请您明确主体再提问」。
     """
     confirmed_list = list_dict.get("confirmed_list", [])
     option_list = list_dict.get("option_list", [])
+    similar_list = list_dict.get("similar_list", [])
+    state["item_name_options"] = []
 
     if confirmed_list:
         state["item_names"] = [item.get("item_name") for item in confirmed_list]
@@ -58,11 +64,12 @@ def apply_item_name_result(state: QueryGraphState, list_dict: dict[str, list], r
             state["answer"] = None
         return
 
-    if option_list:
+    if option_list or similar_list:
+        candidates = option_list or similar_list
         # 候选主体与改写问题一并写入本轮 state：随消息落库后，用户下一轮回「是 X」时才能被消解。
         # 注意：路由只判 state["answer"] 是否为空，写入 item_names 不改变本轮回问的路由结果。
         candidate_names: list[str] = []
-        for item in option_list:
+        for item in candidates:
             name = item.get("item_name")
             if name and name not in candidate_names:
                 candidate_names.append(name)
@@ -70,10 +77,20 @@ def apply_item_name_result(state: QueryGraphState, list_dict: dict[str, list], r
             state["item_names"] = candidate_names
         if rewritten_query:
             state["rewritten_query"] = rewritten_query
-        state["answer"] = f"本次提问没有确认主体,但是有相似可选的: {','.join(candidate_names)},请您再次确认!"
+        state["item_name_options"] = candidates
+        if option_list:
+            state["answer"] = (
+                f"本次提问没有确认主体，但有相似可选的：{'、'.join(candidate_names)}。"
+                "请点击下方主体直接提问，或补充完整名称后继续。"
+            )
+        else:
+            state["answer"] = (
+                f"没有识别到明确的主体，以下可能是您要找的：{'、'.join(candidate_names)}。"
+                "请点击下方主体直接提问。"
+            )
         return
 
-    state["answer"] = "本次问题没有关联到任何主体,有没有相似可选的主体! 请您明确主体再提问!"
+    state["answer"] = "本次问题没有关联到任何主体，也没有找到相似主体。请补充产品名称后再提问。"
 
 
 @step_log("save_history_message")

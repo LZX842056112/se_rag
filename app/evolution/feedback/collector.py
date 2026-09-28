@@ -8,11 +8,10 @@ from app.evolution.models import FeedbackEvent
 from app.evolution.repositories import evolution_repo
 from app.shared.config import settings
 from app.shared.runtime.logger import logger
+from app.shared.utils.answer import is_no_answer
 
 # 幂等窗口：同一 session/query/thumbs/source 在该窗口内不重复落库，防信号放大
 _DEDUP_WINDOW_SECONDS = 30
-# 兜底话术：检索到证据但模型仍答不出，同样视为知识缺口
-_NO_ANSWER_MARKERS = ("未查询到该问题相关信息", "无法作答")
 
 
 def _emit(event: FeedbackEvent) -> None:
@@ -50,8 +49,7 @@ def flush_session_signals(state: dict[str, Any]) -> None:
         if not session_id:
             return
         signals = state.get("retrieval_signals") or {}
-        answer = state.get("answer") or ""
-        no_answer = any(marker in answer for marker in _NO_ANSWER_MARKERS)
+        no_answer = is_no_answer(state.get("answer"))
         if not (signals.get("zero_hit") or signals.get("no_retrieval") or no_answer):
             return
         _emit(FeedbackEvent(

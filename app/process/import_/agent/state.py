@@ -1,7 +1,5 @@
 import copy
-import json
 from typing import TypedDict
-from app.shared.runtime.logger import logger
 
 
 class ImportGraphState(TypedDict):
@@ -61,12 +59,3 @@ def create_default_state(**kwargs) -> ImportGraphState:
     # default_state 全局唯一对象! 多次更新,值进行共享!
     new_state.update(kwargs)
     return new_state
-
-
-if __name__ == "__main__":
-    state = create_default_state(task_id="007周星驰",local_file_path="xx/xxx/md.md")
-    # json json数据转换和备份
-    # json.dump  dumps = >  dict -> json   dump dict写到晚不的 .json格式的文件  dumps dict 转成 json字符串
-    #  不带s都是文件
-    # json.load  loads = >  json -> dict   load 加载外部的json文件 dict  loads 把json字符串转成 dict
-    logger.info("本次生成的state:\n{}", json.dumps(state,indent=4,ensure_ascii=False))

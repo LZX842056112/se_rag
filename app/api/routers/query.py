@@ -57,11 +57,13 @@ def query(background_tasks: BackgroundTasks, query_params: QueryRequestSchema):
         answer=state.get("answer"),
         done_list=get_done_task_list(session_id),
         image_urls=state.get("image_urls", []),
+        item_names=state.get("item_names", []),
         citations=state.get("citations") or build_citations(
             state.get("cited_chunk_ids"), state.get("faq_evo_ids")
         ),
         groundedness=state.get("groundedness", 0.0),
         retrieval_signals=state.get("retrieval_signals", {}),
+        item_name_options=state.get("item_name_options", []),
     )
 
 
