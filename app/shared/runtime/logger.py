@@ -1,49 +1,37 @@
 """
-项目日志工具类
-基于loguru实现，支持.env配置控制台/文件双输出，自动生成logs/app_年月日.log
+项目日志工具（基于 loguru）。
+
 特性：
-1. 配置驱动：通过.env开关输出、修改日志级别
-2. 自动路径：文件日志默认输出到 项目根/logs/app_YYYYMMDD.log
-3. 自动清理：按配置保留日志，自动删除过期文件
-4. 中文友好：utf-8编码，彻底解决中文乱码
-5. 异步安全：开启异步入队，支持多线程/异步场景，避免日志错乱
-6. 开箱即用：项目所有模块直接导入logger即可使用
-7. 位置终极精准：穿透loguru内部+工具类自身，完美显示业务模块实际调用位置
-
-
-    日志级别问题  debug info warning error exception
-    输出函数和动态参数  debug(f"{}"  ||  "{},{},{}",1,2,3)
-    日志配置文件   .env 控制台输出和级别 文件输出和级别 以及文件保存的事件
-    封装两个装饰器  node_log("节点名") -> langgraph -> 节点函数
-                  step_log("业务名") -> rag 业务函数 ->业务的具体步骤
-                  info   warning  error  exception
-
-
+1. 配置驱动：``LOG_*`` 环境变量控制控制台/文件输出与级别；
+2. 自动路径：文件日志默认输出到 ``项目根/logs/app_YYYYMMDD.log``，按天轮转并保留；
+3. 调用位置准确：穿透 loguru 内部帧与工具类自身帧，显示业务代码的真实位置；
+4. 低开销：位置修正使用 ``sys._getframe`` 逐层回溯，**不再**对每条日志执行
+   ``inspect.stack()``（后者会为整个调用栈解析源码行，是旧实现最主要的日志开销）；
+5. 两个装饰器：``node_log``（LangGraph 节点）、``step_log``（业务步骤，默认 DEBUG）。
 """
+from __future__ import annotations
+
 import sys
-import inspect
+import time
+from functools import wraps
 from pathlib import Path
-from loguru import logger
+from typing import Mapping
+
+from loguru import logger as _loguru_logger
 
 from app.shared.config.common import env_bool, env_str
+from app.shared.utils.paths import PROJECT_ROOT
 
-
-# -------------------------- 第一步：读取.env配置（.env 由 common 统一加载） --------------------------
 LOG_CONSOLE_ENABLE = env_bool("LOG_CONSOLE_ENABLE", True)
 LOG_CONSOLE_LEVEL = env_str("LOG_CONSOLE_LEVEL", "INFO").upper()
 LOG_FILE_ENABLE = env_bool("LOG_FILE_ENABLE", True)
 LOG_FILE_LEVEL = env_str("LOG_FILE_LEVEL", "INFO").upper()
 LOG_FILE_RETENTION = env_str("LOG_FILE_RETENTION", "7 days")
 
-# -------------------------- 第三步：定义日志路径（自动推导项目根） --------------------------
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
-# == parents [runtime,shared,app,项目]
-#PROJECT_ROOT = Path(__file__).resolve().parents[3]
 LOG_DIR = PROJECT_ROOT / "logs"
 LOG_FILE_NAME = "app_{time:YYYYMMDD}.log"
 LOG_FILE_PATH = LOG_DIR / LOG_FILE_NAME
 
-# -------------------------- 第四步：定义日志格式（彩色、结构化、易读） --------------------------
 LOG_FORMAT = (
     "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
     "<level>{level: <8}</level> | "
@@ -51,33 +39,26 @@ LOG_FORMAT = (
     "<level>{message}</level>"
 )
 
-# -------------------------- 第五步：初始化日志配置（核心方法） --------------------------
-def init_logger():
-    """
-    初始化全局日志配置
-    1. 移除loguru默认控制台输出（避免重复打印）
-    2. 根据.env配置开启/关闭控制台输出
-    3. 根据.env配置开启/关闭文件输出（自动创建logs文件夹）
-    4. 配置日志格式、级别、分割、保留策略
-    :return: 配置完成的loguru logger实例
-    """
-    # 1. 移除loguru默认的控制台输出
-    logger.remove()
+# 位置修正时需要跳过的框架文件（loguru 内部与工具类自身）
+_INTERNAL_FILE_MARKERS = ("_logger.py", "logger.py")
 
-    # 2. 配置控制台输出（若.env开启）
+
+def init_logger():
+    """初始化全局日志配置：控制台 + 文件双通道，按 .env 开关与级别生效。"""
+    _loguru_logger.remove()
+
     if LOG_CONSOLE_ENABLE:
-        logger.add(
+        _loguru_logger.add(
             sink=sys.stdout,
             level=LOG_CONSOLE_LEVEL,
             format=LOG_FORMAT,
             colorize=True,
-            enqueue=True
+            enqueue=True,
         )
 
-    # 3. 配置文件输出（若.env开启）
     if LOG_FILE_ENABLE:
         LOG_DIR.mkdir(parents=True, exist_ok=True)
-        logger.add(
+        _loguru_logger.add(
             sink=LOG_FILE_PATH,
             level=LOG_FILE_LEVEL,
             format=LOG_FORMAT,
@@ -86,42 +67,43 @@ def init_logger():
             encoding="utf-8",
             enqueue=True,
             backtrace=True,
-            diagnose=True
+            diagnose=True,
         )
-
-    return logger
-
-# -------------------------- 第六步：初始化并终极修正全局logger --------------------------
-base_logger = init_logger()
-
-def fix_log_position(record):
-    """遍历调用栈，跳过loguru内部帧+工具类自身帧，提取业务代码实际调用位置"""
-    for frame in inspect.stack():
-        # 终极过滤：排除loguru内部 + 排除工具类logger.py自身，直接定位业务模块
-        if ("_logger.py" in frame.filename or frame.function == "_log") or "logger.py" in frame.filename:
-            continue
-        # 更新日志字段为业务代码实际位置
-        record.update(
-            name=frame.filename.split("/")[-1].split("\\")[-1],
-            function=frame.function,
-            line=frame.lineno
-        )
-        break
-
-# 应用终极修复，导出全局可用的logger
-logger = base_logger.patch(fix_log_position)
+    return _loguru_logger
 
 
-from functools import wraps
-import time
-from typing import Mapping
+def _fix_log_position(record) -> None:
+    """把日志位置改写为业务代码的真实调用点。
+
+    使用 ``sys._getframe`` 逐层回溯（纯指针跳转，成本极低），跳过 loguru 内部帧与本
+    工具类自身的帧；旧实现使用 ``inspect.stack()`` 会遍历并解析整条调用栈，是热路径
+    中最主要的开销来源。
+    """
+    frame = sys._getframe(1)
+    while frame is not None:
+        filename = frame.f_code.co_filename
+        if frame.f_code.co_name != "_log" and not any(m in filename for m in _INTERNAL_FILE_MARKERS):
+            record.update(
+                name=Path(filename).name,
+                function=frame.f_code.co_name,
+                line=frame.f_lineno,
+            )
+            return
+        frame = frame.f_back
+
+
+logger = init_logger().patch(_fix_log_position)
+
 
 def _trace_id(state) -> str:
+    """从 state 中取追踪 ID（查询用 session_id，导入用 task_id）。"""
     if isinstance(state, Mapping):
         return str(state.get("session_id") or state.get("task_id") or "-")
     return "-"
 
+
 def node_log(node_name: str):
+    """节点日志装饰器：记录 LangGraph 节点的开始、耗时与异常堆栈。"""
     def deco(func):
         @wraps(func)
         def wrapper(state, *args, **kwargs):
@@ -130,60 +112,33 @@ def node_log(node_name: str):
             logger.info(f"[{node_name}] 节点开始，追踪ID={trace_id}")
             try:
                 result = func(state, *args, **kwargs)
-                cost_ms = int((time.time() - start_ts) * 1000)
-                logger.info(f"[{node_name}] 节点完成，追踪ID={trace_id}，耗时={cost_ms}ms")
-                return result
             except Exception:
                 logger.exception(f"[{node_name}] 节点异常，追踪ID={trace_id}")
                 raise
+            cost_ms = int((time.time() - start_ts) * 1000)
+            logger.info(f"[{node_name}] 节点完成，追踪ID={trace_id}，耗时={cost_ms}ms")
+            return result
         return wrapper
     return deco
 
+
 def step_log(step_name: str):
-    """
-    步骤日志装饰器：
-    - 自动打印 步骤开始 / 步骤完成 / 步骤异常（含堆栈）
-    - 不吞异常，保持原有业务语义
+    """业务步骤日志装饰器（DEBUG 级，避免每步两行 INFO 刷屏）。
+
+    异常仍以 exception 级别记录完整堆栈，不吞异常。
     """
     def deco(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
             start_ts = time.time()
-            logger.info(f"[{step_name}] 步骤开始")
+            logger.debug(f"[{step_name}] 步骤开始")
             try:
                 result = func(*args, **kwargs)
-                cost_ms = int((time.time() - start_ts) * 1000)
-                logger.info(f"[{step_name}] 步骤完成，耗时={cost_ms}ms")
-                return result
             except Exception:
                 logger.exception(f"[{step_name}] 步骤异常")
                 raise
+            cost_ms = int((time.time() - start_ts) * 1000)
+            logger.debug(f"[{step_name}] 步骤完成，耗时={cost_ms}ms")
+            return result
         return wrapper
     return deco
-
-# -------------------------- 测试代码（验证修复效果） --------------------------
-if __name__ == '__main__':
-    # 【debug】开发调试用，记录细节、变量，上线一般关闭
-    logger.debug("【调试】进入主程序入口，开始初始化日志")
-    name = "二大爷"
-    name1 = "三大爷"
-    logger.debug(f"我最喜欢的就是我的:{name}【调试】进入主程序入口，开始初始化日志")
-    logger.debug("我最喜欢的就是我的{} 还有{} 【调试】进入主程序入口，开始初始化日志",name,name1)
-
-    # 【info】正常流程日志，记录程序运行状态
-    logger.info("【信息】logger.py内部调用（仅测试，业务模块调用会显示正确文件名）")
-
-    print(f"日志文件输出路径：{LOG_FILE_PATH}")
-
-    # 【warning】警告，不影响运行，但需要关注
-    logger.warning("【警告】未读取到自定义配置，使用默认配置")
-
-    # 【error】当前功能出错，程序不会崩溃，但业务失败
-    logger.error("【错误】logger.py内部调用（仅测试，业务模块调用会显示正确文件名）")
-
-    # 【exception】必须在except里，自动打印完整异常堆栈（定位bug用）
-    try:
-        result = 10 / 0
-        logger.info(f"【信息】业务计算结果：{result}")
-    except Exception:
-        logger.exception("【异常】捕获到业务异常，输出完整堆栈信息")

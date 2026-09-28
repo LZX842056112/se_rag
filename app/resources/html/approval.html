@@ -1,31 +1,15 @@
-<!-- 自进化候选审批后台页面：查询 /evolution/candidates，支持按状态筛选、审批通过/驳回/编辑。 -->
+<!-- 自进化候选审批后台页面：查询 /api/evolution/candidates，支持按状态筛选、审批通过/驳回/编辑。 -->
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1.0" />
   <title>自进化候选审批 · 掌柜智库</title>
+  <link rel="stylesheet" href="/static/app.css" />
   <style>
-    :root{
-      --bg:#f3f5f7;
-      --panel:#ffffff;
-      --text:#1f2d3d;
-      --muted:#7a869a;
-      --brand:#1aa7ff;
-      --brand2:#5b7cfa;
-      --danger:#e5484d;
-      --ok:#22a15f;
-      --border:#e6e9ef;
-      --shadow:0 10px 30px rgba(31,45,61,.10);
-    }
-    *{box-sizing:border-box}
+    /* 本页布局：审批列表卡片（视觉基础样式见 /static/app.css） */
     body{
       margin:0;
-      font-family:"Segoe UI","Microsoft YaHei",system-ui,-apple-system,Arial,sans-serif;
-      background: radial-gradient(1200px 600px at 20% 0%, rgba(26,167,255,.15), transparent 60%),
-                  radial-gradient(1000px 500px at 90% 10%, rgba(91,124,250,.15), transparent 55%),
-                  var(--bg);
-      color:var(--text);
       min-height:100vh;
       padding:24px;
     }
@@ -51,16 +35,7 @@
     .title strong{font-size:15px;display:block;line-height:1.2}
     .title span{font-size:12px;color:var(--muted)}
     .filters{margin-left:auto;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-    select{
-      border:1px solid var(--border);border-radius:9px;
-      padding:8px 10px;font-size:13px;background:#fff;color:var(--text);outline:none;
-    }
     .count{font-size:12px;color:var(--muted)}
-    .btn{
-      border:none;border-radius:9px;padding:9px 14px;font-size:13px;cursor:pointer;
-      background:linear-gradient(135deg,var(--brand),var(--brand2));color:#fff;
-    }
-    .btn:disabled{opacity:.55;cursor:not-allowed}
     .card{
       background:var(--panel);border:1px solid var(--border);border-radius:14px;
       padding:16px 18px;margin-top:14px;box-shadow:0 6px 18px rgba(31,45,61,.06);
@@ -84,11 +59,7 @@
     .q{font-size:15px;font-weight:600;margin:10px 0 4px}
     .a{font-size:13px;color:#3b4a5a;line-height:1.55;white-space:pre-wrap;background:rgba(91,124,250,.05);border-left:3px solid rgba(91,124,250,.35);padding:8px 12px;border-radius:0 8px 8px 0}
     .chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
-    .chip{font-size:11px;color:var(--muted);background:rgba(122,134,154,.10);border:1px solid var(--border);padding:3px 8px;border-radius:99px}
     .ops{margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-    .ops .btn.good{background:var(--ok)}
-    .ops .btn.bad{background:var(--danger)}
-    .ops .btn.plain{background:#eef2f7;color:var(--text)}
     .edit-box{margin-top:12px;border-top:1px dashed var(--border);padding-top:12px}
     .edit-box label{display:block;font-size:12px;color:var(--muted);margin:6px 0 4px}
     .edit-box textarea{
@@ -96,13 +67,6 @@
       font-size:13px;line-height:1.5;resize:vertical;font-family:inherit;outline:none;
     }
     .edit-box textarea:focus{border-color:rgba(26,167,255,.6);box-shadow:0 0 0 3px rgba(26,167,255,.12)}
-    .empty{text-align:center;color:var(--muted);padding:40px 0;font-size:13px}
-    .toast{
-      position:fixed;left:50%;bottom:28px;transform:translateX(-50%);
-      background:#1f2d3d;color:#fff;font-size:13px;padding:10px 16px;border-radius:10px;
-      box-shadow:var(--shadow);opacity:0;transition:opacity .2s;pointer-events:none;max-width:80%;
-    }
-    .toast.show{opacity:1}
     .tok{
       display:flex;align-items:center;gap:6px;
       font-size:12px;color:var(--muted);
@@ -145,60 +109,36 @@
     </div>
     <div class="greet">说明：待审候选（draft）可「通过」（写入知识库并置为 active）、「驳回」（置为 rejected）或先「编辑」内容再审批。强缺口 candidate 经生成器会自动转 draft。</div>
     <div id="list"></div>
-    <div id="toast" class="toast"></div>
   </div>
 
-  <script src="/js/common.js"></script>
+  <script src="/static/app.js"></script>
   <script>
-    // 本页保留 esc/toast/fmtTs 页内实现（语义与 common.js 不同），仅 API_BASE 走公共库
-    const API_BASE = resolveApiBase(8001);
+    App.configure({ fallbackPort: 8001 });
     const listEl = document.getElementById('list');
     const countEl = document.getElementById('count');
     const filterEl = document.getElementById('statusFilter');
-    const toastEl = document.getElementById('toast');
     const tokenEl = document.getElementById('adminToken');
 
-    // 审批写操作令牌：仅当前会话有效（sessionStorage），输入时即时持久化
-    let adminToken = sessionStorage.getItem('evo_admin_token') || '';
+    // 审批写操作令牌：仅当前标签页会话有效（sessionStorage），输入时即时持久化
+    let adminToken = App.getAdminToken();
     if(tokenEl){
       tokenEl.value = adminToken;
       tokenEl.addEventListener('input', () => {
         adminToken = tokenEl.value.trim();
-        try{ sessionStorage.setItem('evo_admin_token', adminToken); }catch(_){}
+        App.setAdminToken(adminToken);
       });
     }
 
-    let timer = null;
-    function toast(msg){
-      toastEl.textContent = msg;
-      toastEl.classList.add('show');
-      if(timer) clearTimeout(timer);
-      timer = setTimeout(() => toastEl.classList.remove('show'), 2200);
-    }
-    function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;'); }
+    // 页面内短名，统一指向公共库实现
+    const toast = App.toast;
+    const esc = App.escapeHtml;
     function shortId(id){ return String(id||'').slice(0,8); }
-    function fmtTs(ts){
-      if(ts == null) return '';
-      let d = new Date(ts);
-      if(isNaN(d.getTime())){
-        if(ts && ts.$date != null){ d = new Date(ts.$date); }
-        else if(typeof ts === 'number'){ d = new Date(ts > 1e11 ? ts : ts*1000); }
-      }
-      return isNaN(d.getTime()) ? '' : d.toLocaleString('zh-CN',{hour12:false});
-    }
+    const fmtTs = App.formatDateTime;
     const ST_LABEL = {draft:'待审批', candidate:'强缺口', pending:'弱缺口', active:'已入库', rejected:'已驳回', hold:'观察中', removed:'已下架'};
 
     async function api(url, opts){
-      const o = opts || {};
-      // 写操作(GET 也会带，无副作用)，携带 X-Internal-Token 通过审批鉴权
-      const headers = Object.assign({}, o.headers || {}, adminToken ? {'X-Internal-Token': adminToken} : {});
-      const res = await fetch(API_BASE + url, Object.assign({}, o, {headers}));
-      let body = null;
-      try{ body = await res.json(); }catch(_){}
-      if(!res.ok){
-        throw new Error((body && (body.detail || body.message)) || ('HTTP ' + res.status));
-      }
-      return body;
+      // 公共库会自动携带 X-Internal-Token（读取自 sessionStorage）并统一解析错误
+      return await App.fetchJson(url, opts || {});
     }
 
     function beginEdit(item, card){
@@ -219,7 +159,7 @@
         const a = box.querySelector('[data-k=a]').value.trim();
         if(!q && !a){ toast('无改动'); return; }
         try{
-          await api('/evolution/candidates/' + item.id + '/edit', {
+          await api(App.PATHS.candidateAction(item.id, 'edit'), {
             method:'POST', headers:{'Content-Type':'application/json'},
             body: JSON.stringify({faq_question:q || null, faq_answer:a || null})
           });
@@ -277,7 +217,7 @@
           actBtn('✔ 通过', 'good', async (b) => {
             b.disabled = true;
             try{
-              await api('/evolution/candidates/' + it.id + '/approve', {
+              await api(App.PATHS.candidateAction(it.id, 'approve'), {
                 method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({reason:''})
               });
               toast('已审批通过并入知识库');
@@ -285,10 +225,10 @@
             }catch(e){ b.disabled = false; toast('通过失败：' + e.message); }
           });
           actBtn('✕ 驳回', 'bad', async (b) => {
-            if(!confirm('确认驳回该候选？')) return;
+            if(!(await App.confirm('确认驳回该候选？', { confirmText: '确认驳回', danger: true }))) return;
             b.disabled = true;
             try{
-              await api('/evolution/candidates/' + it.id + '/reject', {
+              await api(App.PATHS.candidateAction(it.id, 'reject'), {
                 method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({reason:''})
               });
               toast('已驳回');
@@ -311,7 +251,7 @@
       const status = filterEl.value || undefined;
       const qs = status ? ('?status=' + encodeURIComponent(status)) : '';
       try{
-        const data = await api('/evolution/candidates' + qs);
+        const data = await api(App.PATHS.candidates + qs);
         render(Array.isArray(data.items) ? data.items : []);
       }catch(e){
         listEl.innerHTML = '<div class="empty">加载失败：' + esc(e.message) + '</div>';

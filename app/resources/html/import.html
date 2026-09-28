@@ -5,10 +5,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>文件导入服务</title>
+    <link rel="stylesheet" href="/static/app.css">
     <style>
+        /* 本页布局：上传面板与任务列表（视觉基础样式见 /static/app.css） */
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: #f5f7fa;
             margin: 0;
             padding: 20px;
             display: flex;
@@ -46,23 +46,6 @@
         }
         .file-input {
             display: none;
-        }
-        .btn {
-            background-color: #3498db;
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 16px;
-            transition: background-color 0.3s;
-        }
-        .btn:hover {
-            background-color: #2980b9;
-        }
-        .btn:disabled {
-            background-color: #bdc3c7;
-            cursor: not-allowed;
         }
         .file-list {
             margin-top: 30px;
@@ -160,14 +143,14 @@
     </div>
 </div>
 
-<script src="/js/common.js"></script>
+<script src="/static/app.js"></script>
 <script>
     const dropZone = document.getElementById('dropZone');
     const fileInput = document.getElementById('fileInput');
     const fileList = document.getElementById('fileList');
-    
+
     // 默认走导入服务同源地址；如你把页面单独打开（file://），回退到导入服务默认端口。
-    const API_BASE = resolveApiBase(8000);
+    App.configure({ fallbackPort: 8000 });
 
     dropZone.addEventListener('dragover', (e) => {
         e.preventDefault();
@@ -212,16 +195,6 @@
         }
     }
 
-    // 兼容后端 detail 为 string / FastAPI 422 数组 / 对象三种形态
-    function detailText(detail) {
-        if (!detail) return '';
-        if (typeof detail === 'string') return detail;
-        if (Array.isArray(detail)) {
-            return detail.map(d => (d && (d.msg || d.message)) || JSON.stringify(d)).join('；');
-        }
-        return JSON.stringify(detail);
-    }
-
     async function uploadFile(file) {
         // 创建文件项UI
         const id = 'file-' + Math.random().toString(36).substr(2, 9);
@@ -258,21 +231,10 @@
             // 1. 上传文件
             progressContainer.style.display = 'block';
 
-            const response = await fetch(`${API_BASE}/upload`, {
+            const result = await App.fetchJson(App.PATHS.upload, {
                 method: 'POST',
                 body: formData
             });
-
-            if (!response.ok) {
-                let detail = '';
-                try {
-                    const body = await response.json();
-                    detail = detailText(body && (body.detail || body.message));
-                } catch (_) {}
-                throw new Error(detail || ('HTTP ' + response.status));
-            }
-            
-            const result = await response.json();
             const ids = Array.isArray(result.task_ids) ? result.task_ids : [];
             if (!ids.length) throw new Error('no task id');
             const taskId = ids[0];
@@ -285,7 +247,8 @@
             pollStatus(taskId, itemEl);
 
         } catch (error) {
-            console.error(error);
+            // 业务拒绝（如 422 仅支持 md/pdf）属预期路径，用 warn 避免污染错误监控
+            console.warn(error);
             statusBadge.textContent = '失败';
             statusBadge.className = 'status-badge status-error';
             // 将失败原因写入日志区并展开，便于用户自助排查
@@ -360,8 +323,7 @@
 
         const interval = setInterval(async () => {
             try {
-                const res = await fetch(`${API_BASE}/status/${taskId}`);
-                const data = await res.json();
+                const data = await App.fetchJson(App.PATHS.taskStatus(taskId));
 
                 // 渲染日志（done/running）
                 renderLogs(itemEl, data.done_list, data.running_list);

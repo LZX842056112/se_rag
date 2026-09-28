@@ -1,204 +1,53 @@
-# 导入服务文件 导入接口文件
+"""导入服务入口（文件上传与导入状态查询）。
+
+启动：
+    uvicorn app.api.http.import_server:app --host 0.0.0.0 --port 8000
+    python -m app.api.http.import_server
 """
-导入服务 HTTP 入口模块，直接承载导入接口与相关接口业务逻辑。
-"""
-import shutil
-import sys
-import uuid
-from datetime import datetime
-from mimetypes import guess_type
-from pathlib import Path
+from __future__ import annotations
 
-from app.api.schema.import_schema import UploadResponseSchema, StatusResponseSchema
-from app.shared.runtime.logger import logger,PROJECT_ROOT
+from contextlib import asynccontextmanager
 
-from app.process.import_.agent.main_graph import import_app
-
-from fastapi import BackgroundTasks, FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
 
-from app.infra.config.providers import infra_config
+from app.api.errors import install_error_handlers
+from app.api.routers import import_ as import_router
+from app.api.routers import health as health_router
+from app.api.routers import pages as pages_router
+from app.shared.clients.mongo import ensure_indexes
+from app.shared.config import settings
 
 
-from app.process.import_.agent.state import create_default_state, ImportGraphState
-from app.shared.utils.task_utils import (
-    TASK_STATUS_COMPLETED,
-    TASK_STATUS_FAILED,
-    TASK_STATUS_PROCESSING,
-    get_done_task_list,
-    get_running_task_list,
-    get_task_status,
-    update_task_status, add_running_task, add_done_task,
-)
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """服务生命周期：启动时确保 Mongo 索引就绪（失败只告警）。"""
+    ensure_indexes()
+    yield
+
 
 app = FastAPI(
-    title=infra_config.settings.import_app_name,
-    description="企业化 RAG 导入服务，负责文件上传、导入执行与状态查询。",
-    version="0.2.0",
+    title=settings.api.import_app_name,
+    description="企业化 RAG 导入服务：文件上传、导入执行与状态查询。",
+    version="0.3.0",
+    lifespan=lifespan,
 )
 
-# CORS跨域
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=list(infra_config.settings.cors_origins) or ["*"],
+    allow_origins=list(settings.api.cors_origins) or ["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
+install_error_handlers(app)
 
-# 接口1: 返回html文件
-@app.get("/import/html")
-def import_html():
-
-    html_path_obj:Path = PROJECT_ROOT / "app" / "resources" / "html" / "import.html"
-
-    return FileResponse(
-        path = str(html_path_obj),
-        media_type=guess_type(
-            html_path_obj.name
-        )[0]
-    )
-
-# 共用前端 JS：import 页面 <script src="/js/common.js"> 使用
-@app.get("/js/common.js")
-def common_js():
-    js_obj: Path = PROJECT_ROOT / "app" / "resources" / "js" / "common.js"
-    return FileResponse(
-        path=str(js_obj),
-        media_type="text/javascript"
-    )
-
-
-def invoke_import_graph(task_id:str,local_file_path:str,local_dir:str):
-
-    # 执行必须要state -> 必须要三个参数  task_id / local_file_path  / local_dir
-    try:
-        # processing
-        update_task_status(task_id,status_name=TASK_STATUS_PROCESSING)
-        state:ImportGraphState = create_default_state(
-            task_id=task_id,local_file_path=local_file_path,local_dir=local_dir
-         )
-        # LangGraph invoke 返回的是新的 final state，原地 state 不会同步图上写回的字段
-        final_state = import_app.invoke(state)
-        # 防御：图对不支持的文档类型会静默走到 END，这里显式校验是否真的完成了解析。
-        # 只有填入了 md_path 或 pdf_path 才算真正处理过该文件，否则视为“类型不支持已失败”。
-        if not (final_state.get("md_path") or final_state.get("pdf_path")):
-            update_task_status(task_id,status_name=TASK_STATUS_FAILED)
-            logger.warning(f"导入任务[{task_id}]中止: 文件类型不支持(md/pdf以外)，已标记失败")
-            return
-        # completed
-        update_task_status(task_id,status_name=TASK_STATUS_COMPLETED)
-    except Exception as e:
-        # failed
-        update_task_status(task_id,status_name=TASK_STATUS_FAILED)
-        logger.exception(f"导入模块执行发生异常!异常信息:{str(e)}")
-
-
-# 接口2: 导入文件
-# 异步接口
-# 前端 -> 文件 -> 接口 -> langgraph解析 (很久) -> 前端返回结果
-@app.post("/upload")
-def uploads(backgroundtasks:BackgroundTasks,files:list[UploadFile]):
-    """
-    本质: 异步调用图对象,解析本次上传的文件
-         backgroundtasks.add_task(函数,参数)
-
-    1. 先定一个一个执行graph的函数 (task_id,local_file_path,local_dir)
-    2. 凑齐参数 task_id,local_file_path,local_dir
-    3. 异步调用 执行graph的函数 并传递参数
-    4. 返回前端数据
-
-    :param backgroundtasks:
-    :param files:
-    :return:
-    """
-    # 1. 凑齐参数 task_id,local_file_path,local_dir
-    # task_id [每个文件的任务标识,解析的时候,使用task_id作为key存储当前文件的解析状态! 前端也会使用task_id查询对应的状态]
-    # 生成task_id(唯一不重复)  返回task_id即可
-    # uuid -> 时区 / 时间戳 / ip地址 / mac地址
-    if not files:
-        raise HTTPException(status_code=422, detail="no files uploaded")
-    task_id = str(uuid.uuid4())
-    # local_dir ->  项目根路径 / output / 20260626 / task_id
-    time_now_str =  datetime.now().strftime("%Y%m%d")
-    local_dir_obj:Path = PROJECT_ROOT / "output" / time_now_str / task_id
-    local_dir_obj.mkdir(parents=True,exist_ok=True)
-    # files[0] -> file (hk180烫金机使用手册.pdf) -> 运行内存 -> 存储 -> local_dir_obj . file.filename
-    upload_file = files[0]
-    raw_name = upload_file.filename or ""
-    safe_name = Path(raw_name).name  # 仅取 basename，防路径穿越
-    if not safe_name or safe_name in (".", ".."):
-        raise HTTPException(status_code=422, detail="invalid filename")
-    # 类型校验：仅支持 md / pdf，其余直接在入口拒绝并给出明确提示，避免静默“已完成”却未入库
-    if Path(safe_name).suffix.lower() not in (".md", ".pdf"):
-        raise HTTPException(status_code=422, detail="仅支持 md / pdf 格式文件")
-    local_file_path_obj:Path =  local_dir_obj / safe_name
-
-    # 2.上传文件存储到地址存储文件 [后续就可以读取和解析]
-    add_running_task(task_id,"upload_file")
-    # 优化: 一次读取全部
-    # local_file_path_obj.write_bytes(upload_file.read())
-    # 思路: 每次部分读取
-    with local_file_path_obj.open("wb") as file_buffer:
-        # copyfileobj 好处：
-        # 参数1: 上传文件(数据)
-        # 参数2: 要写入的文件引用
-        # 循环读取 !  window默认是 1mb 1024 * 1024  非window 64kb
-        # 指定每次 10 MB = length = 1 * 1025 kb * 1024 mb * 10
-        shutil.copyfileobj(upload_file.file, file_buffer)
-
-    add_done_task(task_id, "upload_file")
-
-    # 3.异步执行
-    backgroundtasks.add_task(
-        invoke_import_graph,
-        task_id=task_id,
-        local_file_path = str(local_file_path_obj),
-        local_dir = str(local_dir_obj)
-    )
-
-    return UploadResponseSchema(
-        code=200,
-        message=f"{upload_file.filename}文件上传成功!",
-        task_ids=[task_id]
-    )
-
-
-# 接口3: 获取请求状态
-@app.get("/status/{task_id}")
-def task_status(task_id:str):
-
-    # done_list running_list
-    # 每次调用的时候,先存储!
-    # task_utils . add_running / done _task (task_id , 节点名)
-    # _tasks_running_list : dict [str,list]  =  task_id -> list -> list.append -> 节点名
-    # _tasks_done_list :dict [str,list] =  task_id -> list -> list.append -> 节点名
-    # _tasks_running_list = {001: [node_entry,node_pdf_to_md]}
-    # _tasks_running_list = {002: [node_entry,node_pdf_to_md]}
-    # _tasks_running_list = {003: [node_entry,node_pdf_to_md]}
-    # task_utils
-    # 每次解析任务内部的节点的调用状态
-    # task_utils 1. 定义了存储数据的字典 2.定义了存储数据方法 3. 定义获取数据方法
-    done_list = get_done_task_list(task_id)
-    running_list = get_running_task_list(task_id)
-    # status 这个任务的总状态
-    # update_task_status(task_id,status) -> 执行图对象
-    # get_task_status
-    status = get_task_status(task_id)
-
-    return StatusResponseSchema(
-        code=200,
-        task_id=task_id,
-        status=status,
-        done_list=done_list,
-        running_list=running_list
-    )
+app.include_router(import_router.router)
+app.include_router(health_router.router)
+app.include_router(pages_router.import_pages_router)
+app.include_router(pages_router.static_router)
 
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host=infra_config.settings.app_host, port=infra_config.settings.import_app_port)
 
-
-
-
+    uvicorn.run(app, host=settings.api.host, port=settings.api.import_port)

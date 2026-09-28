@@ -7,13 +7,7 @@
 """
 from __future__ import annotations
 
-from app.infra.llm.providers import llm_providers
-from app.infra.vector_store.milvus_gateway import milvus_gateway
-from app.rag.item_name.catalog import (
-    is_same_entity,
-    match_catalog_name,
-    normalize_item_name,
-)
+from app.rag.item_name.catalog import match_catalog_name
 from app.rag.item_name.config import (
     ITEM_NAME_CONFIRM_MARGIN,
     ITEM_NAME_CONFIRM_MIN_SCORE,
@@ -21,7 +15,10 @@ from app.rag.item_name.config import (
     ITEM_NAME_OPTION_MIN_SCORE,
     ITEM_NAME_SEARCH_LIMIT,
 )
+from app.shared.clients.milvus_gateway import milvus_gateway
+from app.shared.models import llm_providers
 from app.shared.runtime.logger import logger, step_log
+from app.shared.utils.text import is_same_entity, normalize_item_name
 
 
 @step_log("search_by_item_names")

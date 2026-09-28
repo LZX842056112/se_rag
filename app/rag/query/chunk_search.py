@@ -1,15 +1,19 @@
-"""
-知识库分块检索公共模块。
+"""知识库分块检索公共模块。
 
-供「直接向量检索」(embedding_search_service) 与「HyDE 假设性文档检索」
-(hyde_search_service) 复用，消除两处逐行重复的校验 / 检索 / 格式化逻辑。
+供「直接向量检索」(``embedding_search_service``) 与「HyDE 假设性文档检索」
+(``hyde_search_service``) 复用，消除两处重复的校验 / 检索 / 格式化逻辑。
+
+性能要点：``search_chunks`` 允许传入已算好的向量（``embedding``），使同一次提问的
+多路检索（知识库 / 自进化条目）只做一次向量化，而不是各算一次。
 """
-from app.process.query.agent.state import QueryGraphState
-from app.shared.runtime.logger import logger
-from app.infra.llm.providers import llm_providers
-from app.infra.vector_store.milvus_gateway import milvus_gateway
-from app.rag.query.config import CHUNK_DENSE_METRIC
+from __future__ import annotations
+
 from app.rag.item_name.catalog import expand_item_names
+from app.rag.query.config import CHUNK_DENSE_METRIC
+from app.shared.clients.milvus_gateway import in_expr, milvus_gateway
+from app.shared.models import llm_providers
+from app.shared.runtime.logger import logger
+from app.shared.utils.require import require_state_list, require_state_str
 
 # 检索输出字段（chunk 业务字段）
 CHUNK_OUTPUT_FIELDS = [
@@ -22,55 +26,67 @@ CHUNK_OUTPUT_FIELDS = [
     "content",
 ]
 
+# 每路召回候选数与最终返回条数
+SEARCH_CANDIDATE_LIMIT = 10
+SEARCH_TOP_K = 5
 
-def require_query_and_items(state: QueryGraphState) -> tuple[list[str], str]:
-    """校验并取出 item_names / rewritten_query，任一为空即提前终止。"""
-    item_names = state.get("item_names", [])
-    rewritten_query = state.get("rewritten_query")
-    if len(item_names) == 0 or not rewritten_query:
-        logger.error("关联的主体或者重写的问题为空,业务无法继续,提前终止!")
-        raise ValueError("关联的主体或者重写的问题为空,业务无法继续,提前终止!")
+
+def require_query_and_items(state) -> tuple[list[str], str]:
+    """校验并取出 ``item_names`` / ``rewritten_query``，任一为空即提前终止。"""
+    item_names = require_state_list(state, "item_names")
+    rewritten_query = require_state_str(state, "rewritten_query")
     return item_names, rewritten_query
 
 
-def search_chunks(item_names: list[str], query_text: str) -> list:
-    """
-    对 query_text 做 BGE-M3 混合检索（稠密+稀疏），返回 Milvus 原始命中列表。
+def search_chunks(
+    item_names: list[str],
+    query_text: str,
+    *,
+    embedding: dict[str, list] | None = None,
+    limit: int = SEARCH_TOP_K,
+    collection_name: str | None = None,
+    output_fields: list[str] | None = None,
+    dense_metric: str = CHUNK_DENSE_METRIC,
+) -> list:
+    """对 ``query_text`` 做 BGE-M3 混合检索（稠密+稀疏），返回 Milvus 原始命中列表。
 
-    item_names 为空时不加主体过滤，供自进化缺口上下文等全库轻量检索复用。
-    非空时会先扩展为"同一实体的全部写法"，避免同一产品因多次导入留下近重复主体名
-    时，只按其中一种写法过滤而漏掉另一种写法下的分片。
+    :param item_names: 主体过滤名单；为空时不加主体过滤（供自进化缺口上下文等复用）
+    :param embedding: 已算好的单条向量；为空时内部自行向量化
+    :param collection_name: 目标集合；默认知识库分块集合
     """
-    # 1. query_text 向量化
-    result = llm_providers.generate_embeddings([query_text])
-    # 2. 主体过滤名单：扩展为同一实体的全部写法
+    # 1. 向量化（复用调用方传入的向量，避免同一次提问重复编码）
+    vectors = embedding or llm_providers.embed_text(query_text)
+
+    # 2. 主体过滤名单：扩展为同一实体的全部写法，避免近重复主体名导致漏召回
     filter_names = expand_item_names(item_names) if item_names else []
-    # 3. 组装混合检索请求。dense 的 metric_type 必须与 kb_chunks 实际索引一致（HNSW/COSINE），
-    #    否则 Milvus 报 "metric type not match"、检索静默失败（网关返回 None）-> 召回为空
+    expr = in_expr("item_name", filter_names) if filter_names else None
+
+    # 3. 组装混合检索请求。dense 的 metric_type 必须与目标集合实际索引一致，
+    #    否则 Milvus 报 "metric type not match"、网关静默返回 None -> 召回为空
     reqs = milvus_gateway.create_requests(
-        dense_vector=result["dense"][0],
-        sparse_vector=result["sparse"][0],
-        dense_params={"metric_type": CHUNK_DENSE_METRIC},
-        expr=f"item_name in {filter_names}" if filter_names else None,
-        limit=5 * 2,
+        dense_vector=vectors["dense"][0],
+        sparse_vector=vectors["sparse"][0],
+        dense_params={"metric_type": dense_metric},
+        expr=expr,
+        limit=max(limit * 2, SEARCH_CANDIDATE_LIMIT),
     )
-    # 4. 混合检索
+
+    # 4. 混合检索（返回 [[{id,distance,entity}, ...]]，单列检索取第 0 组）
     milvus_result = milvus_gateway.hybrid_search(
-        collection_name=milvus_gateway.chunk_collection_name,
+        collection_name=collection_name or milvus_gateway.chunk_collection_name,
         reqs=reqs,
         ranker_weights=(0.6, 0.4),
         norm_score=True,
-        limit=5,
-        output_fields=CHUNK_OUTPUT_FIELDS,
+        limit=limit,
+        output_fields=output_fields or CHUNK_OUTPUT_FIELDS,
     )
-    # 5. milvus_result = [[{id,distance,entity}]]，单列检索取第 0 组
-    return milvus_result[0] if milvus_result and len(milvus_result) > 0 else []
+    return milvus_result[0] if milvus_result else []
 
 
 def to_chunks(milvus_list) -> list[dict]:
-    """将 Milvus 原始命中（{id,distance,entity}）统一格式化为业务 chunk 列表。"""
+    """把 Milvus 原始命中（``{id,distance,entity}``）统一格式化为业务 chunk 列表。"""
     chunks = []
-    for item in milvus_list:
+    for item in milvus_list or []:
         entity = item.get("entity", {})
         chunks.append({
             "chunk_id": entity.get("chunk_id"),
@@ -82,6 +98,8 @@ def to_chunks(milvus_list) -> list[dict]:
             "item_name": entity.get("item_name"),
             "content": entity.get("content"),
             "source": "milvus",
+            "type": "milvus",
             "url": "",
         })
+    logger.debug(f"知识库检索命中 {len(chunks)} 条")
     return chunks

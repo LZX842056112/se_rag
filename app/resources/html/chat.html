@@ -5,27 +5,11 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1.0" />
   <title>掌柜智库知识库</title>
+  <link rel="stylesheet" href="/static/app.css" />
   <style>
-    :root{
-      --bg:#f3f5f7;
-      --panel:#ffffff;
-      --text:#1f2d3d;
-      --muted:#7a869a;
-      --brand:#1aa7ff;
-      --brand2:#5b7cfa;
-      --bubble-user:#1aa7ff;
-      --bubble-bot:#ffffff;
-      --border:#e6e9ef;
-      --shadow:0 10px 30px rgba(31,45,61,.12);
-    }
-    *{box-sizing:border-box}
+    /* 本页布局：整屏居中 + 固定高度对话面板（视觉基础样式见 /static/app.css） */
     body{
       margin:0;
-      font-family: "Segoe UI", "Microsoft YaHei", system-ui, -apple-system, Arial, sans-serif;
-      background: radial-gradient(1200px 600px at 20% 0%, rgba(26,167,255,.18), transparent 60%),
-                  radial-gradient(1000px 500px at 90% 10%, rgba(91,124,250,.18), transparent 55%),
-                  var(--bg);
-      color:var(--text);
       height:100vh;
       display:flex;
       justify-content:center;
@@ -76,25 +60,6 @@
       gap:10px;
       align-items:center;
     }
-    .pill{
-      font-size:12px;
-      color:var(--muted);
-      border:1px solid var(--border);
-      padding:6px 10px;
-      border-radius:999px;
-      background:#fff;
-    }
-    .btn{
-      border:none;
-      background:linear-gradient(135deg, var(--brand), var(--brand2));
-      color:#fff;
-      padding:8px 12px;
-      border-radius:10px;
-      font-size:12px;
-      cursor:pointer;
-    }
-    .btn:disabled{opacity:.6;cursor:not-allowed}
-
     .chat{
       flex:1;
       overflow:auto;
@@ -380,10 +345,16 @@
     <div class="hint">快捷键：<span class="kbd">Enter</span> 发送，<span class="kbd">Shift</span>+<span class="kbd">Enter</span> 换行</div>
   </div>
 
-  <script src="/js/common.js"></script>
+  <script src="/static/app.js"></script>
   <script>
     // 默认走查询服务同源地址；如你把页面单独打开（file://），回退到查询服务默认端口。
-    const API_BASE = resolveApiBase(8001);
+    // 初始化接口基地址（同源部署时即当前源；单独打开页面时回退到 8001）
+    App.configure({ fallbackPort: 8001 });
+    // 公共库的格式化 / 转义 / 提示（页面内不再重复实现）
+    const escapeHtml = App.escapeHtml;
+    const nowTime = () => App.formatTime(null);
+    const formatTime = App.formatTime;
+    const showToast = App.toast;
     const chatEl = document.getElementById('chat');
     const inputEl = document.getElementById('input');
     const sendBtn = document.getElementById('send');
@@ -719,9 +690,8 @@
       if(btnEl.dataset.submitted === '1') return;
       btnEl.disabled = true;
       try{
-        const res = await fetch(`${API_BASE}/evolution/feedback`, {
+        await App.fetchJson(App.PATHS.feedback, {
           method: 'POST',
-          headers: {'Content-Type':'application/json'},
           body: JSON.stringify({
             session_id: meta.sessionId,
             query: meta.query,
@@ -729,7 +699,6 @@
             thumbs: value
           })
         });
-        if(!res.ok) throw new Error('feedback rejected: ' + res.status);
         btnEl.dataset.submitted = '1';
         btnEl.classList.add('active');
         // 置灰另一枚并标注已反馈
@@ -749,7 +718,7 @@
         }
       }catch(err){
         btnEl.disabled = false;
-        if(btnEl.dataset.submitted !== '1') alert('反馈提交失败：' + (err && err.message || err));
+        if(btnEl.dataset.submitted !== '1') showToast('反馈提交失败：' + (err && err.message || err));
       }
     }
 
@@ -868,8 +837,7 @@
     let __healthFails = 0;
     async function apiHealth(){
       try{
-        const res = await fetch(`${API_BASE}/health`);
-        if(!res.ok) throw new Error('health not ok');
+        await App.fetchJson(App.PATHS.health);
         __healthFails = 0;
         apiPill.textContent = `API: 已连接`;
         apiPill.style.cursor = 'default';
@@ -883,9 +851,7 @@
 
     async function loadHistory(){
       try{
-        const res = await fetch(`${API_BASE}/history/${sessionId}`);
-        if(!res.ok) return;
-        const data = await res.json();
+        const data = await App.fetchJson(App.PATHS.history(sessionId));
         const items = Array.isArray(data.items) ? data.items : [];
         if(items.length === 0) return;
         // 保留首条欢迎消息，其余先清空再渲染历史
@@ -903,30 +869,27 @@
           }
         }
         scrollToBottom();
-      }catch(_){ showToast('历史加载失败，请稍后重试'); }
+      }catch(err){
+        // 不要静默吞掉异常：历史上「反馈按钮不渲染」正是被静默 catch 掩盖的
+        console.error('历史加载失败', err);
+        showToast('历史加载失败，请稍后重试');
+      }
     }
 
     async function submitQuery(text){
       const isStream = streamToggle.checked;
-      const res = await fetch(`${API_BASE}/query`, {
+      return await App.fetchJson(App.PATHS.query, {
         method: 'POST',
-        headers: {'Content-Type':'application/json'},
         body: JSON.stringify({
           query: text,
           session_id: sessionId,
           is_stream: isStream
         })
       });
-      if(!res.ok){
-        const msg = await res.text();
-        throw new Error(msg || '请求失败');
-      }
-      return await res.json();
     }
 
     async function onSend(){
       if(sendBtn.disabled) return; // 按钮禁用时拦截重复提交（含 Enter 快捷键）
-      console.log('[perf] A onSend start', performance.now());
       const text = (inputEl.value || '').trim();
       if(!text) return;
       inputEl.value = '';
@@ -936,9 +899,7 @@
 
       try{
         const isStream = streamToggle.checked;
-        console.log('[perf] B submitQuery start', performance.now(), { isStream });
         const data = await submitQuery(text);
-        console.log('[perf] B submitQuery end', performance.now(), data);
         
         // 渲染初始状态
         renderProgress(botMsgEl, [], [], 'pending');
@@ -964,91 +925,47 @@
           bubble.insertBefore(answerEl, bubble.firstChild);
         }
 
-        const es = new EventSource(`${API_BASE}/stream/${session_id}`);
-        console.log('[perf] C EventSource created', performance.now(), { session_id });
-        let rawAnswerText = '';
-
-        es.addEventListener('progress', (e) => {
-          try{
-            const d = JSON.parse(e.data || '{}');
+        // SSE 订阅与事件分发统一由公共库处理（事件名：ready/progress/delta/final/close/error）
+        App.openStream(session_id, {
+          onProgress(d){
             renderProgress(botMsgEl, d.done_list, d.running_list, d.status);
-            // 当进度状态已完成时，提前结束“...”等待态
+            // 当进度状态已完成时，提前结束“...”等待态，避免后端未发送 final 时按钮一直禁用
             if(d && d.status === 'completed'){
               const typing = botMsgEl.querySelector('.typing');
               if(typing) typing.remove();
-              // 防止后端未发送 final 导致按钮一直禁用
               sendBtn.disabled = false;
             }
-          }catch(_){}
-        });
-
-        es.addEventListener('delta', (e) => {
-          try{
-            const d = JSON.parse(e.data || '{}');
-            const delta = d.delta || '';
-            if(delta){
-              rawAnswerText += delta;
-              // 即使后端未发送 final，也尽可能在流式过程中渲染图片
-              renderAnswerWithImages(answerEl, rawAnswerText, []);
-              scrollToBottom();
-            }
-          }catch(_){}
-        });
-
-        es.addEventListener('final', (e) => {
-          const typing = botMsgEl.querySelector('.typing');
-          if(typing) typing.remove();
-          // 收起进度条
-          const progress = botMsgEl.querySelector('details.progress');
-          if(progress) progress.removeAttribute('open');
-          
-          try{
-            const d = JSON.parse(e.data || '{}');
-            // 流式 delta 可能不包含“【图片】/图片列表”，最终包的 d.answer 才是完整答案；优先使用 d.answer
-            const finalText = (d && typeof d.answer === 'string' && d.answer.trim().length > 0) ? d.answer : (rawAnswerText || answerEl.textContent || '');
-            renderAnswerWithImages(answerEl, finalText, d.image_urls || []);
-            // 引用来源 / 置信度 / 反馈
-            renderCitationsAndFeedback(botMsgEl, buildBotMeta(d.citations, d.groundedness, sessionId, text));
-          }catch(_){}
-          es.close();
-          sendBtn.disabled = false;
-        });
-
-        es.addEventListener('final_answer', (e) => {
-           // 响应用户的 final_answer 信号，确保图片渲染
-          const typing = botMsgEl.querySelector('.typing');
-          if(typing) typing.remove();
-          const progress = botMsgEl.querySelector('details.progress');
-          if(progress) progress.removeAttribute('open');
-          
-          try{
-            const d = JSON.parse(e.data || '{}');
-            const finalText = (d && typeof d.answer === 'string' && d.answer.trim().length > 0) ? d.answer : (rawAnswerText || answerEl.textContent || '');
-            renderAnswerWithImages(answerEl, finalText, d.image_urls || []);
-            // 引用来源 / 置信度 / 反馈（对同一消息防抖，不重复）
-            renderCitationsAndFeedback(botMsgEl, buildBotMeta(d.citations, d.groundedness, sessionId, text));
-          }catch(_){}
-          es.close();
-          sendBtn.disabled = false;
-        });
-
-        es.addEventListener('error', (e) => {
-          const typing = botMsgEl.querySelector('.typing');
-          if(typing) typing.remove();
-          // 收起进度条
-          const progress = botMsgEl.querySelector('details.progress');
-          if(progress) progress.removeAttribute('open');
-
-          try{
-            const msg = e && e.data ? (JSON.parse(e.data).error || 'SSE 连接中断/失败') : 'SSE 连接中断/失败';
-            rawAnswerText += `\n\n（错误：${msg}）`;
+          },
+          onDelta(d, rawAnswerText){
+            // 即使后端未发送 final，也尽可能在流式过程中渲染图片
             renderAnswerWithImages(answerEl, rawAnswerText, []);
-          }catch(_){
-            rawAnswerText += `\n\n（错误：SSE 连接中断/失败）`;
-            renderAnswerWithImages(answerEl, rawAnswerText, []);
+            scrollToBottom();
+          },
+          onFinal(d, rawAnswerText){
+            const typing = botMsgEl.querySelector('.typing');
+            if(typing) typing.remove();
+            const progress = botMsgEl.querySelector('details.progress');
+            if(progress) progress.removeAttribute('open');
+            // 流式 delta 可能不包含“【图片】/图片列表”，最终包的 answer 才是完整答案，优先使用它
+            const hasFinal = d && typeof d.answer === 'string' && d.answer.trim().length > 0;
+            const finalText = hasFinal ? d.answer : (rawAnswerText || answerEl.textContent || '');
+            renderAnswerWithImages(answerEl, finalText, (d && d.image_urls) || []);
+            renderCitationsAndFeedback(botMsgEl, buildBotMeta(
+              d && d.citations, d && d.groundedness, sessionId, text));
+            sendBtn.disabled = false;
+          },
+          onClose(){
+            sendBtn.disabled = false;
+          },
+          onError(d, rawAnswerText){
+            const typing = botMsgEl.querySelector('.typing');
+            if(typing) typing.remove();
+            const progress = botMsgEl.querySelector('details.progress');
+            if(progress) progress.removeAttribute('open');
+            const msg = (d && (d.message || d.error)) || 'SSE 连接中断/失败';
+            renderAnswerWithImages(answerEl, `${rawAnswerText}\n\n（错误：${msg}）`, []);
+            sendBtn.disabled = false;
           }
-          es.close();
-          sendBtn.disabled = false;
         });
       }catch(e){
         const bubble = botMsgEl.querySelector('.bubble');
@@ -1068,17 +985,14 @@
       }
     });
     btnClear.addEventListener('click', async () => {
-      if(!confirm('确定要清空当前会话的历史记录吗？这将无法恢复。')) return;
+      const ok = await App.confirm('确定要清空当前会话的历史记录吗？这将无法恢复。',
+                                  { confirmText: '清空', danger: true });
+      if(!ok) return;
 
       try {
-        const res = await fetch(`${API_BASE}/history/${sessionId}`, { method: 'DELETE' });
-        if(!res.ok) {
-           console.error("Failed to clear history backend, status:", res.status);
-           alert('服务端清空失败，仅清空本地显示');
-        }
+        await App.fetchJson(App.PATHS.history(sessionId), { method: 'DELETE' });
       } catch(e) {
-        console.error("Failed to clear history backend", e);
-        alert('服务端清空失败，仅清空本地显示');
+        showToast('服务端清空失败，仅清空本地显示');
       }
 
       // 清空除首条欢迎消息外的内容

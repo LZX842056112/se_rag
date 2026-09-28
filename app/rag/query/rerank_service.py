@@ -1,200 +1,198 @@
+"""重排服务：合并 RRF 与联网结果 → BGE-Reranker 打分 → 动态截断 → 回写 ``reranked_docs``。"""
+from __future__ import annotations
+
+from concurrent.futures import ThreadPoolExecutor
+
 from langchain_core.messages import HumanMessage
 from langchain_core.output_parsers import StrOutputParser
 
 from app.process.query.agent.state import QueryGraphState
-from app.rag.query.config import RERANK_MAX_INPUT_TOKENS, RERANK_SUMMARY_CHAR_RATIO, RERANK_MIN_SUMMARY_CHARS, \
-    RERANK_MAX_TOPK, RERANK_MIN_TOPK, RERANK_GAP_ABS, RERANK_GAP_RATIO, get_rerank_topk
-from app.shared.runtime.load_prompt import load_prompt
+from app.rag.query.config import (
+    RERANK_GAP_ABS,
+    RERANK_GAP_RATIO,
+    RERANK_MAX_INPUT_TOKENS,
+    RERANK_MIN_SUMMARY_CHARS,
+    RERANK_MIN_TOPK,
+    RERANK_SUMMARY_CHAR_RATIO,
+    RERANK_SUMMARY_MAX_WORKERS,
+    get_rerank_topk,
+)
+from app.shared.models import llm_providers
 from app.shared.runtime.logger import logger, step_log
-from app.infra.llm.providers import llm_providers
+from app.shared.runtime.prompts import load_prompt
+from app.shared.utils.rate_limit import apply_api_rate_limit
+from app.shared.utils.require import require_state_list, require_state_str
 
-#   1.获取并且校验参数(state) rewritten_query  rrf_chunks  web_search_docs
-#            2.数据格式化处理   rrf_chunks {chunk_id,title,parent_title,part,file_title,content,item_name,score,type,url}
-#                             web_search_docs {snippt , title,url}
-#                             -> 一种格式 -> 给模型了
-#                没有    / chunk_id -> 数据库的有的标识
-#                snippet / content -> text : 回答参考内容
-#                title  / title   -> title : 标题
-#                没有    / score   -> score : web 0  milvus rrf的分 -> reranker打分
-#                没有    / type    -> mcp web  数据库 milvus
-#                url    /  没用    -> url [图片地址]
-#                reranker_list
-#            3.组装问题和答案的列表(rewritten_query,reranker_list) -> question_answer_pair_list [[],[],[]]
-#                获取问题
-#                判断问题token的长度
-#                循环reranker_list获取答案 text
-#                   判断text的长度
-#                     超
-#                        模型压缩 -> 调用..
-#                   装数据pair
-#                返回结果
-#            4. reranker模型打分+排序
-#                reranker.compute_score([question_answer_pair_list [问题,答案]]) -> [scores]
-#                [scores] -> reranker_list { score : x }  -> zip
-#                sort排序
-#                reranker_list {text 没有压缩} -> 分数 + 排序
-#            5. 动态topk截取数据
-#                reranker_list  min  max  topk
-#                  1 2 3 4 5 6 7 8
-#                    断崖值 0.3
+
 @step_log("_require_rerank_inputs")
-def _require_rerank_inputs(state):
-    #1.获取参数
-    rewritten_query = state.get("rewritten_query")
-    rrf_chunks = state.get("rrf_chunks",[])
-    web_search_docs = state.get("web_search_docs",[])
-    #2.非空判断：rewritten_query / rrf_chunks 为硬依赖；网络检索结果允许为空（联网失败时降级为纯本地召回）
-    if not rewritten_query or len(rrf_chunks) == 0:
-        logger.error(f"rewritten_query或者rrf_chunks为空,业务无法继续进行,提前终止!")
-        raise ValueError(f"rewritten_query或者rrf_chunks为空,业务无法继续进行,提前终止!")
-    if len(web_search_docs) == 0:
-        logger.warning("web_search_docs为空,本次仅使用本地召回结果参与重排")
-    return rewritten_query,rrf_chunks,web_search_docs
+def _require_rerank_inputs(state: QueryGraphState) -> tuple[str, list, list]:
+    """校验重排输入：``rewritten_query`` / ``rrf_chunks`` 为硬依赖，联网结果允许为空。"""
+    rewritten_query = require_state_str(state, "rewritten_query")
+    rrf_chunks = require_state_list(state, "rrf_chunks")
+    web_search_docs = require_state_list(state, "web_search_docs", allow_empty=True)
+    if not web_search_docs:
+        logger.warning("web_search_docs 为空，本次仅使用本地召回结果参与重排")
+    return rewritten_query, rrf_chunks, web_search_docs
+
 
 @step_log("deal_rrf_and_web_result")
-def deal_rrf_and_web_result(rrf_chunks, web_search_docs):
-    # 1. 定义一个列表
-    reranker_docs = []
-    # 2. 先循环rrf
-    for chunk in rrf_chunks:
-        reranker_docs.append({
-            "chunk_id":chunk.get("chunk_id"),
-            "text":chunk.get("content"),
-            "title":chunk.get("title"),
-            "score":0, # rrf分 -> reranker打的分
-            "type":"milvus",
-            "source":chunk.get("source"), # 保留来源标志(milvus/evolution)供自进化引用回填
-            "url":None
-        })
-    # 3. 再循环web_search
-    for doc in web_search_docs:
-        reranker_docs.append({
+def deal_rrf_and_web_result(rrf_chunks: list, web_search_docs: list) -> list[dict]:
+    """把本地召回与联网结果统一成重排输入结构（text/title/score/type/url）。"""
+    reranker_docs = [
+        {
+            "chunk_id": chunk.get("chunk_id"),
+            "text": chunk.get("content"),
+            "title": chunk.get("title"),
+            "score": 0,  # 占位：稍后由 reranker 打分覆盖
+            "type": "milvus",
+            "source": chunk.get("source"),  # 保留来源标志（milvus/evolution）供引用回填
+            "url": None,
+        }
+        for chunk in rrf_chunks
+    ]
+    reranker_docs.extend(
+        {
             "chunk_id": None,
             "text": doc.get("snippet"),
             "title": doc.get("title"),
-            "score": 0,  # rrf分 -> reranker打的分
+            "score": 0,
             "type": "web",
-            "url": doc.get("url")
-        })
-
+            "source": "web",
+            "url": doc.get("url"),
+        }
+        for doc in web_search_docs
+    )
     return reranker_docs
 
-@step_log("create_question_answer_list")
-def create_question_answer_list(rewritten_query, reranker_docs):
-    question_answer_pair_list = []
-    # 1. 获取rewritten_query并且计算token数量
-    reranker_model =  llm_providers.reranker_model()
-    tokenizer =  reranker_model.tokenizer
-    # 算的时候,只需要算我这个字符占有token列表,不用考虑前后的特殊标识
-    rewritten_query_tokens_list =  tokenizer.encode(rewritten_query,add_special_tokens=False)
-    rewritten_query_token_len = len(rewritten_query_tokens_list)
-    # 2. 循环reranker_docs获取每个text答案
-    for doc in reranker_docs:
-        # 3. 答案的长度判读
-        answer = doc.get("text") # 答案
-        answer_token_len = len(tokenizer.encode(answer,add_special_tokens=False))
-        # 4. 超长了调用模型进行压缩
-        # reranker固定4个分割符号
-        if rewritten_query_token_len + answer_token_len + 4 > RERANK_MAX_INPUT_TOKENS:
-            # 调用模型进行压缩
-            # limit = 答案的token / 1.3 -> int -> 50 max
-            limit = max(
-                RERANK_MIN_SUMMARY_CHARS,
-                int((RERANK_MAX_INPUT_TOKENS - 4 - rewritten_query_token_len) / RERANK_SUMMARY_CHAR_RATIO))
-            # 加载提示词
-            rerank_text_refine_str =  load_prompt("rerank_text_refine",question=rewritten_query,answer=answer,limit=limit)
-            # 封装message
-            messages = [
-                HumanMessage(
-                    content=rerank_text_refine_str
-                )
-            ]
-            # 封装调用链
-            chains = llm_providers.chat() | StrOutputParser()
-            # 执行获取结果
-            answer = chains.invoke(messages)
-        # 5. 答案一定处理过了
-        # question_answer_pair_list answer -> 可能被压缩 -> 只用于打分
-        question_answer_pair_list.append([rewritten_query,answer])
-    # 6. 返回结果
-    return question_answer_pair_list
+
+def _summarize_for_rerank(rewritten_query: str, answer: str, limit: int) -> str:
+    """超长文本压缩：仅用于重排打分，不改变最终答案上下文。"""
+    apply_api_rate_limit()
+    prompt_text = load_prompt("rerank_text_refine", question=rewritten_query, answer=answer, limit=limit)
+    chain = llm_providers.chat() | StrOutputParser()
+    return chain.invoke([HumanMessage(content=prompt_text)])
+
+
+def _encode_capped(tokenizer, text: str, max_tokens: int) -> list:
+    """按上限截断编码。
+
+    直接 ``tokenizer.encode(超长文本)`` 会让 transformers 打印
+    「Token indices sequence length is longer than ...」告警（旧实现每次重排都会刷），
+    这里统一走 ``truncation=True`` 的受限编码：既拿到判断所需长度，又不产生告警。
+    """
+    return tokenizer.encode(
+        str(text or ""),
+        add_special_tokens=False,
+        truncation=True,
+        max_length=max(max_tokens, 1),
+    )
+
+
+def _hard_truncate(tokenizer, text: str, max_tokens: int) -> str:
+    """按 token 硬截断（LLM 压缩结果长度不可控，超长会让重排模型报索引越界）。"""
+    if max_tokens <= 0:
+        return ""
+    tokens = _encode_capped(tokenizer, text, max_tokens)
+    if len(tokens) < max_tokens:
+        return text  # 未超限，保留原文
+    return tokenizer.decode(tokens[:max_tokens])
+
+
+@step_log("create_question_answer_lists")
+def create_question_answer_lists(rewritten_query: str, reranker_docs: list[dict]) -> list[list[str]]:
+    """组装 ``[问题, 答案]`` 列表；超长答案先压缩到重排模型可接受的长度。
+
+    压缩需要调用 LLM，文档较多时串行会明显拖慢重排；此处用有界线程池并发（默认 4），
+    任一环节失败自动回退为原文本，保证重排仍可继续。
+    """
+    tokenizer = llm_providers.reranker_model().tokenizer
+    query_token_len = len(_encode_capped(tokenizer, rewritten_query, RERANK_MAX_INPUT_TOKENS))
+    # reranker 固定 4 个分隔符 token，为「问题 + 分隔符」预留后再算可用长度
+    available = RERANK_MAX_INPUT_TOKENS - 4 - query_token_len
+    limit = max(RERANK_MIN_SUMMARY_CHARS, int(available / RERANK_SUMMARY_CHAR_RATIO))
+
+    pairs: list[list[str]] = []
+    tasks: list[tuple[int, str]] = []
+    for index, doc in enumerate(reranker_docs):
+        answer = doc.get("text") or ""
+        answer_token_len = len(_encode_capped(tokenizer, answer, RERANK_MAX_INPUT_TOKENS))
+        if query_token_len + answer_token_len + 4 > RERANK_MAX_INPUT_TOKENS:
+            tasks.append((index, answer))
+        pairs.append([rewritten_query, answer])
+
+    if tasks:
+        max_workers = min(RERANK_SUMMARY_MAX_WORKERS, len(tasks))
+        try:
+            with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                results = list(pool.map(
+                    lambda item: _summarize_for_rerank(rewritten_query, item[1], limit),
+                    tasks,
+                ))
+            for (index, _), summary in zip(tasks, results):
+                if summary:
+                    pairs[index][1] = summary
+        except Exception as exc:  # noqa: BLE001 - 压缩属优化项，失败则退回原文
+            logger.warning(f"重排长文本压缩失败，回退原文打分：{exc}")
+
+    # 压缩结果长度不可控（或压缩失败），统一按 token 预算硬截断，保证输入不超模型上限
+    budget = RERANK_MAX_INPUT_TOKENS - 4 - query_token_len
+    for pair in pairs:
+        pair[1] = _hard_truncate(tokenizer, pair[1], budget)
+    return pairs
 
 
 @step_log("use_reranker_deal_score")
-def use_reranker_deal_score(question_answer_pair_list, reranker_docs):
-    # 1. 调用reranker打分
-    reranker_model = llm_providers.reranker_model()
-    # normalize=True 归一化 避免负分  0 - 1分之间
-    scores_list =  reranker_model.compute_score(question_answer_pair_list,normalize=True)
-    # scores_list == question_answer_pair_list == reranker_docs {score}
-    # 2. 同步遍历 分 -> reranker_docs
-    for score , doc in zip(scores_list,reranker_docs):
+def use_reranker_deal_score(question_answer_pair_list: list, reranker_docs: list[dict]) -> None:
+    """调用重排模型打分并按分数倒序排序（原地修改 ``reranker_docs``）。"""
+    scores_list = llm_providers.reranker_model().compute_score(question_answer_pair_list, normalize=True)
+    for score, doc in zip(scores_list, reranker_docs):
         doc["score"] = score
-    # 3. 倒序排序
-    reranker_docs.sort(key=lambda x : x.get("score",0),reverse=True)
+    reranker_docs.sort(key=lambda x: x.get("score", 0), reverse=True)
+
 
 @step_log("dyn_limit_reranker_docs")
-def dyn_limit_reranker_docs(reranker_docs):
-    """
-      动态结果截取! topk个
-         RERANK_MAX_TOPK: int = 5  -> 最多10个
-         RERANK_MIN_TOPK: int = 2  -> 最少2个
-         RERANK_GAP_RATIO: float = 20% -> 断崖百分比  ->  1 - 2 / 1     0.3 0.2 -> (0.3 - 0.2) / 0.3 = 33%
-         RERANK_GAP_ABS: float = 0.2   -> 断崖分差值  ->  0.8  ->  0.5  跳过  大 多了 影响准确了  小  少了 召回率
-      topk -> ???
-    :param reranker_docs:
-    :return:
-    """
-    # 累计断崖：以重排峰值(第 1 名)作基准，逐项累计与其的相对下跌，达到阈值即截断。
-    # 相比仅“相邻两指针对比”，它能捕捉相邻分差细小、但相对头部已明显下滑的慢坡，
-    # 避免把头尾质量接近的低分长尾一并保留进作答上下文。
-    top_max: int = min(get_rerank_topk(), len(reranker_docs))
-    top_min: int = RERANK_MIN_TOPK
-    gap_abs: float = RERANK_GAP_ABS      # 0.2 绝对分差阈值
-    gap_ratio: float = RERANK_GAP_RATIO  # 0.2 相对比例阈值
+def dyn_limit_reranker_docs(reranker_docs: list[dict]) -> list[dict]:
+    """动态截断：以重排峰值作基准逐项累计下跌，达到阈值即截断。
 
-    # 缺省截断数取满 top_max；前 top_min 个作为召回下限无条件保留
-    topk: int = top_max
-
-    # 已见到的最高分（累计基准）。重排后按分数倒序，故初始通常即为 docs[0]
+    相比仅比较相邻两项，累计口径能捕捉「相邻分差细小、但相对头部已明显下滑」的慢坡，
+    避免把头尾质量接近的低分长尾一并放进作答上下文。前 ``RERANK_MIN_TOPK`` 条无条件保留。
+    """
+    if not reranker_docs:
+        return []
+    top_max = min(get_rerank_topk(), len(reranker_docs))
+    topk = top_max
     running_max = reranker_docs[0].get("score", 0.0)
 
-    # 从 top_min 起向后累计判断：分数未创新高且相对峰值累计下跌达到阈值 → 在此截断
-    for i in range(top_min, top_max):
+    for i in range(RERANK_MIN_TOPK, top_max):
         score = reranker_docs[i].get("score", 0.0)
-        if score > running_max:            # 分数回升，刷新峰值基准
+        if score > running_max:
             running_max = score
             continue
-        abs_score = running_max - score    # 相对峰值的累计下跌
+        abs_score = running_max - score
         ratio = abs_score / running_max if running_max else 0.0
-        if abs_score > gap_abs or ratio > gap_ratio:
+        if abs_score > RERANK_GAP_ABS or ratio > RERANK_GAP_RATIO:
             topk = i
             break
-    # 截取前 topk 个
     return reranker_docs[:topk]
 
 
 @step_log("rerank_documents")
 def rerank_documents(state: QueryGraphState) -> QueryGraphState:
-    """
-    重排序服务：
-    1. 合并 RRF 和 Web Search 的文档
-    2. 使用 BGE Reranker 模型计算相关性得分
-    3. 根据得分动态截断，智能截取 TopK
-    4. 回写 reranked_docs
-    """
-    # 1.获取并且校验参数(state) rewritten_query  rrf_chunks  web_search_docs
-    rewritten_query,rrf_chunks,web_search_docs = _require_rerank_inputs(state)
-    # 2. 数据格式化处理
-    reranker_docs = deal_rrf_and_web_result(rrf_chunks,web_search_docs)
-    # 3. 组装问题和答案的列表(rewritten_query,reranker_list) -> question_answer_pair_list [[],[],[]]
-    question_answer_pair_list:list[list[str]] = create_question_answer_list(rewritten_query,reranker_docs)
-    # 4. 打分+排序
-    logger.info(f"排序和打分之前的数据:{reranker_docs}")
-    use_reranker_deal_score(question_answer_pair_list,reranker_docs)
-    logger.info(f"排序和打分之后的数据:{reranker_docs}")
-    # 5. 动态截取数据
+    """重排服务入口：合并 → 压缩 → 打分排序 → 动态截断 → 回写 ``reranked_docs``。"""
+    rewritten_query, rrf_chunks, web_search_docs = _require_rerank_inputs(state)
+    reranker_docs = deal_rrf_and_web_result(rrf_chunks, web_search_docs)
+    question_answer_pair_list = create_question_answer_lists(rewritten_query, reranker_docs)
+    use_reranker_deal_score(question_answer_pair_list, reranker_docs)
     reranker_docs = dyn_limit_reranker_docs(reranker_docs)
-    # 6. 更新state
     state["reranked_docs"] = reranker_docs
+    logger.info(
+        "重排完成：候选 {} 条，保留 {} 条；Top3={}".format(
+            len(question_answer_pair_list),
+            len(reranker_docs),
+            [
+                {"chunk_id": d.get("chunk_id"), "score": round(float(d.get("score") or 0.0), 4)}
+                for d in reranker_docs[:3]
+            ],
+        )
+    )
     return state

@@ -1,0 +1,127 @@
+/*
+ * 掌柜智库前端基础样式：设计变量 + 通用组件（按钮 / 标签 / 提示 / 空态）。
+ * 三页（客服对话、审批后台、文件导入）共用；页面各自的布局样式保留在页内 <style>。
+ */
+:root{
+  --bg:#f3f5f7;
+  --panel:#ffffff;
+  --text:#1f2d3d;
+  --muted:#7a869a;
+  --brand:#1aa7ff;
+  --brand2:#5b7cfa;
+  --danger:#e5484d;
+  --ok:#22a15f;
+  --border:#e6e9ef;
+  --shadow:0 10px 30px rgba(31,45,61,.12);
+  --bubble-user:#1aa7ff;
+  --bubble-bot:#ffffff;
+  --font-base:"Segoe UI","Microsoft YaHei",system-ui,-apple-system,Arial,sans-serif;
+}
+
+*{box-sizing:border-box}
+
+body{
+  font-family:var(--font-base);
+  color:var(--text);
+  background:
+    radial-gradient(1200px 600px at 20% 0%, rgba(26,167,255,.16), transparent 60%),
+    radial-gradient(1000px 500px at 90% 10%, rgba(91,124,250,.16), transparent 55%),
+    var(--bg);
+}
+
+/* ---------- 按钮 ---------- */
+.btn{
+  border:none;
+  border-radius:10px;
+  padding:9px 14px;
+  font-size:13px;
+  cursor:pointer;
+  color:#fff;
+  background:linear-gradient(135deg, var(--brand), var(--brand2));
+}
+.btn:disabled{opacity:.6;cursor:not-allowed}
+.btn.good{background:var(--ok)}
+.btn.bad{background:var(--danger)}
+.btn.plain{background:#eef2f7;color:var(--text)}
+
+/* ---------- 标签 / 徽标 ---------- */
+.pill{
+  font-size:12px;
+  color:var(--muted);
+  border:1px solid var(--border);
+  padding:6px 10px;
+  border-radius:999px;
+  background:#fff;
+}
+.chip{
+  font-size:11px;
+  color:var(--muted);
+  background:rgba(122,134,154,.10);
+  border:1px solid var(--border);
+  padding:3px 8px;
+  border-radius:99px;
+}
+
+/* ---------- 输入 ---------- */
+select,
+input[type="text"],
+input[type="password"]{
+  border:1px solid var(--border);
+  border-radius:9px;
+  padding:8px 10px;
+  font-size:13px;
+  background:#fff;
+  color:var(--text);
+  outline:none;
+  font-family:inherit;
+}
+select:focus,
+input[type="text"]:focus,
+input[type="password"]:focus{border-color:rgba(26,167,255,.6);box-shadow:0 0 0 3px rgba(26,167,255,.12)}
+
+/* ---------- 空态 ---------- */
+.empty{text-align:center;color:var(--muted);padding:40px 0;font-size:13px}
+.empty-hint{color:var(--muted);font-size:13px;padding:12px 2px}
+
+/* ---------- 轻提示（toast） ---------- */
+.app-toast{
+  position:fixed;
+  left:50%;
+  bottom:28px;
+  transform:translateX(-50%);
+  background:rgba(20,24,33,.92);
+  color:#fff;
+  padding:9px 16px;
+  border-radius:9px;
+  font-size:13px;
+  max-width:80%;
+  box-shadow:var(--shadow);
+  opacity:0;
+  pointer-events:none;
+  transition:opacity .2s;
+  z-index:9999;
+}
+.app-toast.show{opacity:1}
+
+/* ---------- 页内确认对话框（替代原生 confirm，避免模态阻塞渲染进程） ---------- */
+.app-confirm-mask{
+  position:fixed;
+  inset:0;
+  background:rgba(20,24,33,.45);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  z-index:10000;
+}
+.app-confirm{
+  background:var(--panel);
+  border:1px solid var(--border);
+  border-radius:12px;
+  padding:18px;
+  width:calc(100% - 48px);
+  max-width:420px;
+  color:var(--text);
+  font-size:14px;
+}
+.app-confirm-text{line-height:1.6}
+.app-confirm-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}

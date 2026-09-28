@@ -6,8 +6,9 @@ from typing import Any
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from app.process.import_.agent.state import ImportGraphState
-from app.rag.import_.config import CHUNK_SIZE, CHUNK_OVERLAP, CHUNK_MIN, CHUNK_MAX_SIZE
+from app.rag.import_.config import CHUNK_MAX_SIZE, CHUNK_MIN, CHUNK_OVERLAP, CHUNK_SIZE
 from app.shared.runtime.logger import logger, step_log
+from app.shared.utils.require import require_state_str
 
 
 #   md_content , file_title =  load_markdown_content(state)
@@ -17,37 +18,26 @@ from app.shared.runtime.logger import logger, step_log
 #          4. 统一换成符号(数据清洗)  md_content \n\r |  \r  -> \n -> state[md_content] ..
 #          5. 返回md_content file_title
 @step_log("load_markdown_content")
-def load_markdown_content(state:ImportGraphState) -> tuple[str,str]:
-    """
-    获取参数和校验
-    :param state:
-    :return:
-    """
+def load_markdown_content(state: ImportGraphState) -> tuple[str, str]:
+    """读取并清洗 Markdown 内容：``md_content`` 为空时回退读取 ``md_path``，统一换行符。"""
     md_content = state.get("md_content")
     file_title = state.get("file_title")
-    md_path    = state.get("md_path")
+    md_path = state.get("md_path")
 
-    # md_content校验
+    if not md_content and md_path and Path(md_path).exists():
+        logger.warning(f"md_content 为空，回退从 md_path 读取：{md_path}")
+        md_content = Path(md_path).read_text(encoding="utf-8")
     if not md_content:
-        if md_path and Path(md_path).exists():
-            logger.warning(f"md_content内容为空,从备份地址:{md_path}再次读取数据!!")
-            md_content = Path(md_path).read_text(encoding="utf-8")
-        if not md_content:
-            logger.error(f"md_content为空,尝试从md_path读取,依然为空,业务无法继续进行,提前终止!")
-            raise ValueError(f"md_content为空,尝试从md_path读取,依然为空,业务无法继续进行,提前终止!")
+        raise ValueError("md_content 为空且无法从 md_path 读取，业务无法继续，提前终止！")
 
-    if not file_title:
-        if md_path and Path(md_path).exists():
-            file_title = Path(md_path).stem
-        if not file_title:
-            file_title = "default"
-        state['file_title'] = file_title
-        logger.warning(f"file_title为空,启动默认值机制,赋值后:{file_title}")
+    fallback_title = Path(md_path).stem if md_path and Path(md_path).exists() else "default"
+    file_title = require_state_str(state, "file_title", default=fallback_title)
 
-    # 数据清晰 统一换行符号
-    md_content = md_content.replace("\r\n","\n").replace("\r","\n")
-    state['md_content'] = md_content
-    return md_content,file_title
+    # 数据清洗：统一换行符为 \n
+    md_content = md_content.replace("\r\n", "\n").replace("\r", "\n")
+    state["md_content"] = md_content
+    state["file_title"] = file_title
+    return md_content, file_title
 
 #  split_document(md_content,file_title) -> list[dict{title,content,file_title}]
 
@@ -203,7 +193,9 @@ def _split_long_chunk(chunk) -> list[dict[str,Any]]:
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=CHUNK_SIZE - len(sub_content_prefix),  # 因为确保标题数量去除了
         chunk_overlap=CHUNK_OVERLAP,
-        separators=["\n\n", "\n", "。", "！", "？", "；", ".", "!", "?", ";"],
+        # 末尾的空串分隔符是兜底：代码块 / 表格 / 无标点长文本也必须能切开，
+        # 否则会出现远超 CHUNK_SIZE 的超长切片（旧实现缺该兜底，长文本可能整块入库）
+        separators=["\n\n", "\n", "。", "！", "？", "；", ".", "!", "?", ";", ""],
     )
 
     sub_chunk_list = []
@@ -246,7 +238,7 @@ def _merge_short_chunks_same_parent_title(refine_list)-> list[dict[str,Any]]:
         # 第一次给base_chunk赋值
         if not base_chunk:
             base_chunk = next_chunk
-            logger.info(f"短合并第一次进入,设置base_chunk内容!")
+            logger.debug("短合并第一次进入，设置 base_chunk 内容")
             continue
         # 3.合并的逻辑
         # base_chunk -> content < 400 条件1

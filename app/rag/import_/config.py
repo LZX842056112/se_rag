@@ -1,29 +1,28 @@
-MINERU_MODEL_VERSION = "vlm"
-# MinerU 任务轮询最大超时时间（单位：秒），超过则判定任务失败
-# 600 -> 一个pdf 约等于 1秒
-MINERU_POLL_TIMEOUT_SECONDS = 600
-# MinerU 任务轮询间隔时间（单位：秒），每隔多久查询一次任务状态
-MINERU_POLL_INTERVAL_SECONDS = 3
-# MinerU 文件下载超时时间（单位：秒），下载文件超过此时长则中断
-MINERU_DOWNLOAD_TIMEOUT_SECONDS = 30
+"""导入链路参数：MinerU 交互与文本切分策略。"""
+from __future__ import annotations
 
-# local_dir 对应的输出目录常量
+# MinerU 模型版本（pipeline / vlm 等）
+MINERU_MODEL_VERSION = "vlm"
+# MinerU 任务轮询最长等待时间（秒），超过判定失败
+MINERU_POLL_TIMEOUT_SECONDS = 600
+# MinerU 任务轮询间隔（秒）
+MINERU_POLL_INTERVAL_SECONDS = 3
+# 解析结果 zip 下载超时（秒）
+MINERU_DOWNLOAD_TIMEOUT_SECONDS = 60
+
+# local_dir 缺省值所对应的输出目录名
 PDF_PARSE_SERVICE_LOCAL_DIR = "output"
 
-SUPPORTED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"}
-
-
-# 文本切块最大长度：单个文本块最多包含 1000 字符（防止过长导致向量失真）
+# ==================== 文本切分策略 ====================
+# 单块最大长度：超过则递归细切，防止过长导致向量语义失真
 CHUNK_MAX_SIZE = 1000
-# 文本切块基准长度：单个文本块理想大小为 600 字符（兼顾语义完整性 + 检索精度）
+# 单块目标长度
 CHUNK_SIZE = 600
-# 文本块重叠长度：相邻块之间重叠 50 字符，保证语义不被切断、上下文连贯
+# 相邻块重叠长度，保证语义不被切断
 CHUNK_OVERLAP = 50
-# 最小碎片阈值：低于这个长度判定为短碎片，需要尝试合并
+# 短碎片阈值：低于该长度尝试与同标题邻块合并
 CHUNK_MIN = 400
-
-# 声明常量,切块的截取数量 默认: 10
+# 主体名识别时截取前 N 个切片作为上下文
 CHUNKS_SPLIT_TOP_NUMBER = 10
-
-# 向量化批次大小：每批处理 6 条切片，避免显存溢出
+# 向量化批次大小：每批处理 N 条切片，避免显存溢出
 EMBEDDING_BATCH_SIZE = 6

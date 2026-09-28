@@ -40,7 +40,8 @@ class RagEvalTester:
         - chunk_rows：chunks 集合查询结果
         - case_count：生成的评测用例数量
         """
-        from app.rag_eval.runner import close_mongo_client, insert_batch_eval_dataset
+        from app.rag_eval.runner import insert_batch_eval_dataset
+        from app.shared.clients.mongo import close_mongo_client
 
         try:
             return insert_batch_eval_dataset()
@@ -56,7 +57,8 @@ class RagEvalTester:
         - summary：批量汇总结果
         - report_path：评测报告文件路径
         """
-        from app.rag_eval.runner import close_mongo_client, run_batch_eval
+        from app.rag_eval.runner import run_batch_eval
+        from app.shared.clients.mongo import close_mongo_client
 
         try:
             return run_batch_eval()

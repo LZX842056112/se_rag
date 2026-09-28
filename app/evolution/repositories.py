@@ -1,78 +1,69 @@
-"""
-自进化 Mongo 持久化层：单例连接 + 集合读写。
-写入规则：fb_events / k_gaps / k_candidates / k_metrics / param_registry 的写者分离，
-读链路只读缓存，不直接读这些 collections。
+"""自进化 Mongo 持久化层：集合访问器 + 参数注册表读写。
+
+写入规则：``fb_events`` / ``k_gaps`` / ``k_candidates`` / ``k_metrics`` / ``param_registry``
+各自有唯一写入者；读链路只读缓存（``tuning/param_registry``），不直接读这些集合。
+
+连接与集合名统一来自 ``app.shared.clients.mongo`` + ``settings.mongo``：
+历史问题——此处曾硬编码集合名并自建第二套 MongoClient，导致配置项失效与连接池翻倍。
 """
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import Any, Optional
 
-from pymongo import MongoClient
-from pymongo.collection import Collection
-from pymongo.database import Database
-
-from app.shared.config.common import env_str
-from app.shared.runtime.logger import logger
+from app.shared.clients.mongo import get_collection
+from app.shared.config import settings
 
 
-class EvolutionMongoTool:
-    """基于原生 PyMongo 的自进化数据读写工具，仿 HistoryMongoTool 单例模式。"""
+class EvolutionRepository:
+    """自进化各集合的访问入口（懒加载，不在导入期建立连接）。"""
 
-    def __init__(self) -> None:
-        self.mongo_url: str = env_str("MONGO_URL")
-        self.db_name: str = env_str("MONGO_DB_NAME")
-        if not self.mongo_url:
-            raise ValueError("MONGO_URL 未配置，无法建立自进化持久层连接")
-        self.client: MongoClient = MongoClient(self.mongo_url)
-        self.db: Database = self.client[self.db_name]
+    @property
+    def fb_events(self):
+        """反馈事件集合（用户显式反馈 + 读链路未解决信号）。"""
+        return get_collection(settings.mongo.fb_events_collection)
 
-        # collections（懒创建，pyMongo 无需显式建表）
-        self.fb_events: Collection = self.db["fb_events"]
-        self.k_gaps: Collection = self.db["k_gaps"]
-        self.k_candidates: Collection = self.db["k_candidates"]
-        self.k_metrics: Collection = self.db["k_metrics"]
-        self.param_registry: Collection = self.db["param_registry"]
+    @property
+    def k_gaps(self):
+        """知识缺口集合。"""
+        return get_collection(settings.mongo.k_gaps_collection)
 
-        # 索引（create_index 幂等）
-        self.fb_events.create_index([("session_id", 1), ("ts", -1)])
-        self.fb_events.create_index([("ts", -1)])
-        self.k_gaps.create_index([("session_id", 1), ("ts", -1)])
-        self.k_candidates.create_index([("faq_question", 1)])
-        self.k_candidates.create_index([("status", 1)])
-        self.k_metrics.create_index([("ts", -1)])
-        self.param_registry.create_index([("key", 1)], unique=True)
+    @property
+    def k_candidates(self):
+        """候选知识点集合（draft/active/rejected/deprecated）。"""
+        return get_collection(settings.mongo.k_candidates_collection)
 
-        logger.info(f"Successfully connected to MongoDB (evolution): {self.db_name}")
+    @property
+    def k_metrics(self):
+        """指标快照集合。"""
+        return get_collection(settings.mongo.k_metrics_collection)
 
-    # ---------------- param_registry ----------------
-    def get_param(self, key: str) -> dict[str, Any] | None:
+    @property
+    def param_registry(self):
+        """参数注册表集合。"""
+        return get_collection(settings.mongo.param_registry_collection)
+
+    def get_param(self, key: str) -> Optional[dict[str, Any]]:
+        """读取单条参数记录。"""
         return self.param_registry.find_one({"key": key})
 
     def set_param(self, key: str, value: Any, updated_by: str = "manual") -> None:
-        """单写入者调用：upsert 且 rev+1。"""
-        now = time.time()
-        existing = self.param_registry.find_one({"key": key})
-        rev = (existing or {}).get("rev", 0) + 1
+        """写入单条参数记录（单写入者调用：upsert 且 rev+1）。"""
+        existing = self.param_registry.find_one({"key": key}) or {}
         self.param_registry.update_one(
             {"key": key},
-            {"$set": {"value": value, "updated_at": now, "updated_by": updated_by, "rev": rev}},
+            {"$set": {
+                "value": value,
+                "updated_at": time.time(),
+                "updated_by": updated_by,
+                "rev": int(existing.get("rev", 0)) + 1,
+            }},
             upsert=True,
         )
 
     def all_params(self) -> dict[str, Any]:
+        """读取全部参数（``{key: value}``）。"""
         return {doc["key"]: doc.get("value") for doc in self.param_registry.find()}
 
 
-# 单例
-_evolution_mongo_tool: EvolutionMongoTool | None = None
-
-
-def get_evolution_mongo_tool() -> EvolutionMongoTool:
-    global _evolution_mongo_tool
-    if _evolution_mongo_tool is None:
-        _evolution_mongo_tool = EvolutionMongoTool()
-    return _evolution_mongo_tool
-
-
-evolution_repo = get_evolution_mongo_tool
+evolution_repo = EvolutionRepository()

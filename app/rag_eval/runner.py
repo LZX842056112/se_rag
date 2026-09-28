@@ -20,8 +20,8 @@ from pathlib import Path
 from statistics import mean
 from unittest.mock import patch
 
-from app.infra.config.providers import infra_config
-from app.infra.vector_store.milvus_gateway import milvus_gateway
+from app.shared.clients.milvus_gateway import milvus_gateway
+from app.shared.config import settings
 from app.process.import_.agent.nodes.node_bge_embedding import node_bge_embedding
 from app.process.import_.agent.nodes.node_import_milvus import node_import_milvus
 from app.process.import_.agent.nodes.node_item_name_recognition import node_item_name_recognition
@@ -42,9 +42,6 @@ from app.rag_eval.dataset import (
     write_batch_eval_cases,
 )
 from app.rag_eval.metrics import evaluate_query_state
-from app.shared.clients import peek_history_mongo_tool
-
-
 LAYER_LABELS = {
     "embedding_chunks": "普通检索",
     "hyde_embedding_chunks": "HyDE检索",
@@ -62,10 +59,10 @@ def insert_env_ready() -> bool:
     - False：缺少必要配置
     """
     return bool(
-        infra_config.milvus_config.milvus_url
-        and infra_config.milvus_config.chunks_collection
-        and infra_config.milvus_config.item_name_collection
-        and (infra_config.embedding_config.bge_m3_path or infra_config.embedding_config.bge_m3)
+        settings.milvus.url
+        and settings.milvus.chunks_collection
+        and settings.milvus.item_name_collection
+        and (settings.embedding.model_path or settings.embedding.model_name)
     )
 
 
@@ -80,11 +77,11 @@ def batch_eval_ready() -> bool:
     - False：缺少必要配置
     """
     return bool(
-        infra_config.milvus_config.milvus_url
-        and infra_config.milvus_config.chunks_collection
-        and infra_config.milvus_config.item_name_collection
-        and (infra_config.embedding_config.bge_m3_path or infra_config.embedding_config.bge_m3)
-        and infra_config.reranker_config.bge_reranker_large
+        settings.milvus.url
+        and settings.milvus.chunks_collection
+        and settings.milvus.item_name_collection
+        and (settings.embedding.model_path or settings.embedding.model_name)
+        and settings.reranker.model_path
     )
 
 
@@ -97,15 +94,6 @@ def milvus_ready() -> bool:
     - False：Milvus 不可用
     """
     return milvus_gateway.milvus_client is not None
-
-
-def close_mongo_client() -> None:
-    """
-    关闭评测过程中可能创建的 Mongo 连接。
-    """
-    mongo_tool = peek_history_mongo_tool()
-    if mongo_tool is not None:
-        mongo_tool.client.close()
 
 
 def _query_chunk_rows_with_retry(
