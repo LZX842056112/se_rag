@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import app.api.http.import_server as import_server
 import app.api.http.query_server as query_server
+from app.api.errors import ApiError
+from app.api.routers import pages
 from app.shared.clients import milvus_gateway as milvus_module
 from app.shared.clients import minio_gateway as minio_module
 from app.shared.clients import mongo as mongo_module
@@ -23,8 +25,7 @@ def test_query_service_route_contract():
         "/api/evolution/candidates",
         "/api/evolution/candidates/{candidate_id}/approve",
         "/approval",
-        "/static/app.js",
-        "/static/app.css",
+        "/static/{asset_name}",
     ):
         assert expected in paths, f"缺少路由 {expected}"
     assert "/" in paths  # 客服对话页
@@ -33,7 +34,7 @@ def test_query_service_route_contract():
 def test_import_service_route_contract():
     paths = _paths(import_server.app)
     for expected in ("/api/health", "/api/import/upload", "/api/import/status/{task_id}",
-                     "/import", "/static/app.js"):
+                     "/import", "/static/{asset_name}"):
         assert expected in paths, f"缺少路由 {expected}"
 
 
@@ -42,3 +43,40 @@ def test_no_external_connection_created_on_import():
     assert mongo_module._client is None
     assert milvus_module._milvus_client is None
     assert minio_module._minio_client is None
+
+
+def test_static_asset_whitelist_and_cache_headers():
+    """静态资源白名单生效，且带长缓存头；未登记的资源一律 404。"""
+    for name in ("app.css", "app.js", "chat.css", "chat.js", "approval.js", "import.js"):
+        response = pages.static_asset(name)
+        assert response.headers["cache-control"] == "public, max-age=86400, immutable"
+    try:
+        pages.static_asset("secret.txt")
+    except ApiError as exc:
+        assert exc.status_code == 404
+    else:
+        raise AssertionError("未登记的资源未被拒绝（存在路径穿越风险）")
+
+
+def test_pages_are_rendered_with_asset_version_and_no_cache():
+    """页面渲染注入内容指纹，并禁止缓存 HTML（避免刷新后仍看到旧页面）。"""
+    for name in ("chat", "approval", "import"):
+        response = pages.render_page(name)
+        body = response.body.decode("utf-8")
+        assert response.headers["cache-control"] == "no-cache"
+        assert "{{ASSET_V}}" not in body, "页面模板占位符未被替换"
+        assert "?v=" in body, "静态资源缺少版本参数"
+    assert len(pages.asset_version()) == 10
+
+
+def test_asset_version_changes_with_content(tmp_path, monkeypatch):
+    """内容指纹必须随静态资源内容变化（否则长缓存会锁死旧版本）。"""
+    for relative, _ in pages._ASSETS.values():
+        target = tmp_path / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("v1", encoding="utf-8")
+    monkeypatch.setattr(pages, "_RESOURCES", tmp_path)
+    monkeypatch.setitem(pages._version_cache, "stamp", -1.0)
+    first = pages.asset_version()
+    (tmp_path / "js" / "app.js").write_text("v2", encoding="utf-8")
+    assert pages.asset_version() != first

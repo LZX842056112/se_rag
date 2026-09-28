@@ -191,6 +191,128 @@
     });
   }
 
+  /** 元素创建小工具：省掉 createElement + className + textContent 三连样板 */
+  function create(tag, className, text) {
+    var el = document.createElement(tag);
+    if (className) el.className = className;
+    if (text != null) el.textContent = String(text);
+    return el;
+  }
+
+  /** 任务 / 进度状态的中文标签（各页共用同一套措辞） */
+  var STATUS_LABEL = {
+    pending: '等待中',
+    processing: '处理中',
+    completed: '已完成',
+    failed: '失败'
+  };
+
+  /** 是否为图片链接（宽松判断，兼容带查询串的地址） */
+  function isImageUrl(url) {
+    try {
+      var parsed = new URL(url);
+      return /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(parsed.pathname);
+    } catch (_) {
+      return /\.(png|jpe?g|gif|webp|bmp|svg)(\?|#|$)/i.test(url || '');
+    }
+  }
+
+  /** URL 规整：去空白并把空格编码，避免 img src 直接失败 */
+  function normalizeUrl(rawUrl) {
+    var text = String(rawUrl || '').trim();
+    return text ? text.replace(/\s/g, '%20') : '';
+  }
+
+  /** 去重但保留原顺序（检索结果与引用顺序有语义，不能用 Set 直接打乱） */
+  function dedupeKeepOrder(values) {
+    var seen = new Set();
+    var out = [];
+    (Array.isArray(values) ? values : []).forEach(function (item) {
+      var text = String(item || '');
+      if (!text || seen.has(text)) return;
+      seen.add(text);
+      out.push(text);
+    });
+    return out;
+  }
+
+  /** 从自由文本里宽松提取 http(s) 链接（去掉首尾标点并按序去重） */
+  function extractUrlsLoose(text) {
+    var matches = String(text || '').match(/(https?:\/\/[^\s]+)/g) || [];
+    var trimmed = matches.map(function (item) {
+      return String(item || '')
+        .replace(/^[<([{'"]+|^[＜（【\[]+/, '')
+        .replace(/[)\]}'">，。,;；\]】）＞]+$/, '');
+    }).filter(Boolean);
+    return dedupeKeepOrder(trimmed);
+  }
+
+  /**
+   * 拆分「答案正文 + 图片列表」：支持 `【图片】` / `[图片]` 标记后的图片列表。
+   * 返回 `{ text, images }`，images 已规整、过滤并去重。
+   */
+  function parseAnswerAndImages(text) {
+    var raw = String(text || '');
+    var marker = /【\s*图片\s*】|\[\s*图片\s*\]/g;
+    var match;
+    var lastIndex = -1;
+    var lastLength = 0;
+    while ((match = marker.exec(raw)) !== null) {
+      lastIndex = match.index;
+      lastLength = match[0].length;
+    }
+    if (lastIndex === -1) return { text: raw, images: [] };
+
+    var body = raw.slice(0, lastIndex).trimEnd();
+    var tail = raw.slice(lastIndex + lastLength).trim();
+    var urls = [];
+    tail.split(/\r?\n/).map(function (line) { return line.trim(); }).filter(Boolean).forEach(function (line) {
+      if (line.indexOf('http://') === 0 || line.indexOf('https://') === 0) urls.push(line);
+      else urls = urls.concat(extractUrlsLoose(line));
+    });
+    var images = dedupeKeepOrder(urls.map(normalizeUrl).filter(isImageUrl));
+    return { text: body, images: images };
+  }
+
+  /**
+   * 渲染答案正文 + 图片：显式标记、接口候选、正文宽松提取三者取并集后去重。
+   * 图片加载成功只显示图片；加载失败才回退成链接，保证用户仍能手动打开。
+   */
+  function renderAnswerWithImages(containerEl, answerText, candidateImageUrls) {
+    var parsed = parseAnswerAndImages(answerText);
+    var candidates = (Array.isArray(candidateImageUrls) ? candidateImageUrls : [])
+      .map(normalizeUrl).filter(isImageUrl);
+    var loose = extractUrlsLoose(answerText).map(normalizeUrl).filter(isImageUrl);
+    var images = dedupeKeepOrder(parsed.images.concat(candidates).concat(loose));
+
+    containerEl.textContent = '';
+    var textEl = create('div', 'answer-text', (parsed.text || '').trim() || '（已完成，但未返回答案）');
+    containerEl.appendChild(textEl);
+
+    if (!images.length) return;
+    var wrap = create('div', 'answer-images');
+    images.forEach(function (url) {
+      var safeUrl = normalizeUrl(url);
+      var img = create('img');
+      img.loading = 'lazy';
+      img.src = safeUrl;
+      img.alt = '参考图片';
+      img.referrerPolicy = 'no-referrer';
+
+      var link = create('a', null, '图片：' + url);
+      link.href = safeUrl;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.style.display = 'none';
+
+      img.addEventListener('load', function () { link.style.display = 'none'; img.style.display = ''; });
+      img.addEventListener('error', function () { img.style.display = 'none'; link.style.display = 'inline'; });
+      wrap.appendChild(img);
+      wrap.appendChild(link);
+    });
+    containerEl.appendChild(wrap);
+  }
+
   window.App = {
     PATHS: PATHS,
     resolveBase: resolveBase,
@@ -207,6 +329,14 @@
     formatDateTime: formatDateTime,
     toast: toast,
     confirm: confirmDialog,
+    create: create,
+    STATUS_LABEL: STATUS_LABEL,
+    isImageUrl: isImageUrl,
+    normalizeUrl: normalizeUrl,
+    dedupeKeepOrder: dedupeKeepOrder,
+    extractUrlsLoose: extractUrlsLoose,
+    parseAnswerAndImages: parseAnswerAndImages,
+    renderAnswerWithImages: renderAnswerWithImages,
     setAdminToken: function (token) {
       state.adminToken = String(token || '').trim();
       try { sessionStorage.setItem('evo_admin_token', state.adminToken); } catch (_) { /* 忽略隐私模式异常 */ }

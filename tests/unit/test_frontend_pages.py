@@ -1,8 +1,8 @@
-"""前端页面静态检查：三页引用的公共库能力必须真的存在。
+"""前端静态检查：页面保持「纯标记 + 外链资源」，公共能力只有一份实现。
 
-回归背景：`/js/common.js` 被 `/static/app.js` 取代后，chat.html 仍在调用旧全局
-`formatTime(ts)`，导致「刷新后历史回显」整段抛 `ReferenceError: formatTime is not defined`，
-并被 catch 静默吞成一句 toast（浏览器联调时才暴露）。
+回归背景：
+- `formatTime is not defined`：删除 common.js 后 chat 页仍裸调旧全局，刷新历史整段报错；
+- 页面内联 CSS/JS 让 HTML 膨胀到 30+ KB 且无法被浏览器缓存，故改为外链 + 内容指纹。
 """
 from __future__ import annotations
 
@@ -13,11 +13,18 @@ import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PAGES_DIR = PROJECT_ROOT / "app" / "resources" / "html"
+JS_DIR = PROJECT_ROOT / "app" / "resources" / "js"
+CSS_DIR = PROJECT_ROOT / "app" / "resources" / "css"
 
-LEGACY_GLOBALS = ("resolveApiBase", "DEFAULT_HEADERS", "formatTs")
+PAGE_ASSETS = {
+    "chat.html": ("app.css", "chat.css", "app.js", "chat.js"),
+    "approval.html": ("app.css", "approval.css", "app.js", "approval.js"),
+    "import.html": ("app.css", "import.css", "app.js", "import.js"),
+}
 
-# 页面里可能以短名使用的公共函数；只要裸调用，就必须在页内别名到 App.*
+# 页面/脚本里可能以短名使用的公共函数；只要裸调用，就必须别名到 App.*
 HELPERS = ("escapeHtml", "formatTime", "formatDateTime", "nowTime", "showToast", "toast", "esc", "fmtTs")
+LEGACY_GLOBALS = ("resolveApiBase", "DEFAULT_HEADERS", "formatTs")
 
 
 def bare_helpers_without_alias(source: str) -> set[str]:
@@ -45,28 +52,55 @@ def test_guard_detects_the_original_history_regression():
     assert bare_helpers_without_alias(fixed_snippet) == set()
 
 
-@pytest.mark.parametrize("page_name", ["chat.html", "approval.html", "import.html"])
-def test_pages_use_shared_assets_only(page_name: str):
+@pytest.mark.parametrize("page_name", list(PAGE_ASSETS))
+def test_page_is_markup_only(page_name: str):
+    """页面不得再包含内联 <style> / <script> 代码块，也不得引用已删除的 common.js。"""
     source = (PAGES_DIR / page_name).read_text(encoding="utf-8")
-    assert "/js/common.js" not in source, "页面仍引用已删除的 common.js"
-    assert "/static/app.js" in source, "页面未引用公共库 app.js"
-    assert "/static/app.css" in source, "页面未引用公共样式 app.css"
+    assert "<style" not in source, f"{page_name} 仍有内联样式，请移到 /static/*.css"
+    assert not re.search(r"<script(?![^>]*\bsrc=)[^>]*>", source), f"{page_name} 仍有内联脚本"
+    assert "/js/common.js" not in source
+    assert "<script src=" in source and "app.js" in source
+
+
+@pytest.mark.parametrize("page_name,assets", PAGE_ASSETS.items())
+def test_page_references_versioned_whitelisted_assets(page_name: str, assets: tuple[str, ...]):
+    """页面引用的静态资源必须存在，且带上内容指纹参数（否则长缓存会锁死旧版本）。"""
+    source = (PAGES_DIR / page_name).read_text(encoding="utf-8")
+    refs = re.findall(r'(?:href|src)="/static/([^"?]+)(\?v=\{\{ASSET_V\}\})?"', source)
+    assert refs, f"{page_name} 没有引用任何静态资源"
+    referenced = [name for name, _ in refs]
+    assert sorted(referenced) == sorted(assets), f"{page_name} 资源集合不符：{referenced}"
+    for name, version in refs:
+        assert version, f"{page_name} 引用的 {name} 缺少 ?v={{ASSET_V}} 版本参数"
+        assert (JS_DIR if name.endswith(".js") else CSS_DIR).joinpath(name).exists(), f"{name} 不存在"
+
+
+@pytest.mark.parametrize("page_name", list(PAGE_ASSETS))
+def test_pages_use_shared_helpers_only(page_name: str):
+    """页面脚本不得使用旧全局；裸调用的公共函数必须已别名。"""
+    page_source = (PAGES_DIR / page_name).read_text(encoding="utf-8")
+    script_name = page_name.replace(".html", ".js")
+    script_source = (JS_DIR / script_name).read_text(encoding="utf-8")
     for legacy in LEGACY_GLOBALS:
-        assert legacy not in source, f"页面仍使用旧全局 {legacy}"
+        assert legacy not in page_source and legacy not in script_source, f"{page_name} 仍使用旧全局 {legacy}"
+    missing = bare_helpers_without_alias(script_source)
+    assert not missing, f"{script_name} 裸调用了未别名的公共函数：{sorted(missing)}"
 
 
-@pytest.mark.parametrize("page_name", ["chat.html", "approval.html", "import.html"])
-def test_shared_helpers_are_aliased(page_name: str):
-    source = (PAGES_DIR / page_name).read_text(encoding="utf-8")
-    missing = bare_helpers_without_alias(source)
-    assert not missing, f"{page_name} 裸调用了未别名的公共函数：{sorted(missing)}"
-
-
-@pytest.mark.parametrize("page_name", ["chat.html", "approval.html", "import.html"])
+@pytest.mark.parametrize("page_name", list(PAGE_ASSETS))
 def test_pages_do_not_use_native_modals(page_name: str):
     """原生 confirm/alert/prompt 会阻塞渲染进程（联调时卡死标签页），统一用页内浮层。"""
-    source = (PAGES_DIR / page_name).read_text(encoding="utf-8")
+    script_source = (JS_DIR / page_name.replace(".html", ".js")).read_text(encoding="utf-8")
     for modal in ("confirm", "alert", "prompt"):
-        assert not re.search(rf"(?<![\w.]){modal}\s*\(", source), (
+        assert not re.search(rf"(?<![\w.]){modal}\s*\(", script_source), (
             f"{page_name} 仍在使用原生 {modal}()，请改用 App.{modal if modal == 'confirm' else 'toast'}()"
         )
+
+
+def test_shared_library_has_no_page_specific_dead_code():
+    """公共库只放跨页能力：不应出现仅某页使用的历史遗留函数名。"""
+    source = (JS_DIR / "app.js").read_text(encoding="utf-8")
+    for legacy in ("shouldShowImagesByAnswer", "parseImagesFromTextLoosely", "resolveApiBase"):
+        assert legacy not in source, f"app.js 仍包含历史遗留实现：{legacy}"
+    for required in ("renderAnswerWithImages", "openStream", "confirm", "create"):
+        assert required in source

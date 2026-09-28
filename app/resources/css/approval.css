@@ -1,0 +1,45 @@
+/*
+ * 自进化审批后台样式（视觉基础见 /static/app.css）。
+ */
+body{margin:0;min-height:100vh;padding:24px}
+.filters{margin-left:auto;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.count{font-size:12px;color:var(--muted)}
+.greet{font-size:12px;color:var(--muted);margin-top:10px}
+.item{
+  background:var(--panel);
+  border:1px solid var(--border);
+  border-radius:14px;
+  margin-top:14px;
+  padding:16px 18px;
+  box-shadow:0 6px 18px rgba(31,45,61,.06);
+}
+.item-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.st{font-size:11px;line-height:1;padding:4px 8px;border-radius:8px;color:#fff}
+.st.draft{background:#f2a33c}
+.st.active{background:var(--ok)}
+.st.rejected{background:var(--danger)}
+.st.candidate{background:var(--brand2)}
+.st.pending{background:#8aa0b4}
+.st.hold{background:#b068d0}
+.st.removed{background:#9aa6b2}
+.item-id{font-size:11px;color:var(--muted);font-family:ui-monospace,Menlo,monospace}
+.item-ts{margin-left:auto;font-size:11px;color:var(--muted)}
+.q{font-size:15px;font-weight:600;margin:10px 0 4px}
+.a{
+  font-size:13px;color:#3b4a5a;line-height:1.55;white-space:pre-wrap;
+  background:rgba(91,124,250,.05);border-left:3px solid rgba(91,124,250,.35);
+  padding:8px 12px;border-radius:0 8px 8px 0;
+}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.ops{margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.edit-box{margin-top:12px;border-top:1px dashed var(--border);padding-top:12px}
+.edit-box label{display:block;font-size:12px;color:var(--muted);margin:6px 0 4px}
+.edit-box textarea{
+  width:100%;border:1px solid var(--border);border-radius:9px;padding:8px 10px;
+  font-size:13px;line-height:1.5;resize:vertical;font-family:inherit;outline:none;
+}
+.edit-box textarea:focus{border-color:rgba(26,167,255,.6);box-shadow:0 0 0 3px rgba(26,167,255,.12)}
+.tok{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
+.tok input{
+  width:150px;font-size:12px;font-family:ui-monospace,Menlo,monospace;
+}

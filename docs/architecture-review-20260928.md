@@ -208,6 +208,32 @@ flowchart LR
 
 ## 12. 风险与后续建议
 
+### 12.1 前端资源与缓存优化（2026-09-28 下午补充）
+
+问题：三个页面把 CSS/JS 全部内联，chat 页 95% 的体积都是内联代码，且所有静态资源都没有
+`Cache-Control`（浏览器只能靠启发式缓存，既可能重复下载、也可能命中旧 JS——联调时就踩过一次
+"页面还是旧脚本"）。
+
+改造：内联样式/脚本全部外链化为 `/static/{app,chat,approval,import}.{css,js}`；公共库扩展出
+`create / STATUS_LABEL / isImageUrl / normalizeUrl / dedupeKeepOrder / extractUrlsLoose /
+parseAnswerAndImages / renderAnswerWithImages`，三页共用；页面用 `?v=<内容指纹>` 引用资源，
+由 `app/api/routers/pages.py` 注入（按 mtime 失效的 sha1 前 10 位）。
+
+| 指标 | 改造前 | 改造后 |
+| --- | --- | --- |
+| `chat.html` | 36,101 字节（内联 CSS 7.8KB + JS 23.7KB，占 95%） | **2,078 字节（-94%）** |
+| `approval.html` | 11,757 字节 | **1,912 字节（-84%）** |
+| `import.html` | 12,811 字节 | **1,444 字节（-89%）** |
+| 缓存策略 | 全部无 `Cache-Control` | HTML `no-cache`（每次校验，避免旧页面）；静态资源 `public, max-age=86400, immutable` + 内容指纹 |
+| 静态资源路由 | 两个写死的 `/static/app.{css,js}` | 白名单化的 `/static/{asset}`（未登记资源 404，天然免疫路径穿越） |
+| 重复实现 | 图片/答案解析、DOM 创建、状态文案分散在页内 | 收敛进 `app.js`，删除死代码 `shouldShowImagesByAnswer` / `parseImagesFromTextLoosely` |
+| 页面骨架 | 顶栏/品牌样式各写一份，导入页风格不同 | 共享 `.topbar/.brand/.logo/.title/.panel`，三页视觉与措辞统一 |
+
+浏览器回归（三页真实操作，全部通过）：导入 md 七个节点全绿 / .txt 被拒并只记 warn；
+问答流式回答 + `知识库` 引用 + 置信度 100% + 点赞「已反馈」；刷新后历史（含引用与反馈栏）恢复；
+清空对话走页内确认浮层；审批页 draft 卡片渲染「通过/驳回/编辑」并弹出页内确认（取消后状态不变）。
+离线单测 80 passed（新增 7 条前端静态/路由用例，含"资源必须带指纹""页面不得内联"与守卫自检）。
+
 | 优先级 | 风险 / 建议 | 收益 | 代价 |
 | --- | --- | --- | --- |
 | P0 | `uv.lock` 未随依赖裁剪重算（沙箱内无法访问 PyPI 镜像）；请在本地执行 `uv lock && uv sync` | 锁文件与实际依赖一致 | 需要网络与一次完整安装 |

@@ -376,6 +376,16 @@ E2E_ENABLED=1 uv run pytest -m e2e tests/e2e -s
 - 新增架构与优化报告 `docs/architecture-review-20260928.md` 与浏览器联调验证报告
   `docs/verification-report-20260928.md`。
 
+**⑦ 前端资源与外链化优化**
+
+- 三页把内联 CSS/JS 全部外链为 `/static/{app,chat,approval,import}.{css,js}`：
+  `chat.html` 36.1KB → 2.0KB（-94%）、`approval.html` 11.8KB → 1.9KB、`import.html` 12.8KB → 1.4KB。
+- 公共库补齐 `create / STATUS_LABEL / renderAnswerWithImages / parseAnswerAndImages / extractUrlsLoose`
+  等跨页能力，删除页内死代码；页面骨架（顶栏/品牌/面板）统一到 `app.css`。
+- 缓存策略：HTML `no-cache`；静态资源 `public, max-age=86400, immutable`，并用
+  `?v=<内容指纹>`（`app/api/routers/pages.py` 注入）保证更新立即生效；
+  `/static/{asset}` 改为白名单路由，未登记资源 404。
+
 ### 2026-09-27
 
 - 反馈按钮渲染修复、上传类型校验（L1）、接地性（groundedness）评估修复、演进知识召回链路修复、
