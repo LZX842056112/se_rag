@@ -38,7 +38,8 @@ def _exists_question(question: str) -> bool:
         return False
 
 
-def _store_need_info(question: str, item_names: list[str], reason: str) -> KnowledgeCandidate | None:
+def _store_need_info(question: str, item_names: list[str], reason: str,
+                     gap_id: str | None = None) -> KnowledgeCandidate | None:
     """登记「待人工补充」候选：不臆造答案，等管理员补充事实后再通过。
 
     这类候选不可能被误批为知识（``approve`` 会拒绝），也不会进入检索。
@@ -55,6 +56,7 @@ def _store_need_info(question: str, item_names: list[str], reason: str) -> Knowl
         item_names=list(item_names or []),
         status="need_info",
         reason=reason,
+        gap_id=gap_id,
     )
     evolution_repo.k_candidates.insert_one(candidate.document())
     logger.info(f"候选登记为待人工补充：{question[:40]}（{reason}）")
@@ -77,7 +79,7 @@ def generate_candidate(gap: dict[str, Any], context_docs: list[dict[str, Any]]) 
 
     # 无证据：不臆造，交人工补充（此前正是这里生成了「未提及…建议联系官方」的伪知识）
     if not context.strip():
-        return _store_need_info(question, item_names, "无检索证据，需人工补充事实")
+        return _store_need_info(question, item_names, "无检索证据，需人工补充事实", str(gap.get("gap_id") or "") or None)
 
     last_error: Exception | None = None
     for _ in range(_MAX_RETRY):
@@ -90,7 +92,9 @@ def generate_candidate(gap: dict[str, Any], context_docs: list[dict[str, Any]]) 
 
             faq_question, faq_answer, has_pii = sanitize_candidate(faq_question, faq_answer)
             if not has_pii and looks_like_non_answer(faq_answer):
-                return _store_need_info(faq_question, item_names, "生成答案未包含事实（疑似“无信息”结论）")
+                return _store_need_info(faq_question, item_names,
+                                        "生成答案未包含事实（疑似“无信息”结论）",
+                                        str(gap.get("gap_id") or "") or None)
             candidate = KnowledgeCandidate(
                 faq_question=faq_question,
                 faq_answer=faq_answer,
@@ -98,6 +102,7 @@ def generate_candidate(gap: dict[str, Any], context_docs: list[dict[str, Any]]) 
                 item_names=item_names,
                 status="rejected" if has_pii else "draft",
                 reason="PII detected" if has_pii else "",
+                gap_id=str(gap.get("gap_id") or "") or None,
             )
             if _exists_question(faq_question):
                 candidate.status = "rejected"

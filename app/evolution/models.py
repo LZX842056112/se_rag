@@ -40,6 +40,7 @@ class GapSignal(BaseModel):
 
 
 class KnowledgeGap(BaseModel):
+    gap_id: str | None = None   # Mongo 主键（生成候选时透传给候选，用于回写缺口状态）
     session_id: str
     query: str = ""
     item_names: list[str] = Field(default_factory=list)
@@ -62,6 +63,7 @@ class KnowledgeCandidate(BaseModel):
     status: str = "draft"      # draft | active | deprecated | rejected
     evo_doc_id: str | None = None
     reason: str = ""
+    gap_id: str | None = None   # 来源缺口 id（审批后把缺口标记为 resolved/rejected）
     ts: float = Field(default_factory=_now)
 
     def document(self) -> dict[str, Any]:

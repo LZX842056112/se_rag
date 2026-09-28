@@ -83,6 +83,28 @@ def test_edit_with_refusal_text_keeps_need_info(fake_mongo):
     assert stored["status"] == "need_info"
 
 
+def test_approve_marks_source_gap_resolved(fake_mongo, upsert_ok, monkeypatch):
+    """审批通过后要把来源缺口标记为 resolved，避免缺口永久残留（第二个真实事故）。"""
+    gap = fake_mongo[settings.mongo.k_gaps_collection].insert_one(
+        {"session_id": "s1", "query": "Q", "status": "candidate", "confidence": 0.7}
+    )
+    cid = _insert(fake_mongo, gap_id=str(gap.inserted_id))
+    ok, message = approval_service.approve(cid)
+    assert (ok, message) == (True, "")
+    stored_gap = fake_mongo[settings.mongo.k_gaps_collection].find_one({"_id": gap.inserted_id})
+    assert stored_gap["status"] == "resolved"
+
+
+def test_reject_marks_source_gap_rejected(fake_mongo, upsert_ok):
+    gap = fake_mongo[settings.mongo.k_gaps_collection].insert_one(
+        {"session_id": "s1", "query": "Q", "status": "candidate", "confidence": 0.7}
+    )
+    cid = _insert(fake_mongo, gap_id=str(gap.inserted_id))
+    assert approval_service.reject(cid) is True
+    stored_gap = fake_mongo[settings.mongo.k_gaps_collection].find_one({"_id": gap.inserted_id})
+    assert stored_gap["status"] == "rejected"
+
+
 def test_approve_missing_candidate_returns_message(fake_mongo, upsert_ok):
     ok, message = approval_service.approve("6aba50cb5bc4916bb36526bf")
     assert ok is False and message == "候选不存在"

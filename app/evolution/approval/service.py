@@ -89,15 +89,29 @@ def approve(candidate_id: str, reason: str = "") -> tuple[bool, str]:
         except PyMongoError as exc:
             logger.warning(f"审批回滚失败：{exc}")
         return False, "写入向量库失败，候选已回滚为待审批"
+    _mark_gap(item.gap_id, "resolved")
     return True, ""
+
+
+def _mark_gap(gap_id: str | None, status: str) -> None:
+    """回写来源缺口状态（审批通过 → resolved / 驳回 → rejected），避免缺口永久残留。"""
+    if not gap_id:
+        return
+    try:
+        evolution_repo.k_gaps.update_one({"_id": ObjectId(gap_id)}, {"$set": {"status": status}})
+    except Exception as exc:  # noqa: BLE001 - 缺口状态属辅助信息，失败不影响审批结果
+        logger.warning(f"回写缺口状态失败：{gap_id} -> {status}（{exc}）")
 
 
 def reject(candidate_id: str, reason: str = "") -> bool:
     """驳回候选。"""
     try:
+        object_id = ObjectId(candidate_id)
+        current = evolution_repo.k_candidates.find_one({"_id": object_id}) or {}
         evolution_repo.k_candidates.update_one(
-            {"_id": ObjectId(candidate_id)}, {"$set": {"status": "rejected", "reason": reason}}
+            {"_id": object_id}, {"$set": {"status": "rejected", "reason": reason}}
         )
+        _mark_gap(current.get("gap_id"), "rejected")
         return True
     except Exception as exc:  # noqa: BLE001
         logger.warning(f"驳回失败：{exc}")

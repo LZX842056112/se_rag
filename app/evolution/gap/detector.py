@@ -16,15 +16,24 @@ from app.shared.runtime.logger import logger
 _DEDUP_WINDOW = 3600
 
 
-def _is_duplicated(session_id: str, ts: float) -> bool:
-    """同一 session 在窗口内已产生 pending/candidate 缺口则跳过，防重复消费。"""
+def _is_duplicated(query: str, ts: float) -> bool:
+    """**按问题**去重（不是按会话）。
+
+    真实事故：早期实现按 session 判定「已有 pending/candidate 缺口就跳过」，而缺口在候选通过后
+    不会复位，于是同一会话里**后续的所有问题永远扫不到**（日志表现为「产出 strong 缺口 0 条」）。
+
+    规则：
+    - 同一问题已有 ``pending`` 缺口（尚未生成候选）→ 跳过；
+    - 同一问题在去重窗口内出现过缺口 → 跳过。
+    已经生成过候选的问题由候选级 ``_exists_question`` 负责去重，因此这里不再看 ``candidate``。
+    """
+    text = str(query or "").strip()
+    if not text:
+        return False
     try:
-        existed = evolution_repo.k_gaps.find_one(
-            {"session_id": session_id, "status": {"$in": ["pending", "candidate"]}}
-        )
-        if existed:
+        if evolution_repo.k_gaps.find_one({"query": text, "status": "pending"}):
             return True
-        recent = evolution_repo.k_gaps.find_one({"session_id": session_id, "ts": {"$gte": ts - _DEDUP_WINDOW}})
+        recent = evolution_repo.k_gaps.find_one({"query": text, "ts": {"$gte": ts - _DEDUP_WINDOW}})
         return recent is not None
     except Exception:  # noqa: BLE001 - 去重失败按「不重复」处理，交由后续去重兜底
         return False
@@ -90,11 +99,12 @@ def scan_unresolved_feedbacks(batch: int = 50) -> list[KnowledgeGap]:
             .limit(batch)
         )
         for doc in cursor:
-            if _is_duplicated(doc.get("session_id", ""), doc.get("ts") or 0):
+            if _is_duplicated(doc.get("query", ""), doc.get("ts") or 0):
                 continue
             gap = detect_and_classify(doc, transcript_slice=doc.get("query", ""))
             if gap.status == "candidate":
-                evolution_repo.k_gaps.insert_one(gap.document())
+                inserted = evolution_repo.k_gaps.insert_one(gap.document())
+                gap.gap_id = str(inserted.inserted_id)  # 透传给候选，便于审批后回写缺口状态
                 gaps.append(gap)
         logger.info(f"缺口扫描完成，产出 strong 缺口 {len(gaps)} 条")
     except Exception as exc:  # noqa: BLE001
