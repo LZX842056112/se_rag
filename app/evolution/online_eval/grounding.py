@@ -1,6 +1,10 @@
 """在线接地性（groundedness）评估：对答案相对证据片段做支持度打分。
 
-走轻量 LLM 结构化输出；异常时安全降级为 0（表示「无法判定」），不阻断主链路。
+走轻量 LLM 结构化输出；**无法判定时返回 ``None``**（而不是 0.0），不阻断主链路。
+
+历史问题：证据为空 / 调用失败 / 解析失败都返回 0.0，前端一律渲染「回答置信度 0%」，
+与「答案确实不接地（评分为 0）」无法区分，用户会误判为系统坏了。现在用 ``None`` 表示
+「未评估」，由前端显示为「未评估」。
 """
 from __future__ import annotations
 
@@ -20,10 +24,10 @@ _EVIDENCE_CHAR_LIMIT = 500
 _ANSWER_CHAR_LIMIT = 4000
 
 
-def compute_groundedness(answer: str, evidence_texts: list[str]) -> float:
-    """计算答案相对证据的接地分（0~1）；空证据或评估失败返回 0。"""
+def compute_groundedness(answer: str, evidence_texts: list[str]) -> float | None:
+    """计算答案相对证据的接地分（0~1）；空证据或评估失败返回 ``None``（未评估）。"""
     if not answer or not evidence_texts:
-        return 0.0
+        return None
     try:
         context = "\n".join(f"- {text[:_EVIDENCE_CHAR_LIMIT]}" for text in evidence_texts)
         prompt = _PROMPT.format(context=context, answer=answer[:_ANSWER_CHAR_LIMIT])
@@ -31,5 +35,5 @@ def compute_groundedness(answer: str, evidence_texts: list[str]) -> float:
         parsed = parse_json_object(response.content)
         return max(0.0, min(1.0, float(parsed.get("groundedness", 0.0))))
     except Exception as exc:  # noqa: BLE001 - 评估失败不影响主链路
-        logger.warning(f"groundedness 评估失败，降级为 0：{exc}")
-        return 0.0
+        logger.warning(f"groundedness 评估失败，标记为未评估：{exc}")
+        return None

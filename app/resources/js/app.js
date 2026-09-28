@@ -17,6 +17,7 @@
     history: function (sessionId) { return '/api/history/' + encodeURIComponent(sessionId); },
     feedback: '/api/evolution/feedback',
     candidates: '/api/evolution/candidates',
+    evolutionStatus: '/api/evolution/status',
     candidateAction: function (id, action) {
       return '/api/evolution/candidates/' + encodeURIComponent(id) + '/' + action;
     },

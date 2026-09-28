@@ -65,6 +65,38 @@ def test_web_cap_only_when_local_hits():
     assert len(rerank_service.cap_web_docs(web, limit=2)) == 5
 
 
+def test_web_docs_cannot_outrank_local_hits():
+    """回归：联网片段分数再高，也不允许排在本地命中之前。"""
+    docs = [
+        {"chunk_id": 1, "type": "milvus", "source": "milvus", "score": 0.42},
+        {"chunk_id": None, "type": "web", "source": "web", "score": 0.999, "url": "https://w/1"},
+        {"chunk_id": None, "type": "web", "source": "web", "score": 0.998, "url": "https://w/2"},
+    ]
+    ranked = rerank_service.prefer_local_docs(list(docs))
+    assert ranked[0]["chunk_id"] == 1, "本地知识必须排在联网补充之前"
+    assert [d["score"] for d in ranked[1:]] == [0.42, 0.42], "联网分被压到本地最高分"
+
+
+def test_pure_web_answering_keeps_scores():
+    """本地零命中时联网结果保持原分（纯联网问答仍可用）。"""
+    docs = [
+        {"chunk_id": None, "type": "web", "source": "web", "score": 0.5, "url": "https://w/1"},
+        {"chunk_id": None, "type": "web", "source": "web", "score": 0.9, "url": "https://w/2"},
+    ]
+    ranked = rerank_service.prefer_local_docs(list(docs))
+    assert [d["score"] for d in ranked] == [0.9, 0.5]
+
+
+def test_local_wins_ties_against_web():
+    """同分时本地排前（不依赖排序稳定性）。"""
+    docs = [
+        {"chunk_id": None, "type": "web", "source": "web", "score": 0.7, "url": "https://w/1"},
+        {"chunk_id": 9, "type": "milvus", "source": "milvus", "score": 0.7},
+    ]
+    ranked = rerank_service.prefer_local_docs(list(docs))
+    assert ranked[0]["chunk_id"] == 9
+
+
 def test_evolution_authority_survives_truncation(monkeypatch):
     """权威 FAQ 即使重排分数被压低，也必须留在最终上下文里。"""
     evolution = _evolution_chunk()

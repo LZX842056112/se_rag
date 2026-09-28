@@ -205,6 +205,9 @@ uv sync            # 依据 pyproject.toml + uv.lock 创建环境并安装依赖
 | `TASK_STATE_TTL_SECONDS` | 任务进度内存保留时长 | `21600`（6 小时） |
 | `EVOLUTION_ENABLED` | 自进化总开关 | `false` |
 | `EVOLUTION_SCHEDULE_ENABLED` / `EVOLUTION_SCHEDULE_INTERVAL_MINUTES` | 调度器 | `true` / `30` |
+| `EVOLUTION_METRIC_INTERVAL_MINUTES` | 指标快照 + 参数自调的执行周期（0 = 每轮） | `60` |
+| `EVOLUTION_BACKTEST_ENABLED` / `EVOLUTION_BACKTEST_INTERVAL_HOURS` | 回测止损开关与周期 | `true` / `24` |
+| `EVOLUTION_BACKTEST_MIN_HITS` | 回测下架的最小命中数（防单条差评误杀） | `3` |
 | `EVOLUTION_ADMIN_TOKEN` | 审批写操作令牌 | 无 |
 | `MCP_TIMEOUT_SECONDS` | 联网检索 MCP 超时（秒） | `30` |
 | `WEB_MAX_IN_CONTEXT` | 本地有命中时，最终上下文保留的联网结果条数上限 | `2` |
@@ -242,6 +245,7 @@ uvicorn app.api.http.import_server:app --host 0.0.0.0 --port 8000
 | `DELETE /api/history/{session_id}` | 清空会话历史 |
 | `POST /api/evolution/feedback` | 提交反馈（`thumbs`=1 / -1） |
 | `GET /api/evolution/candidates` | 候选列表（可按 `status` 筛选） |
+| `GET /api/evolution/status` | 闭环运行状态（缺口/候选计数、调度进度、最近指标快照） |
 | `POST /api/evolution/candidates/{id}/approve` `/reject` `/edit` | 审批写操作（需 `X-Internal-Token`） |
 | `DELETE /api/evolution/candidates/{id}` | 下架候选（已入库条目同时移出向量库，需 Token） |
 
@@ -475,6 +479,27 @@ E2E_ENABLED=1 uv run pytest -m e2e tests/e2e -s
   并新增 2 条前端守卫用例（页面与脚本生成的标记均不得出现 `style="`）；确认 `app.infra` 已无任何引用、
   「无法作答」判定只有 `app/shared/utils/answer.py` 一份口径。详见
   `docs/architecture-review-20260928.md` 第 15 节。
+
+**⑭ 复查三项遗留问题全部修复（联网排名/引用、闭环接线、缺口扫描游标）**
+
+- **联网不再抢走本地知识，且联网来源有独立引用**：新增 `rerank_service.prefer_local_docs()`——本地有命中时，
+  联网文档的排序分被压到「不超过本地最高分」（同分时本地排前），本地知识永远在联网补充之前；
+  `citations` 现在覆盖 `kb / evolution / web` 三类来源，联网引用带 `source="web"` + 标题 + 原网页链接，
+  前端标「**联网**」并可点开（只接受 http/https）。反馈载荷会**剔除联网引用**，避免 URL 被当成 `chunk_id`
+  污染缺口信号。
+- **接地性区分「未评估」**：`compute_groundedness` 在证据为空 / 调用失败 / 输出不可解析时返回 `None`，
+  API 与前端显示「回答置信度 未评估」，不再一律渲染成 0%（此前与「答案确实不接地」不可区分）。
+- **闭环真正闭环**：`record_metric` / `adjust_step` / `run_backtest` 此前**没有任何调用方**（文档里的自调参
+  与回测从未运行）。现由 `scheduler.run_evolution_cycle_once()` 编排：每轮扫描生成 →（按 `EVOLUTION_METRIC_INTERVAL_MINUTES`）
+  指标快照 + 参数自调 →（按 `EVOLUTION_BACKTEST_INTERVAL_HOURS`）回测止损；自调基线取**历史**快照
+  （避免与本轮快照自比自导致永不触发），回测新增 `backtest_min_hits` 门槛（默认 3，防单条差评误杀人工审批的知识）。
+  新增 `GET /api/evolution/status` 并把「闭环：缺口 N · 候选 M · 近一次自评 <时间>」显示在审批页顶部，
+  排障不必再翻日志。
+- **缺口扫描不再饿死早期信号**：`scan_unresolved_feedbacks` 由「取最新 batch 条」改为**按 ts 升序 + 游标推进**，
+  窗口扫完后游标归零复扫（重复由问题级去重兜住），事件再多也不会漏掉更早的未解决信号。
+- 复验：真实库 + 真实模型实测 `引用来源（5）= 3 知识库 + 2 联网`、置信度 90%、控制台 0 error；
+  调度日志出现「指标快照 / 回测完成」与「游标 … → 0」的复扫记录；离线 **153 passed / 1 deselected**、
+  `pyflakes` 0 告警。详见 `docs/verification-report-20260928.md` 第 10.8 节。
 
 ### 2026-09-27
 

@@ -69,6 +69,8 @@ def run_backtest(window_days: int | None = None) -> list[BacktestResult]:
         result.reject_rate = result.rejected / result.hits if result.hits else 0.0
         if result.hits == 0:
             result.verdict = "hold"  # 证据不足，先放着
+        elif result.hits < cfg.backtest_min_hits:
+            result.verdict = "hold"  # 命中次数不足，避免单条差评误杀人工审批的知识
         elif result.reject_rate > cfg.reject_rate_max:
             result.verdict = "remove"  # 拒绝率超上限，先下架
         elif result.adopt_rate >= cfg.attain_rate_min:

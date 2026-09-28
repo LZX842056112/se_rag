@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+from app.evolution.models import MetricSnapshot
 from app.evolution.online_eval.metrics import compute_snapshot
 from app.evolution.repositories import evolution_repo
 from app.evolution.tuning import param_registry
@@ -16,10 +17,15 @@ _MIN = {"RRF_K": 20, "RRF_TOP": 2, "RERANK_TOP_K": 2}
 _MAX = {"RRF_K": 200, "RRF_TOP": 20, "RERANK_TOP_K": 6}
 
 
-def _baseline_adopt_rate() -> float | None:
-    """取最近 3 条指标快照的平均采纳率作为基线。"""
+def _baseline_adopt_rate(before_ts: float | None = None) -> float | None:
+    """取最近 3 条历史指标快照的平均采纳率作为基线。
+
+    ``before_ts`` 用于排除「本轮刚写入的快照」：否则自己与自己比较，``diff`` 恒为
+    一个被自身拉平的小值，自调几乎永不触发（接线时的经典隐形坑）。
+    """
     try:
-        rows = list(evolution_repo.k_metrics.find().sort("ts", -1).limit(3))
+        query = {"ts": {"$lt": before_ts}} if before_ts is not None else {}
+        rows = list(evolution_repo.k_metrics.find(query).sort("ts", -1).limit(3))
         if not rows:
             return None
         return sum(row.get("adopt_rate", 0.0) for row in rows) / len(rows)
@@ -27,15 +33,17 @@ def _baseline_adopt_rate() -> float | None:
         return None
 
 
-def adjust_step() -> bool:
+def adjust_step(snapshot: MetricSnapshot | None = None) -> bool:
     """执行一次参数自调 + 止损判定，返回是否有参数被更新。
 
     三态：数据不足/持平不动；明显改善小幅上调；小幅恶化小幅下调（不越下限）；骤降回退下限。
+
+    ``snapshot`` 由调度器传入（与写库的是同一份）；不传时自行计算，保持函数可独立调用。
     """
     if not settings.evolution.enabled:
         return False
-    snapshot = compute_snapshot()
-    baseline = _baseline_adopt_rate()
+    snapshot = snapshot or compute_snapshot()
+    baseline = _baseline_adopt_rate(snapshot.ts)
     if baseline is None or baseline <= 0.0:
         return False  # 基线数据不足，不做动作
 

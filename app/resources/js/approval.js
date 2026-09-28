@@ -14,6 +14,7 @@
   const countEl = document.getElementById('count');
   const filterEl = document.getElementById('statusFilter');
   const tokenEl = document.getElementById('adminToken');
+  const statusEl = document.getElementById('evoStatus');
 
   const ST_LABEL = {
     draft: '待审批',
@@ -33,6 +34,35 @@
   }
 
   function shortId(id) { return String(id || '').slice(0, 8); }
+
+  function sumCounts(counts) {
+    return Object.keys(counts || {}).reduce((total, key) => total + (counts[key] || 0), 0);
+  }
+
+  function shortClock(ts) {
+    return ts ? App.formatDateTime(ts) : '未执行';
+  }
+
+  /** 闭环状态：把「扫描游标 / 缺口与候选计数」显式展示，避免只能翻日志判断是否卡住 */
+  async function loadStatus() {
+    if (!statusEl) return;
+    try {
+      const data = await App.fetchJson(App.PATHS.evolutionStatus);
+      if (!data.enabled) { statusEl.textContent = '闭环状态：自进化未开启'; return; }
+      const gaps = sumCounts(data.gaps);
+      const candidates = sumCounts(data.candidates);
+      const scheduler = data.scheduler || {};
+      statusEl.textContent = '闭环：缺口 ' + gaps + ' · 候选 ' + candidates +
+        ' · 近一次自评 ' + shortClock(scheduler.last_metric_ts);
+      statusEl.title = '缺口：' + JSON.stringify(data.gaps || {}) +
+        '\n候选：' + JSON.stringify(data.candidates || {}) +
+        '\n反馈事件：' + (data.feedback_events || 0) +
+        '\n最近回测：' + shortClock(scheduler.last_backtest_ts) +
+        '\n调度间隔（分钟）：' + (scheduler.interval_minutes || 0);
+    } catch (e) {
+      statusEl.textContent = '闭环状态：不可用';
+    }
+  }
 
   function chipsHtml(item) {
     const parts = [];
@@ -182,4 +212,5 @@
   filterEl.addEventListener('change', reload);
   document.getElementById('refresh').addEventListener('click', reload);
   reload();
+  loadStatus();
 })();

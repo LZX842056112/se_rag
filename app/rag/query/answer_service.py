@@ -12,7 +12,7 @@ from langchain_core.messages import HumanMessage
 from app.evolution.online_eval.grounding import compute_groundedness
 from app.process.query.agent.state import QueryGraphState
 from app.rag.config import SUPPORTED_IMAGE_EXTENSIONS
-from app.rag.query.citations import build_citations
+from app.rag.query.citations import build_citations, split_cited
 from app.rag.query.history_utils import build_history_context
 from app.shared.clients.history_repository import history_repository
 from app.shared.config import settings
@@ -97,34 +97,31 @@ def extract_text_image_url(state: QueryGraphState) -> None:
 
 
 def backfill_evolution_outputs(state: QueryGraphState) -> QueryGraphState:
-    """回填引用、检索信号与接地性（仅自进化开启时计算 groundedness）。"""
+    """回填引用、检索信号与接地性（仅自进化开启时计算 groundedness）。
+
+    引用覆盖三类来源：知识库切片（kb）、自进化条目（evolution）、联网补充（web）。
+    联网引用单独带 ``source="web"``，前端标「联网」，避免「靠联网答出来却显示无引用」。
+    """
     reranked_docs = state.get("reranked_docs", [])
-    cited: list = []
-    evolution_ids: list = []
-    for doc in reranked_docs:
-        chunk_id = doc.get("chunk_id")
-        if doc.get("type") == "web":
-            continue
-        if chunk_id is not None:
-            cited.append(chunk_id)
-            if doc.get("source") == "evolution":
-                evolution_ids.append(chunk_id)
+    cited, evolution_ids, web_docs = split_cited(reranked_docs)
 
     # Milvus 数值型主键会被解析成 int，必须统一转 str 再落状态：
     # 否则 FeedbackEvent.cited_chunk_ids(list[str]) 校验失败，自动会话信号被静默丢弃（缺口漏检）
     state["cited_chunk_ids"] = [str(c) for c in cited]
     state["faq_evo_ids"] = [str(c) for c in evolution_ids]
-    state["citations"] = build_citations(cited, evolution_ids)
+    state["citations"] = build_citations(cited, evolution_ids, web_docs)
     state["retrieval_signals"] = {
         "zero_hit": len(reranked_docs) == 0,
         "no_retrieval": not state.get("embedding_chunks") and not state.get("hyde_embedding_chunks"),
         "evolution_hit": bool(evolution_ids),
+        "web_hit": bool(web_docs),
     }
     if settings.evolution.enabled and reranked_docs:
         evidence = [str(d.get("text") or "") for d in reranked_docs]
         state["groundedness"] = compute_groundedness(state.get("answer", ""), evidence)
     else:
-        state["groundedness"] = 0.0
+        # 未开启自进化时不做接地性评估 → None（前端显示「未评估」，不误报 0%）
+        state["groundedness"] = None
     return state
 
 

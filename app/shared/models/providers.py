@@ -4,7 +4,7 @@ from __future__ import annotations
 from langchain_openai import ChatOpenAI
 
 from app.shared.config import settings
-from app.shared.models.embedding import embed_text, generate_embeddings, get_bge_m3_ef
+from app.shared.models.embedding import embed_text, generate_embeddings
 from app.shared.models.llm import get_llm_client
 from app.shared.models.reranker import get_reranker_model
 
@@ -19,10 +19,6 @@ class LLMProvider:
     def vision_chat(self, vision_model_name: str | None = None) -> ChatOpenAI:
         """获取视觉语言模型（用于 Markdown 图片理解）。"""
         return get_llm_client(vision_model_name or settings.llm.vl_model)
-
-    def bge_m3_embedding(self):
-        """获取 BGE-M3 模型对象。"""
-        return get_bge_m3_ef()
 
     def generate_embeddings(self, texts: list[str]) -> dict[str, list]:
         """批量生成稠密 + 稀疏向量。"""

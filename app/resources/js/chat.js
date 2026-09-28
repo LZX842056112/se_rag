@@ -13,6 +13,12 @@
   const nowTime = () => App.formatTime(null);
   const showToast = App.toast;
 
+  /** 只接受 http/https 链接，避免把 javascript:/data: 之类写进 href */
+  function safeHttpUrl(value) {
+    const url = String(value || '').trim();
+    return /^https?:\/\//i.test(url) ? url : '';
+  }
+
   const chatEl = document.getElementById('chat');
   const inputEl = document.getElementById('input');
   const sendBtn = document.getElementById('send');
@@ -146,7 +152,10 @@
         body: JSON.stringify({
           session_id: meta.sessionId,
           query: meta.query,
-          cited_chunk_ids: meta.citations.map(c => c && c.faq_id).filter(Boolean),
+          // 联网引用没有知识库 id：不能参与缺口/候选信号，否则 URL 会被当成 chunk_id
+          cited_chunk_ids: meta.citations
+            .filter(c => c && c.source !== 'web' && c.faq_id)
+            .map(c => c.faq_id),
           item_names: meta.itemNames || [],
           thumbs: value
         })
@@ -179,17 +188,32 @@
       wrap.appendChild(App.create('div', 'cit-header', `引用来源（${citations.length}）`));
       const list = App.create('div', 'cit-list');
       citations.forEach(c => {
+        const source = (c && c.source) || 'kb';
+        const label = source === 'evolution' ? '自进化' : (source === 'web' ? '联网' : '知识库');
         const item = App.create('div', 'cit-item');
-        const isEvolution = c && c.source === 'evolution';
-        item.appendChild(App.create('span', 'cit-tag ' + (isEvolution ? 'evolution' : 'kb'),
-                                    isEvolution ? '自进化' : '知识库'));
-        item.appendChild(App.create('span', 'cit-id', String((c && c.faq_id) || '').slice(0, 24)));
+        item.appendChild(App.create('span', 'cit-tag ' + source, label));
+        if (source === 'web') {
+          // 联网引用没有 chunk_id：显示标题（无标题则显示 URL），可点开原网页
+          const url = safeHttpUrl((c && c.faq_id) || '');
+          const text = String((c && c.title) || '').trim() || url;
+          if (url) {
+            const link = App.create('a', 'cit-id cit-link', text);
+            link.href = url;
+            link.target = '_blank';
+            link.rel = 'noopener noreferrer';
+            item.appendChild(link);
+          } else {
+            item.appendChild(App.create('span', 'cit-id', text));
+          }
+        } else {
+          item.appendChild(App.create('span', 'cit-id', String((c && c.faq_id) || '').slice(0, 24)));
+        }
         list.appendChild(item);
       });
       wrap.appendChild(list);
     }
 
-    if (groundedness !== null) {
+    if (typeof groundedness === 'number' && isFinite(groundedness)) {
       const pct = Math.round(groundedness * 100);
       const gz = App.create('div', 'groundedness');
       const gauge = App.create('div', 'gauge');
@@ -198,6 +222,11 @@
       gauge.appendChild(fill);
       gz.appendChild(gauge);
       gz.appendChild(App.create('span', null, '回答置信度 ' + pct + '%'));
+      wrap.appendChild(gz);
+    } else {
+      // 未评估（证据为空 / 评估失败）时不显示 0%，避免与「确实不接地」混淆
+      const gz = App.create('div', 'groundedness unknown');
+      gz.appendChild(App.create('span', null, '回答置信度 未评估'));
       wrap.appendChild(gz);
     }
 

@@ -1,6 +1,8 @@
 """接口契约与「导入期无外部连接」回归测试。"""
 from __future__ import annotations
 
+import os
+
 import app.api.http.import_server as import_server
 import app.api.http.query_server as query_server
 from app.api.errors import ApiError
@@ -23,6 +25,7 @@ def test_query_service_route_contract():
         "/api/history/{session_id}",
         "/api/evolution/feedback",
         "/api/evolution/candidates",
+        "/api/evolution/status",
         "/api/evolution/candidates/{candidate_id}/approve",
         "/api/evolution/candidates/{candidate_id}",
         "/approval",
@@ -79,5 +82,10 @@ def test_asset_version_changes_with_content(tmp_path, monkeypatch):
     monkeypatch.setattr(pages, "_RESOURCES", tmp_path)
     monkeypatch.setitem(pages._version_cache, "stamp", -1.0)
     first = pages.asset_version()
-    (tmp_path / "js" / "app.js").write_text("v2", encoding="utf-8")
+    # 指纹按「最新 mtime」做缓存失效判断：同一次 fs 时间粒度内的多次写入可能拿到相同 mtime
+    # （Windows 上实测会偶发），因此显式把被改文件的 mtime 推后，保证测的是内容变化而非时钟精度
+    changed = tmp_path / "js" / "app.js"
+    changed.write_text("v2", encoding="utf-8")
+    stamp = changed.stat().st_mtime + 5
+    os.utime(changed, (stamp, stamp))
     assert pages.asset_version() != first

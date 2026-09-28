@@ -84,6 +84,35 @@ def cap_web_docs(docs: list[dict], *, limit: int = WEB_MAX_IN_CONTEXT) -> list[d
     return [d for d in docs if id(d) in keep]
 
 
+@step_log("prefer_local_docs")
+def prefer_local_docs(docs: list[dict]) -> list[dict]:
+    """本地知识优先：联网结果不得排在本地命中之前。
+
+    真实事故：某次提问的 4 条联网结果分数 0.999x，压过本地手册切片排到最前，
+    答案便主要摘自媒体片段——而联网来源不参与引用回填，界面表现为「答了却无引用、
+    置信度 0%」。``cap_web_docs`` 只限制了联网条数，限制不了排名，这里补上排名约束：
+
+    - 本地（知识库 / 自进化）无命中时，联网结果保持原分（纯联网问答仍可用）；
+    - 本地有命中时，联网文档的排序分被压到「不超过本地最高分」，同分时本地排前
+      （排序键第二项显式标注来源，不依赖排序稳定性）。
+    """
+    local_scores = [float(d.get("score") or 0.0) for d in docs if d.get("type") != "web"]
+    if local_scores:
+        best_local = max(local_scores)
+        clamped = 0
+        for doc in docs:
+            if doc.get("type") == "web" and float(doc.get("score") or 0.0) > best_local:
+                doc["score"] = best_local
+                clamped += 1
+        if clamped:
+            logger.info(f"联网结果 {clamped} 条分数被压至本地最高分 {best_local:.4f}，本地知识优先排序")
+    return sorted(
+        docs,
+        key=lambda d: (float(d.get("score") or 0.0), d.get("type") != "web"),
+        reverse=True,
+    )
+
+
 @step_log("ensure_evolution_docs")
 def ensure_evolution_docs(docs: list[dict], candidates: list[dict]) -> list[dict]:
     """权威条目保底：自进化条目是人工审批过的知识，不能被重排截断丢掉。
@@ -222,7 +251,8 @@ def rerank_documents(state: QueryGraphState) -> QueryGraphState:
     reranker_docs = deal_rrf_and_web_result(rrf_chunks, web_search_docs)
     question_answer_pair_list = create_question_answer_lists(rewritten_query, reranker_docs)
     use_reranker_deal_score(question_answer_pair_list, reranker_docs)
-    # 联网只作补充 → 动态截断 → 权威条目保底
+    # 本地知识优先排序 → 联网只作补充（限条数）→ 动态截断 → 权威条目保底
+    reranker_docs = prefer_local_docs(reranker_docs)
     reranker_docs = cap_web_docs(reranker_docs)
     scored_docs = list(reranker_docs)  # 截断前的完整候选（权威条目保底用）
     reranker_docs = dyn_limit_reranker_docs(reranker_docs)

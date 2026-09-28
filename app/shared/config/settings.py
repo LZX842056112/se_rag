@@ -133,6 +133,11 @@ class EvolutionSettings:
     reject_rate_max: float
     alarm_adopt_rate_drop: float
     recall_limit: int
+    # 闭环运行周期：指标快照/自调与回测的触发间隔（0 表示每轮都跑）
+    metric_interval_minutes: int
+    backtest_enabled: bool
+    backtest_interval_hours: int
+    backtest_min_hits: int
 
 
 @dataclass
@@ -244,6 +249,11 @@ def _build_settings() -> Settings:
             reject_rate_max=env_float("EVOLUTION_REJECT_RATE_MAX", 0.30),
             alarm_adopt_rate_drop=env_float("EVOLUTION_ALARM_ADOPT_DROP", 0.10),
             recall_limit=env_int("EVOLUTION_RECALL_LIMIT", 10),
+            metric_interval_minutes=env_int("EVOLUTION_METRIC_INTERVAL_MINUTES", 60),
+            backtest_enabled=env_bool("EVOLUTION_BACKTEST_ENABLED", True),
+            backtest_interval_hours=env_int("EVOLUTION_BACKTEST_INTERVAL_HOURS", 24),
+            # 回测下架门槛：命中次数不足时只观察，避免单条差评误杀人工审批过的知识
+            backtest_min_hits=env_int("EVOLUTION_BACKTEST_MIN_HITS", 3),
         ),
         runtime=RuntimeSettings(
             task_state_ttl_seconds=env_int("TASK_STATE_TTL_SECONDS", 6 * 3600),

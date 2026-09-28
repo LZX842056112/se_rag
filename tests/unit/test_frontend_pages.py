@@ -112,3 +112,22 @@ def test_shared_library_has_no_page_specific_dead_code():
         assert legacy not in source, f"app.js 仍包含历史遗留实现：{legacy}"
     for required in ("renderAnswerWithImages", "openStream", "confirm", "create"):
         assert required in source
+
+
+def test_chat_marks_web_citations_and_keeps_them_out_of_feedback():
+    """联网引用要标「联网」并给出原网页，但不能进 cited_chunk_ids（URL 不是知识库主键）。"""
+    source = (JS_DIR / "chat.js").read_text(encoding="utf-8")
+    assert "source === 'web'" in source, "未按来源区分引用标签"
+    assert "'联网'" in source, "缺少「联网」标签"
+    assert "c.source !== 'web'" in source, "反馈载荷必须剔除联网引用，否则 URL 会被当成 chunk_id"
+    assert "未评估" in source, "接地性缺失时应显示「未评估」，不能渲染成 0%"
+    assert "safeHttpUrl" in source, "联网链接必须限制为 http/https"
+
+
+def test_approval_page_exposes_loop_status():
+    """闭环状态要能在审批页直接看到（排障时不必翻日志）。"""
+    page = (PAGES_DIR / "approval.html").read_text(encoding="utf-8")
+    assert 'id="evoStatus"' in page
+    script = (JS_DIR / "approval.js").read_text(encoding="utf-8")
+    assert "PATHS.evolutionStatus" in script
+    assert "evolutionStatus: '/api/evolution/status'" in (JS_DIR / "app.js").read_text(encoding="utf-8")

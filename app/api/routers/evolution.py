@@ -13,13 +13,19 @@ from app.api.errors import ApiError
 from app.evolution.approval import service as approval_service
 from app.evolution.feedback.collector import record_feedback
 from app.evolution.models import FeedbackEvent
+from app.evolution.repositories import evolution_repo
 from app.evolution.schema import (
     CandidateApproveRequest,
     CandidateEditRequest,
     CandidateItem,
     CandidateListResponse,
+    EvolutionStatusResponse,
     OkResponse,
 )
+from app.evolution.scheduler import loop_status
+from app.evolution.online_eval.metrics import latest_metrics
+from app.shared.config import settings
+from app.shared.runtime.logger import logger
 
 router = APIRouter(prefix="/api/evolution", tags=["evolution"])
 
@@ -58,6 +64,46 @@ def list_candidates(status: str | None = None, limit: int = 100) -> CandidateLis
     """候选列表（可按 ``status`` 筛选）。"""
     docs = approval_service.list_candidates(status=status, limit=limit)
     return CandidateListResponse(items=[_to_item(doc) for doc in docs])
+
+
+def _count_by(collection, field: str = "status") -> dict[str, int]:
+    """按字段聚合计数（读不到库时返回空，不影响接口可用）。"""
+    try:
+        rows = collection.aggregate([{"$group": {"_id": f"${field}", "n": {"$sum": 1}}}])
+        return {str(row.get("_id") or "unknown"): int(row.get("n", 0)) for row in rows}
+    except Exception as exc:  # noqa: BLE001 - 状态接口属排障能力，缺库时降级
+        logger.warning(f"闭环状态聚合失败（{field}）：{exc}")
+        return {}
+
+
+@router.get("/status", response_model=EvolutionStatusResponse)
+def get_status() -> EvolutionStatusResponse:
+    """闭环运行状态：缺口/候选计数、调度进度与最近一次指标快照。
+
+    排障背景：用户曾只能靠翻日志判断「缺口为什么没扫到」；这里把调度游标与计数暴露成接口，
+    审批页顶部直接展示，避免「明明在跑却像卡住」。
+    """
+    latest: dict | None = None
+    try:
+        rows = latest_metrics(recent=1)
+        latest = rows[0] if rows else None
+        if latest is not None:
+            latest.pop("_id", None)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"读取最近指标快照失败：{exc}")
+    feedback_events = 0
+    try:
+        feedback_events = evolution_repo.fb_events.count_documents({})
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"统计反馈事件失败：{exc}")
+    return EvolutionStatusResponse(
+        enabled=settings.evolution.enabled,
+        scheduler=dict(loop_status()),
+        gaps=_count_by(evolution_repo.k_gaps),
+        candidates=_count_by(evolution_repo.k_candidates),
+        feedback_events=feedback_events,
+        latest_metric=latest,
+    )
 
 
 @router.post("/candidates/{candidate_id}/approve", response_model=OkResponse,

@@ -15,6 +15,19 @@ from app.shared.runtime.logger import logger
 # 聚类窗口内视为同一缺口（秒）
 _DEDUP_WINDOW = 3600
 
+# 扫描游标（进程内）：按 ``ts`` **升序**推进。
+# 真实问题：早期实现 `.sort("ts", -1).limit(batch)` 只取「最新 batch 条」，反馈事件一多，
+# 更早的未解决信号就永远排不进窗口（永远扫不到）。改为升序 + 游标前进后，窗口内的信号
+# 一定会在有限轮次内被逐条看到；游标用尽（窗口内没有更新的信号）时回到窗口起点复扫，
+# 重复由问题级去重兜住。进程重启丢游标只会多扫一轮，故不为此新增 Mongo 字段。
+_CURSOR: dict[str, float] = {"ts": 0.0}
+_CURSOR_EPSILON = 1e-6  # 冷启动/复扫时包含窗口边界上的事件
+
+
+def reset_scan_cursor() -> None:
+    """重置扫描游标（测试与排障用）。"""
+    _CURSOR["ts"] = 0.0
+
 
 def _is_duplicated(query: str, ts: float) -> bool:
     """**按问题**去重（不是按会话）。
@@ -81,24 +94,32 @@ def detect_and_classify(fb_doc: dict[str, Any], transcript_slice: str = "") -> K
 
 
 def scan_unresolved_feedbacks(batch: int = 50) -> list[KnowledgeGap]:
-    """扫描观察窗内未解决的反馈，产出 strong 缺口（其余归档为 pending）。"""
+    """扫描观察窗内未解决的反馈，产出 strong 缺口（其余归档为 pending）。
+
+    按 ``ts`` 升序 + 游标推进：每轮最多消费 ``batch`` 条，**不饿死**更早的未解决信号。
+    """
     if not settings.evolution.enabled:
         return []
     gaps: list[KnowledgeGap] = []
     try:
         since = time.time() - settings.evolution.observe_window_days * 86400
+        cursor_ts = max(_CURSOR["ts"], since - _CURSOR_EPSILON)
         # 未采纳信号包含两类：读链路写入的 adopt=False（零命中/兜底话术），
         # 以及用户点踩产生的事件（adopt 为 None、thumbs<0）。只查 adopt=False 会漏掉后者，
         # 导致「点踩」永远进不了缺口扫描（实测缺陷 D1）。
-        cursor = (
+        events = (
             evolution_repo.fb_events.find({
-                "ts": {"$gte": since},
+                "ts": {"$gt": cursor_ts},
                 "$or": [{"adopt": False}, {"thumbs": {"$lt": 0}}],
             })
-            .sort("ts", -1)
+            .sort("ts", 1)
             .limit(batch)
         )
-        for doc in cursor:
+        scanned = 0
+        last_ts = _CURSOR["ts"]
+        for doc in events:
+            scanned += 1
+            last_ts = float(doc.get("ts") or 0.0)
             if _is_duplicated(doc.get("query", ""), doc.get("ts") or 0):
                 continue
             gap = detect_and_classify(doc, transcript_slice=doc.get("query", ""))
@@ -106,7 +127,12 @@ def scan_unresolved_feedbacks(batch: int = 50) -> list[KnowledgeGap]:
                 inserted = evolution_repo.k_gaps.insert_one(gap.document())
                 gap.gap_id = str(inserted.inserted_id)  # 透传给候选，便于审批后回写缺口状态
                 gaps.append(gap)
-        logger.info(f"缺口扫描完成，产出 strong 缺口 {len(gaps)} 条")
+        # 扫到东西 → 游标前进；窗口内已无更新信号 → 归零，下一轮从窗口起点复扫
+        _CURSOR["ts"] = last_ts if scanned else 0.0
+        logger.info(
+            f"缺口扫描完成：消费信号 {scanned} 条，产出 strong 缺口 {len(gaps)} 条，"
+            f"游标 {cursor_ts:.0f} → {_CURSOR['ts']:.0f}"
+        )
     except Exception as exc:  # noqa: BLE001
         logger.warning(f"缺口扫描失败：{exc}")
     return gaps

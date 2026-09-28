@@ -55,5 +55,10 @@ def offline_guard(monkeypatch):
 
     monkeypatch.setattr(param_registry, "_LAST_LOAD", 0.0)
     param_registry._CACHE.clear()
+    # 缺口扫描游标是进程内状态：不清会跨用例串味（前一个用例把游标推过了本例的事件）
+    from app.evolution.gap import detector
+
+    detector.reset_scan_cursor()
     yield
     param_registry._CACHE.clear()
+    detector.reset_scan_cursor()

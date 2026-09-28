@@ -97,3 +97,43 @@ def test_grade_signals_thresholds():
     grade, confidence = grade_signals(GapSignal(user=1.0, generation=1.0))
     assert grade == "strong" and confidence == pytest.approx(0.7, abs=1e-6)
     assert grade_signals(GapSignal())[0] == "none"
+
+
+def test_backlog_larger_than_batch_is_not_starved(fake_mongo, monkeypatch):
+    """回归：事件数超过 batch 时，更早的未解决信号也必须被扫到。
+
+    旧实现 `.sort("ts", -1).limit(batch)` 只取「最新 batch 条」，反馈一多早期的信号
+    就永远排不进窗口（表现为「明明有差评，缺口扫描却一直 0 条」）。
+    """
+    monkeypatch.setattr(settings.evolution, "enabled", True)
+    now = time.time()
+    for index in range(5):
+        _insert_fb(fake_mongo, session="sess-backlog", query=f"积压问题{index}？", ts=now - 500 + index)
+
+    seen: list[str] = []
+    for _ in range(4):  # batch=2 → 3 轮扫完 5 条，第 4 轮开始窗口复扫
+        seen += [gap.query for gap in scan_unresolved_feedbacks(batch=2)]
+
+    assert sorted(seen) == sorted(f"积压问题{i}？" for i in range(5)), "更早的信号被 batch 限制饿死"
+
+
+def test_events_after_cursor_are_seen_next_round(fake_mongo, monkeypatch):
+    """游标只跳过已消费区间：新事件（ts 更大）下一轮必须被扫到。"""
+    monkeypatch.setattr(settings.evolution, "enabled", True)
+    now = time.time()
+    _insert_fb(fake_mongo, session="sess-a", query="第一个问题？", ts=now - 100)
+    assert len(scan_unresolved_feedbacks(batch=10)) == 1
+
+    _insert_fb(fake_mongo, session="sess-b", query="第二个问题？", ts=now)
+    gaps = scan_unresolved_feedbacks(batch=10)
+    assert [gap.query for gap in gaps] == ["第二个问题？"]
+
+
+def test_cursor_wraps_around_after_window_exhausted(fake_mongo, monkeypatch):
+    """窗口扫完后游标归零，下一轮从窗口起点复扫（重复由问题级去重兜住）。"""
+    monkeypatch.setattr(settings.evolution, "enabled", True)
+    _insert_fb(fake_mongo, session="sess-c", query="唯一问题？", ts=time.time() - 10)
+    assert len(scan_unresolved_feedbacks(batch=10)) == 1
+    # 复扫：同问题在去重窗口内 → 不再产出缺口，但调用必须正常返回
+    assert scan_unresolved_feedbacks(batch=10) == []
+    assert scan_unresolved_feedbacks(batch=10) == []

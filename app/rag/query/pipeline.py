@@ -4,7 +4,7 @@ from __future__ import annotations
 from app.evolution.feedback.collector import flush_session_signals
 from app.process.query.agent.main_graph import query_app
 from app.process.query.agent.state import QueryGraphState, create_query_default_state
-from app.rag.query.citations import build_citations
+from app.rag.query.citations import citations_from_reranked_docs
 from app.shared.config import settings
 from app.shared.runtime.logger import logger
 from app.shared.utils.sse_broker import SSEEvent, ensure_channel, publish
@@ -38,10 +38,9 @@ def invoke_query_graph(session_id: str, original_query: str, is_stream: bool) ->
                 "image_urls": result_state.get("image_urls", []),
                 # 回传已识别主体：前端点踩时原样回传，保证 反馈→缺口→候选 的 item_names 贯通
                 "item_names": result_state.get("item_names", []),
-                "citations": result_state.get("citations") or build_citations(
-                    result_state.get("cited_chunk_ids"), result_state.get("faq_evo_ids")
-                ),
-                "groundedness": result_state.get("groundedness", 0.0),
+                "citations": result_state.get("citations")
+                or citations_from_reranked_docs(result_state.get("reranked_docs")),
+                "groundedness": result_state.get("groundedness"),
                 "item_name_options": result_state.get("item_name_options", []),
             })
             publish(session_id, SSEEvent.CLOSE, {})

@@ -139,7 +139,9 @@ body{
 }
 .cit-tag.evolution{background:var(--brand2)}
 .cit-tag.kb{background:#8aa0b4}
+.cit-tag.web{background:#6d7f96}
 .cit-id{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted)}
+.cit-link{color:var(--brand);text-decoration:underline;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .groundedness{
   display:flex;
   align-items:center;
@@ -148,6 +150,7 @@ body{
   color:var(--muted);
   margin-top:8px;
 }
+.groundedness.unknown{opacity:.75}
 .gauge{
   flex:1;
   height:6px;

@@ -15,7 +15,7 @@ from app.api.schema.query_schema import (
     QueryRequestSchema,
     QueryStreamResponseSchema,
 )
-from app.rag.query.citations import build_citations
+from app.rag.query.citations import citations_from_reranked_docs
 from app.rag.query.pipeline import invoke_query_graph
 from app.shared.clients.history_repository import history_repository
 from app.shared.runtime.logger import logger
@@ -58,10 +58,8 @@ def query(background_tasks: BackgroundTasks, query_params: QueryRequestSchema):
         done_list=get_done_task_list(session_id),
         image_urls=state.get("image_urls", []),
         item_names=state.get("item_names", []),
-        citations=state.get("citations") or build_citations(
-            state.get("cited_chunk_ids"), state.get("faq_evo_ids")
-        ),
-        groundedness=state.get("groundedness", 0.0),
+        citations=state.get("citations") or citations_from_reranked_docs(state.get("reranked_docs")),
+        groundedness=state.get("groundedness"),
         retrieval_signals=state.get("retrieval_signals", {}),
         item_name_options=state.get("item_name_options", []),
     )
@@ -89,7 +87,7 @@ def get_history(session_id: str, limit: int = 10) -> HistoryListResponseSchema:
                 item_names=item.get("item_names", []),
                 image_urls=item.get("image_urls", []),
                 citations=item.get("citations", []),
-                groundedness=item.get("groundedness", 0.0),
+                groundedness=item.get("groundedness"),
                 ts=item.get("ts"),
             )
             for item in history_list

@@ -33,7 +33,8 @@ class QueryNotStreamResponseSchema(BaseModel):
     item_names:list[str] = Field(default_factory=list)
     # 自进化输出
     citations:list[CitationModel] = Field(default_factory=list)
-    groundedness:float = 0.0
+    # 接地性：None 表示「未评估」（证据为空或评估失败），前端显示为「未评估」而非 0%
+    groundedness:float | None = None
     retrieval_signals:dict = Field(default_factory=dict)
     # 没确认到主体时的相似主体选项（前端渲染成可点选按钮）
     item_name_options:list[dict] = Field(default_factory=list)
@@ -52,7 +53,7 @@ class HistoryItemResponseSchema(BaseModel):
     item_names:list[str]=Field(description="关联的item_name", default_factory=list)
     image_urls:list[str]=Field(description="关联的图片地址", default_factory=list)
     citations:list[CitationModel]=Field(description="引用来源", default_factory=list)
-    groundedness:float=0.0
+    groundedness:float | None=None
     ts:Any
 
 class HistoryListResponseSchema(BaseModel):

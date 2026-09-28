@@ -331,9 +331,48 @@ parseAnswerAndImages / renderAnswerWithImages`，三页共用；页面用 `?v=<�
 
 | 优先级 | 观察 | 影响 | 建议 |
 | --- | --- | --- | --- |
-| **P1（本轮最高优先级发现）** | **联网结果会与本地知识同场重排，且不产出引用**：`cap_web_docs` 只在「本地有命中」时把联网结果截到 2 条，但**不约束它的排名**；实测日志 `Top3=[{chunk_id: None, 0.997}, {chunk_id: None, 0.9946}, {chunk_id: 469389094813929820, 0.8856}]` —— 前两条是联网文档。而 `build_citations` 只为 `kb`/`evolution` 生成引用，`type == "web"` 在 `backfill_evolution_outputs` 里被 `continue` 跳过 | 若答案主要由联网片段支撑，界面就是**「答了却没有引用」**；`groundedness` 又由 LLM 判定、异常即降级 0 → 显示「回答置信度 0%」，用户无法区分「答得不好」与「评估失败」。本轮真实浏览器实测出现过一次「一行答案 + 0 引用 + 0%」（同一问题换一次运行即为完整答案 + 3 引用 + 100%） | ① 把「联网可否压过本地知识」显式化为策略（例如联网文档排名不得高于第 `RERANK_MIN_TOPK` 名，或要求其分数需显著高于最高本地分才保留）；② 联网来源补 `source="web"` 的引用并在前端标「联网」；③ `groundedness` 引入「未知」态，失败时不显示 0% |
-| P1 | `app/evolution/backtest/runner.run_backtest`、`tuning/controller.adjust_step`、`online_eval/metrics.record_metric`/`latest_metrics` 定义完整但**无任何调用方**（仅文档描述为闭环的一环） | 自调参/回测/在线指标实际未运行，「闭环」目前止于「候选入库→检索命中」 | 要么在 `evolution_scheduler_loop` 里按天接线（先跑 `record_metric` → `adjust_step`），要么在文档中标注为预留能力，避免误判为已生效 |
-| P2 | `detector.scan_unresolved_feedbacks` 用 `.sort("ts", -1).limit(batch)`（默认 50）取「最新 N 条」 | 反馈事件长期堆积时，较早的未解决信号可能被新事件挤出窗口而**永远扫不到** | 把「是否未解决」下推到 Mongo 查询条件后按 `ts` 升序处理，或加 `seen` 标记 |
-| P2 | `LLMProvider.bge_m3_embedding`、`HistoryRepository.update_item_names`、`task_state.task_count` 无调用方 | 少量死代码（合计约 15 行） | 保留（对外门面/后续扩展）或随下次改动一并移除 |
+| ~~P1（本轮最高优先级发现）~~ **已修复（见 15.5）** | **联网结果会与本地知识同场重排，且不产出引用**：`cap_web_docs` 只在「本地有命中」时把联网结果截到 2 条，但**不约束它的排名**；实测日志 `Top3=[{chunk_id: None, 0.997}, {chunk_id: None, 0.9946}, {chunk_id: 469389094813929820, 0.8856}]` —— 前两条是联网文档。而 `build_citations` 只为 `kb`/`evolution` 生成引用，`type == "web"` 在 `backfill_evolution_outputs` 里被 `continue` 跳过 | 若答案主要由联网片段支撑，界面就是**「答了却没有引用」**；`groundedness` 又由 LLM 判定、异常即降级 0 → 显示「回答置信度 0%」，用户无法区分「答得不好」与「评估失败」。本轮真实浏览器实测出现过一次「一行答案 + 0 引用 + 0%」（同一问题换一次运行即为完整答案 + 3 引用 + 100%） | ① 把「联网可否压过本地知识」显式化为策略（例如联网文档排名不得高于第 `RERANK_MIN_TOPK` 名，或要求其分数需显著高于最高本地分才保留）；② 联网来源补 `source="web"` 的引用并在前端标「联网」；③ `groundedness` 引入「未知」态，失败时不显示 0% |
+| ~~P1~~ **已修复（见 15.5）** | `app/evolution/backtest/runner.run_backtest`、`tuning/controller.adjust_step`、`online_eval/metrics.record_metric`/`latest_metrics` 定义完整但**无任何调用方**（仅文档描述为闭环的一环） | 自调参/回测/在线指标实际未运行，「闭环」目前止于「候选入库→检索命中」 | 要么在 `evolution_scheduler_loop` 里按天接线（先跑 `record_metric` → `adjust_step`），要么在文档中标注为预留能力，避免误判为已生效 |
+| ~~P2~~ **已修复（见 15.5）** | `detector.scan_unresolved_feedbacks` 用 `.sort("ts", -1).limit(batch)`（默认 50）取「最新 N 条」 | 反馈事件长期堆积时，较早的未解决信号可能被新事件挤出窗口而**永远扫不到** | 把「是否未解决」下推到 Mongo 查询条件后按 `ts` 升序处理，或加 `seen` 标记 |
+| P3 | `HistoryRepository.update_item_names`、`task_state.task_count` 无调用方（`LLMProvider.bge_m3_embedding` 已在本轮删除） | 少量死代码（合计约 10 行） | 保留（对外门面/后续扩展）：两者都是带状态类的窄接口，删除无收益 |
 | P2 | `app/resources/js/chat.js` 单文件 413 行，承担消息渲染 + 流式 + 反馈 + 主体点选 | 继续加功能会变难维护 | 后续若再扩展，按「渲染 / 流式 / 反馈」拆分为多个 IIFE 文件（`pages.py` 已是白名单化静态路由，加文件成本低） |
 | P3 | `uvicorn` 日志在 PowerShell 重定向下按 GBK 落盘，中文出现乱码（`logs/verify-*.log`） | 只影响人工排查可读性 | 启动脚本加 `PYTHONIOENCODING=utf-8`（或 `-u` + 显式编码） |
+
+### 15.5 三项遗留问题的修复（2026-09-28 深夜补充，用户要求「全部修复」）
+
+#### 15.5.1 联网不再抢走本地知识 + 联网来源有独立引用 + 接地性区分「未评估」
+
+| 关注点 | 改动 | 文件 |
+| --- | --- | --- |
+| 排名 | 新增 `prefer_local_docs()`：本地有命中时把联网文档的排序分压到「不超过本地最高分」，并以 `(分数, 是否本地)` 显式排序（同分本地在前），因此**本地知识永远在联网补充之前**；本地零命中时联网保持原分（纯联网问答仍可用） | `app/rag/query/rerank_service.py` |
+| 引用 | `citations` 覆盖三类来源：`kb`（切片主键）/ `evolution`（进化条目）/ `web`（`source="web"` + `title` + 原网页）。新增 `split_cited()` 与 `citations_from_reranked_docs()`，读链路三处（answer_service / pipeline / query router）共用，`CitationModel` 增加可选 `title` | `app/rag/query/citations.py`、`app/evolution/schema.py`、`app/rag/query/answer_service.py`、`app/api/routers/query.py` |
+| 信号纯净度 | 前端反馈载荷剔除 `source === 'web'` 的引用（URL 不是知识库主键）；`retrieval_signals` 增加 `web_hit`；只接受 http/https 链接（防 `javascript:`） | `app/resources/js/chat.js`、`app/resources/css/chat.css` |
+| 接地性 | `compute_groundedness()` 在证据为空 / 调用失败 / 输出不可解析时返回 `None`（未评估），API schema 改为 `float \| None`，前端显示「回答置信度 未评估」而不是 0% | `app/evolution/online_eval/grounding.py`、`app/api/schema/query_schema.py`、`app/resources/js/chat.js` |
+
+#### 15.5.2 闭环真正闭环（指标 / 自调 / 回测接线 + 可观测）
+
+- `app/evolution/scheduler.py` 新增 `run_evolution_cycle_once()`：**每轮**扫描未解决反馈→缺口→候选；
+  按 `EVOLUTION_METRIC_INTERVAL_MINUTES`（默认 60，0=每轮）跑指标快照 + 参数自调；
+  按 `EVOLUTION_BACKTEST_INTERVAL_HOURS`（默认 24）跑回测止损。`force=True` 供排障手动触发。
+- `adjust_step(snapshot)` 现在**接收调度器同一份快照**，基线取 `ts < snapshot.ts` 的最近 3 条历史快照——
+  否则「本轮快照」会被算进基线，`diff` 被自己拉平，自调几乎永不触发。
+- `run_backtest()` 增加 `backtest_min_hits`（默认 3）门槛：命中次数不足只观察，避免**单条差评**把人工审批过的
+  知识自动下架。
+- 新增 `GET /api/evolution/status`（缺口/候选分状态计数、调度进度、最近指标快照），审批页顶部显示
+  「闭环：缺口 N · 候选 M · 近一次自评 <时间>」，排障不必再翻日志。
+
+#### 15.5.3 缺口扫描不再饿死早期信号
+
+`scan_unresolved_feedbacks` 由 `.sort("ts", -1).limit(batch)`（永远只看最新 N 条）改为**按 `ts` 升序 + 进程内游标推进**：
+每轮消费最多 `batch` 条且游标只前进；窗口内扫完（无更新信号）时游标归零、下一轮从窗口起点复扫，
+重复由「问题级去重」兜住。不引入 Mongo 字段（进程重启只多扫一轮），保持既有数据契约。
+
+#### 15.5.4 验收证据
+
+| 项 | 结果 |
+| --- | --- |
+| 离线门禁 | `pyflakes app tests` 0 输出；`compileall` 通过；**153 passed / 1 deselected**（新增 24 条用例覆盖三项修复） |
+| 真实库 + 真实模型 | 提问 `Brother HAK 180 烫金机` → `引用来源（5）= 3 知识库 + 2 联网`（联网项带标题与原网页链接）、`回答置信度 90%`、控制台 0 error；日志 `联网结果 1 条分数被压至本地最高分 0.9992，本地知识优先排序` |
+| 闭环运行 | 启动即出现 `指标快照：采纳率=0.00 缺口率=1.00 自调=无`、`回测完成：考察 0 条，下架 0 条`；`k_metrics` 落库 1 条；`/api/evolution/status` 返回 scheduler/latest_metric |
+| 扫描游标 | 日志 `缺口扫描完成：消费信号 2 条，产出 strong 缺口 0 条，游标 1790005249 → 1790608023` → 下一轮 `消费信号 0 条 … 游标 1790608023 → 0`（复扫行为可见） |
+| 数据清理 | 本轮 `e2e_sess_verify_d20` 与浏览器测试会话已删，残留 0；用户会话 `e2e_sess_20260928b`（6 条消息 / 2 条缺口 / 2 条 draft 候选）原样保留 |
