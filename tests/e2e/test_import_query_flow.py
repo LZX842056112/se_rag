@@ -26,6 +26,7 @@ from app.rag.import_.pipeline import invoke_import_graph
 from app.rag.query.pipeline import invoke_query_graph
 from app.shared.clients.milvus_gateway import milvus_gateway
 from app.shared.config import settings
+from app.shared.runtime.logger import logger
 from app.shared.utils.sse_broker import drop_channel, stream_events
 from app.shared.utils.task_state import get_task_status
 
@@ -95,19 +96,54 @@ def sample_doc(tmp_path: Path):
     _cleanup_milvus(file_title)
 
 
-def _cleanup_milvus(file_title: str) -> None:
-    """按 file_title 清理测试产生的向量数据（chunks / item_name）。"""
+def _delete_and_verify(collection: str, filter_expr: str, *, retries: int = 3,
+                       wait_seconds: float = 2.0) -> None:
+    """删除后按「删除 → 等待 → 复核」确认 Milvus 真的清空。
+
+    Milvus 删除存在短暂可见性延迟：删完立即查询可能仍读到旧数据，此前正因如此，
+    跑批在 ``kb_item_names`` 留下了 ``e2e_sample_*`` 残留。清理必须复核，残留要显式报错
+    而不是静默放过。
+    """
     client = milvus_gateway.milvus_client
     if client is None:
         return
-    from app.shared.clients.milvus_gateway import eq_expr
-
-    for collection in (milvus_gateway.chunk_collection_name, milvus_gateway.item_name_collection_name):
+    remaining = -1
+    for attempt in range(retries):
         try:
             if client.has_collection(collection_name=collection):
-                client.delete(collection_name=collection, filter=eq_expr("file_title", file_title))
-        except Exception:  # noqa: BLE001 - 清理失败不掩盖用例结论
-            pass
+                client.delete(collection_name=collection, filter=filter_expr)
+        except Exception as exc:  # noqa: BLE001 - 记录后继续重试
+            logger.warning(f"清理 {collection} 失败（第 {attempt + 1} 次）：{exc}")
+        time.sleep(wait_seconds)
+        try:
+            if client.has_collection(collection_name=collection):
+                remaining = len(client.query(collection_name=collection, filter=filter_expr,
+                                             output_fields=["file_title"]))
+            else:
+                remaining = 0
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"复核 {collection} 失败：{exc}")
+            remaining = -1
+        if remaining == 0:
+            return
+    raise AssertionError(f"测试数据清理后仍有残留：collection={collection}, filter={filter_expr}, remaining={remaining}")
+
+
+def _cleanup_milvus(file_title: str) -> None:
+    """按 file_title 清理测试产生的向量数据（chunks / item_name），并复核清空。"""
+    from app.shared.clients.milvus_gateway import eq_expr
+
+    filter_expr = eq_expr("file_title", file_title)
+    for collection in (milvus_gateway.chunk_collection_name, milvus_gateway.item_name_collection_name):
+        _delete_and_verify(collection, filter_expr)
+
+
+def _cleanup_evolution_item(evo_doc_id: str) -> None:
+    """下架进化条目并复核（同样是删除 + 等待 + 复核）。"""
+    from app.shared.clients.milvus_gateway import eq_expr
+
+    deactivate(evo_doc_id)
+    _delete_and_verify(milvus_gateway.evolution_collection_name, eq_expr("evo_doc_id", evo_doc_id))
 
 
 def test_import_query_and_evolution_flow(require_e2e, sample_doc):
@@ -174,8 +210,8 @@ def test_import_query_and_evolution_flow(require_e2e, sample_doc):
         approved = evolution_repo.k_candidates.find_one({"_id": drafts[0]["_id"]})
         evo_doc_id = approved.get("evo_doc_id")
         assert evo_doc_id, "审批后未生成 evo_doc_id"
-        # 清理：下架本次审批产生的进化条目与候选记录
-        deactivate(evo_doc_id)
+        # 清理：下架本次审批产生的进化条目与候选记录（下架后复核确实已移出检索）
+        _cleanup_evolution_item(evo_doc_id)
         evolution_repo.k_candidates.delete_one({"_id": drafts[0]["_id"]})
 
     # ---------- 4. 清理测试会话与缺口 ----------

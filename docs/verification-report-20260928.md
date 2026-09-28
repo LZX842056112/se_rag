@@ -89,7 +89,7 @@
 | D4 | 导入服务缺少健康检查路由（与查询服务口径不一致） | 健康路由只定义在查询服务 | 新增共享 `app/api/routers/health.py`，两服务统一 `/api/health`；路由契约测试同步 | 两服务 `/api/health` 均 200 |
 | D6 | 刷新页面后历史不回显（提示「历史加载失败」） | 上一轮重构删除 `common.js` 后，chat 页仍裸调旧全局 `formatTime(ts)` → `ReferenceError`，且被 `catch(_)` 静默吞掉 | 补 `const formatTime = App.formatTime;`；catch 改为先 `console.error` 再提示；新增前端静态守卫测试（含「守卫自检」用例，确保能捕获该回归） | 刷新后 3 条消息 + 引用块 + 反馈栏全部恢复 |
 | D5 | 审批页「驳回」与问答页「清空对话」使用原生 `confirm()`，模态会阻塞渲染进程（自动化点击超时、标签页可能直接卡死） | 浏览器原生模态对话框阻塞渲染进程 | 新增公共库 `App.confirm()` 页内确认浮层（`app.js` + `app.css`），两处改为 `await App.confirm(...)`；同时把 chat 页残留的 `alert()` 换成 `App.toast()`；新增「页面不得使用原生 confirm/alert/prompt」静态守卫测试 | 复验：驳回与清空均「无原生模态 + 页内浮层可见 + 点击不被阻塞 + 操作生效」，见截图 `verify-10-inpage-confirm.png`、`verify-11-inpage-reject.png` |
-| D7 | 早前 `pytest -m e2e` 跑批在 Milvus `kb_item_names` 遗留 3 条 `e2e_sample_*` 记录 | 清理按 `file_title` 删除后立即查询，遇 Milvus 可见性延迟未复核 | 本轮已在清理脚本中加入「删除 → 等 3s → 复核」，并清掉历史遗留 | 清理后 `kb_item_names` 仅剩 2 条生产记录 |
+| D7 | 早前 `pytest -m e2e` 跑批在 Milvus `kb_item_names` 遗留 3 条 `e2e_sample_*` 记录 | 清理按 `file_title` 删除后立即结束，遇 Milvus 可见性延迟未复核 | 历史遗留已手工清除；并把 E2E 清理加固为「删除 → 等待 → 复核」，仍有残留则重试，最终残留会以断言失败显式暴露（`chunks`/`item_name`/进化条目三处都走该流程） | 加固后跑一次真机 E2E：跑批后审计 Milvus 与 Mongo 的 `e2e_*` 残留全部为 0，生产数据不变 |
 
 | D5（补充） | 原生模态 `confirm()` 阻塞渲染进程 | 浏览器模态对话框特性 | 如上：新增 `App.confirm()` 页内确认浮层并替换 2 处调用 + 2 处 `alert()`；新增原生模态静态守卫 | 复验通过（见 D5 行） |
 
@@ -108,6 +108,21 @@
 | Mongo `fb_events` / `k_gaps`（测试会话） | 6 / 3 | 0 / 0 |
 
 两个 uvicorn 进程已关闭，端口 8000/8001 均已释放；服务日志保留在 `logs/verify-*.log`。
+
+### 5.1 依赖裁剪后的环境一致性验证（补充）
+
+`pyproject.toml` 裁剪依赖后，验证本地环境与锁文件确实一致、且裁剪后的环境仍能跑通全链路：
+
+| 检查 | 结果 |
+| --- | --- |
+| `uv lock --check` | `Resolved 159 packages`（exit 0），锁文件与 `pyproject.toml` 一致 |
+| `uv sync` | 仅清理了一个游离包（`cryptography`，不在依赖图中），无新增安装 |
+| 已移除的直依赖是否还在 venv | 全部不在（`dashscope` / `magic-pdf` / `modelscope` / `torchaudio` / `torchvision` / `grandalf` / `langchain-community` / `langchain-mcp-adapters` / `mineru-kie-sdk`） |
+| 关键运行期依赖 | 在位（`fastapi` / `flagembedding` / `langgraph` / `langchain-openai` / `pymilvus` / `pymongo` / `minio` / `torch` / `openai-agents`） |
+| 锁中剩余的“疑似多余”包 | `datasets`、`pandas` 仍在锁中，但它们是 `flagembedding` 的传递依赖（`uv.lock` 第 563 行），非遗漏 |
+| 离线回归 | `pyflakes` 0 告警、`compileall` 通过、`pytest` 73 passed |
+| 真机端到端（裁剪后环境） | `E2E_ENABLED=1 uv run pytest -m e2e` → **1 passed / 47.37s** |
+| 浏览器冒烟（裁剪后环境） | 三页均正常启动：问答页 `API: 已连接` + 欢迎语可用；审批页渲染生产候选 1 条 + Token 输入框；导入页空态正常；三页控制台 0 error |
 
 ## 6. 结论
 
