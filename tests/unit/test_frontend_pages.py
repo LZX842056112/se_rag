@@ -131,3 +131,12 @@ def test_approval_page_exposes_loop_status():
     script = (JS_DIR / "approval.js").read_text(encoding="utf-8")
     assert "PATHS.evolutionStatus" in script
     assert "evolutionStatus: '/api/evolution/status'" in (JS_DIR / "app.js").read_text(encoding="utf-8")
+
+
+def test_shared_library_warns_when_page_is_stale():
+    """长开的旧页面不会自动换脚本：公共库要能发现「服务端资源版本变了」并提示刷新。"""
+    source = (JS_DIR / "app.js").read_text(encoding="utf-8")
+    assert "LOADED_ASSET_V" in source, "未记录本页加载的资源版本"
+    assert "checkFreshness" in source, "未实现版本比对"
+    assert "asset_version" in source, "未读取健康检查里的资源版本"
+    assert "Ctrl+F5" in source, "未提示用户刷新"

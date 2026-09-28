@@ -34,6 +34,19 @@
     adminToken: sessionStorage.getItem('evo_admin_token') || ''
   };
 
+  /**
+   * 本页面加载的静态资源版本（服务端按内容哈希注入 ?v=）。
+   *
+   * 历史坑：长开的旧标签页不会自动更新脚本，用户会以为「功能没修好」——
+   * 实际页面里跑的还是旧 JS（实测两次：选项按钮不渲染、置信度显示 0% 都是旧页面所致）。
+   */
+  var LOADED_ASSET_V = (function () {
+    var src = (document.currentScript && document.currentScript.src) || '';
+    var matched = /[?&]v=([^&]+)/.exec(src);
+    return matched ? matched[1] : '';
+  })();
+  var freshnessNotified = false;
+
   /** 同源部署时直接用当前源；单独打开页面（file://）时回退到指定默认端口 */
   function resolveBase(fallbackPort) {
     return location.origin.indexOf('http') === 0
@@ -322,6 +335,24 @@
     containerEl.appendChild(wrap);
   }
 
+  /** 服务端资源版本变了 → 说明后端已部署新前端，提示用户刷新（只提示一次） */
+  function checkFreshness(payload) {
+    var latest = payload && payload.asset_version;
+    if (!latest || !LOADED_ASSET_V || latest === LOADED_ASSET_V || freshnessNotified) return;
+    freshnessNotified = true;
+    toast('系统已更新，请按 Ctrl+F5 刷新页面以加载新版本', 8000);
+  }
+
+  /** 每分钟比对一次资源版本（页面未带 ?v= 时跳过，例如直接以 file:// 打开） */
+  function watchFreshness() {
+    if (!LOADED_ASSET_V) return;
+    setInterval(function () {
+      fetchJson(PATHS.health).then(checkFreshness).catch(function () { /* 忽略网络抖动 */ });
+    }, 60000);
+  }
+
+  watchFreshness();
+
   window.App = {
     PATHS: PATHS,
     resolveBase: resolveBase,
@@ -346,6 +377,8 @@
     extractUrlsLoose: extractUrlsLoose,
     parseAnswerAndImages: parseAnswerAndImages,
     renderAnswerWithImages: renderAnswerWithImages,
+    loadedAssetVersion: LOADED_ASSET_V,
+    checkFreshness: checkFreshness,
     setAdminToken: function (token) {
       state.adminToken = String(token || '').trim();
       try { sessionStorage.setItem('evo_admin_token', state.adminToken); } catch (_) { /* 忽略隐私模式异常 */ }

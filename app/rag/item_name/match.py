@@ -7,8 +7,7 @@
 """
 from __future__ import annotations
 
-from app.rag.item_name.catalog import match_catalog_name
-from app.rag.item_name.catalog import find_similar_names, load_item_names
+from app.rag.item_name.catalog import find_names_mentioned_in, find_similar_names, load_item_names, match_catalog_name
 from app.rag.item_name.config import (
     ITEM_NAME_CONFIRM_MARGIN,
     ITEM_NAME_CONFIRM_MIN_SCORE,
@@ -59,6 +58,49 @@ def _similar_fallback(item_name: str, ranked: list[dict]) -> list[dict]:
             for name in catalog:
                 _add(name, None, "catalog_all")
 
+    return options[:SIMILAR_OPTION_LIMIT]
+
+
+def similar_from_query(*texts: str) -> list[dict]:
+    """模型没抽出主体时，**用问句本身**在目录里找相似主体供点选。
+
+    事故背景：用户问「烫金机怎么安装」时模型返回空 ``item_names``，链路因此完全跳过目录匹配，
+    只回一句「也没有找到相似主体」；而同一界面上问 ``hak180`` 却能给出选项——
+    对用户来说就是「有的显示有的不显示」。
+
+    兜底顺序：主体名相似（子串 / token 前缀）→ 问句里出现库内关键词 → 小知识库直接列目录。
+    """
+    options: list[dict] = []
+    seen: set[str] = set()
+
+    def _add(name: str, matched_by: str) -> None:
+        key = normalize_item_name(name)
+        if not key or key in seen:
+            return
+        seen.add(key)
+        options.append({"item_name": name, "score": None, "matched_by": matched_by})
+
+    wanted = [str(text or "").strip() for text in texts]
+    for text in wanted:
+        if not text:
+            continue
+        for name, how in find_similar_names(text, limit=SIMILAR_OPTION_LIMIT):
+            _add(name, how)
+        if options:
+            return options[:SIMILAR_OPTION_LIMIT]
+
+    for text in wanted:
+        if not text:
+            continue
+        for name, how in find_names_mentioned_in(text, limit=SIMILAR_OPTION_LIMIT):
+            _add(name, how)
+        if options:
+            return options[:SIMILAR_OPTION_LIMIT]
+
+    catalog = load_item_names()
+    if 0 < len(catalog) <= CATALOG_SUGGEST_MAX:
+        for name in catalog:
+            _add(name, "catalog_all")
     return options[:SIMILAR_OPTION_LIMIT]
 
 

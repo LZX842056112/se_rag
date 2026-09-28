@@ -85,3 +85,56 @@ def test_feedback_payload_carries_item_names():
 
     source = (Path(__file__).resolve().parents[2] / "app" / "resources" / "js" / "chat.js").read_text(encoding="utf-8")
     assert "item_names: meta.itemNames || []" in source
+
+
+def test_find_names_mentioned_in_query(catalog):
+    """回归 D17：问句里出现库内主体名的关键词（「烫金机」）也要能找到该主体。"""
+    found = catalog_module.find_names_mentioned_in("烫金机怎么安装")
+    assert found == [("Brother HAK 180 烫金机", "catalog_mentioned")]
+
+
+def test_find_names_mentioned_in_ignores_unrelated_question(catalog):
+    """问句里没有库内关键词时不得硬凑候选。"""
+    assert catalog_module.find_names_mentioned_in("今天天气怎么样") == []
+    assert catalog_module.find_names_mentioned_in("") == []
+
+
+def test_similar_from_query_prefers_mention_then_small_catalog(monkeypatch):
+    """没抽出主体时的兜底链：问句关键词 → 小目录全列。"""
+    from app.rag.item_name import match as match_module
+
+    monkeypatch.setattr(catalog_module, "_CACHE",
+                        {"names": ["Brother HAK 180 烫金机"], "raws": ["Brother HAK 180 烫金机"], "ts": 9e9})
+    monkeypatch.setattr(match_module, "load_item_names", lambda: ["Brother HAK 180 烫金机"])
+
+    options = match_module.similar_from_query("烫金机怎么安装")
+    assert [item["item_name"] for item in options] == ["Brother HAK 180 烫金机"]
+    assert options[0]["matched_by"] == "catalog_mentioned"
+
+    # 问句完全无关时，小知识库（≤5 条）直接列目录，仍给用户可点的出路
+    options = match_module.similar_from_query("今天天气怎么样")
+    assert [item["matched_by"] for item in options] == ["catalog_all"]
+
+
+def test_confirm_item_name_offers_options_when_no_name_extracted(monkeypatch):
+    """回归 D17：模型返回空 item_names 时，也要按问句给出相似主体（不再只说“请补充产品名称”）。"""
+    from app.rag.item_name import match as match_module
+    from app.rag.query import item_name_confirm_service as service
+    from app.shared.clients import history_repository as history_module
+
+    monkeypatch.setattr(catalog_module, "_CACHE",
+                        {"names": ["Brother HAK 180 烫金机"], "raws": ["Brother HAK 180 烫金机"], "ts": 9e9})
+    monkeypatch.setattr(match_module, "load_item_names", lambda: ["Brother HAK 180 烫金机"])
+    monkeypatch.setattr(service, "get_history_messages_and_context", lambda session_id: "")
+    monkeypatch.setattr(
+        service, "call_llm_item_name_and_rewritten",
+        lambda history_text, original_query: {"item_names": [], "rewritten_query": "烫金机怎么安装"},
+    )
+    monkeypatch.setattr(history_module.history_repository, "save_message", lambda **kwargs: None)
+
+    state = create_query_default_state(session_id="s1", original_query="烫金机怎么安装")
+    result = service.confirm_item_name(state)
+
+    assert result["item_name_options"], "没抽出主体时必须给出可点选主体"
+    assert result["item_name_options"][0]["item_name"] == "Brother HAK 180 烫金机"
+    assert "请点击下方主体直接提问" in result["answer"]

@@ -10,6 +10,8 @@ from app.evolution.schema import CitationModel
 class HealthResponseSchema(BaseModel):
     code:int=200
     message:str=None
+    # 当前静态资源内容指纹：前端据此判断「页面里的脚本是否已过期」，提示用户刷新
+    asset_version:str=""
 
 # 查询接口的请求参数json
 class QueryRequestSchema(BaseModel):

@@ -8,7 +8,7 @@ from __future__ import annotations
 from langchain_core.messages import HumanMessage
 
 from app.process.query.agent.state import QueryGraphState
-from app.rag.item_name.match import search_by_item_names, select_item_names
+from app.rag.item_name.match import search_by_item_names, select_item_names, similar_from_query
 from app.rag.query.history_utils import build_history_context
 from app.shared.clients.history_repository import history_repository
 from app.shared.models import llm_providers
@@ -120,6 +120,17 @@ def confirm_item_name(state: QueryGraphState) -> QueryGraphState:
     if result.get("item_names"):
         milvus_result = search_by_item_names(result["item_names"])
         list_dict = select_item_names(milvus_result)
+    else:
+        # 模型没抽出主体（例如只说了品类「烫金机」）：仍然要用**问句本身**在目录里找相似主体，
+        # 否则同一界面上「hak180 给选项、烫金机怎么安装 只回请补充产品名称」，用户无法理解。
+        similar = similar_from_query(original_query, result.get("rewritten_query") or "")
+        if similar:
+            list_dict = {"confirmed_list": [], "option_list": [], "similar_list": similar}
+            logger.info(
+                f"模型未抽出主体，按问句给出相似主体供点选：{[item['item_name'] for item in similar]}"
+            )
+        else:
+            logger.info(f"模型未抽出主体，且问句中未出现库内关键词：query={original_query}")
 
     apply_item_name_result(state, list_dict, result.get("rewritten_query"))
     save_history_message(state)

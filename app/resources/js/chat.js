@@ -275,7 +275,9 @@
   let healthFails = 0;
   async function apiHealth() {
     try {
-      await App.fetchJson(App.PATHS.health);
+      const health = await App.fetchJson(App.PATHS.health);
+      // 服务端资源版本变了 → 说明后端已部署新前端，提示刷新（长开页面不会自动换脚本）
+      if (App.checkFreshness) App.checkFreshness(health);
       healthFails = 0;
       apiPill.textContent = 'API: 已连接';
       apiPill.style.cursor = 'default';

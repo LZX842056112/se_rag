@@ -178,3 +178,43 @@ def find_similar_names(name: object, *, limit: int = 3) -> list[tuple[str, str]]
 
     matched.sort(key=lambda item: (-item[0], len(item[1])))
     return [(candidate, how) for _, candidate, how in matched[:limit]]
+
+
+# 「问句里提到了库内关键词」判定的最短词长：单字（如「机」）匹配面过大
+_MENTION_MIN_TOKEN_LEN = 2
+
+
+def find_names_mentioned_in(text: object, *, limit: int = 3) -> list[tuple[str, str]]:
+    """模型没抽出主体时，用「问句里出现的库内关键词」找相似主体。
+
+    场景：用户问「烫金机怎么安装」——模型认为「烫金机」是品类而不是具体型号，返回空
+    ``item_names``，于是链路连目录都不查、只回一句「请补充产品名称」。库里明明只有一个
+    ``Brother HAK 180 烫金机``。这里把库内主体名切成 token，凡有长度 ≥2 的词出现在问句里，
+    就把该主体列为候选（``catalog_mentioned``），命中词越长越靠前。
+
+    :return: ``[(库内标准名, 命中方式), ...]``
+    """
+    key = normalize_item_name(text)
+    if not key:
+        return []
+
+    matched: list[tuple[int, int, str, str]] = []
+    seen: set[str] = set()
+    for candidate in load_item_names():
+        candidate_key = normalize_item_name(candidate)
+        if not candidate_key or candidate_key in seen:
+            continue
+        seen.add(candidate_key)
+        if candidate_key in key:
+            matched.append((3, len(candidate_key), candidate, "catalog_contains"))
+            continue
+        hits = [
+            token for token in name_tokens(candidate)
+            if len(token) >= _MENTION_MIN_TOKEN_LEN and token in key
+        ]
+        # 多个词命中（如同时出现「hak」与「180」）比单字面词更可信
+        if hits:
+            matched.append((1, max(len(token) for token in hits) + len(hits), candidate, "catalog_mentioned"))
+
+    matched.sort(key=lambda item: (-item[0], -item[1], len(item[2])))
+    return [(candidate, how) for _, _, candidate, how in matched[:limit]]

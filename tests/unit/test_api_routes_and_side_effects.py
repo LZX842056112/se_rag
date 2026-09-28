@@ -73,6 +73,15 @@ def test_pages_are_rendered_with_asset_version_and_no_cache():
     assert len(pages.asset_version()) == 10
 
 
+def test_health_reports_asset_version_for_stale_page_detection():
+    """健康检查要带资源版本：前端据此发现「页面里的脚本已过期」并提示刷新。"""
+    from app.api.routers import health as health_router
+
+    payload = health_router.health()
+    assert payload.code == 200
+    assert payload.asset_version == pages.asset_version()
+
+
 def test_asset_version_changes_with_content(tmp_path, monkeypatch):
     """内容指纹必须随静态资源内容变化（否则长缓存会锁死旧版本）。"""
     for relative, _ in pages._ASSETS.values():
