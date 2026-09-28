@@ -207,10 +207,11 @@
       listEl.innerHTML = '<div class="empty">加载失败：' + esc(e.message) + '</div>';
       countEl.textContent = '—';
     }
+    // 审批/驳回/下架都会改变闭环计数：列表刷新时一并刷新状态，避免 pill 停在旧数字
+    loadStatus();
   }
 
   filterEl.addEventListener('change', reload);
   document.getElementById('refresh').addEventListener('click', reload);
   reload();
-  loadStatus();
 })();
