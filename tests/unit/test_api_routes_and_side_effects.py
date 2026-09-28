@@ -24,6 +24,7 @@ def test_query_service_route_contract():
         "/api/evolution/feedback",
         "/api/evolution/candidates",
         "/api/evolution/candidates/{candidate_id}/approve",
+        "/api/evolution/candidates/{candidate_id}",
         "/approval",
         "/static/{asset_name}",
     ):

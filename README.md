@@ -242,6 +242,7 @@ uvicorn app.api.http.import_server:app --host 0.0.0.0 --port 8000
 | `POST /api/evolution/feedback` | 提交反馈（`thumbs`=1 / -1） |
 | `GET /api/evolution/candidates` | 候选列表（可按 `status` 筛选） |
 | `POST /api/evolution/candidates/{id}/approve` `/reject` `/edit` | 审批写操作（需 `X-Internal-Token`） |
+| `DELETE /api/evolution/candidates/{id}` | 下架候选（已入库条目同时移出向量库，需 Token） |
 
 导入服务（:8000）：
 
@@ -298,6 +299,11 @@ E2E_ENABLED=1 uv run pytest -m e2e tests/e2e -s
 - **自进化需显式开启**：`EVOLUTION_ENABLED=false` 时反馈接口仅幂等接受不落库，进化条目不参与召回。
 - **审批写操作鉴权**：未配置或未正确携带 `EVOLUTION_ADMIN_TOKEN`（`X-Internal-Token`）时
   通过 / 驳回 / 编辑会被拒绝（503 / 401）。
+- **候选必须携带事实**：无检索证据或生成答案只是「未提及 / 建议联系官方」时，候选会登记为
+  `need_info`（审批页显示「待人工补充」），此时无法直接通过——请先「编辑」补充真实答案，
+  保存后状态自动回到 `待审批（draft）`，再通过即可被客服正常作答。
+- **误批条目可下架**：审批页对 `active` 条目提供「🗑 下架」，下架后立即移出检索（历史遗留的
+  「无信息」条目在召回端也会被自动过滤）。
 - **兜底话术是缺口依据**：命中内容但模型仍回复「未查询到该问题相关信息 / 无法作答」也会记为未解决信号。
 - **反馈幂等**：同一会话、问题、反馈类型在 30 秒内重复提交会被去重。
 - **调度器单 worker**：调度器随查询服务 `lifespan` 启停，仅在单 worker 部署下有效。
@@ -385,6 +391,17 @@ E2E_ENABLED=1 uv run pytest -m e2e tests/e2e -s
 - 缓存策略：HTML `no-cache`；静态资源 `public, max-age=86400, immutable`，并用
   `?v=<内容指纹>`（`app/api/routers/pages.py` 注入）保证更新立即生效；
   `/static/{asset}` 改为白名单路由，未登记资源 404。
+
+**⑧ 候选知识质量闸门（修复「审批已入库但客服仍答不出」）**
+
+- 根因：候选生成器在**无检索证据**时会把「未提及…建议联系官方」写成 FAQ 答案，审批后作为知识入库；
+  客服能召回它（引用标签显示「自进化」），但内容本身没有事实，模型只能继续回答「无法作答」。
+- 生成端：新增 `app/evolution/quality.py`（`looks_like_non_answer`）；无证据或生成答案疑似「无信息结论」
+  的候选登记为 **`need_info`（待人工补充）**，不再产生 `draft`。
+- 审批端：`approve` 拒绝 `need_info` 与「无信息」答案并回显原因；`edit` 补齐事实后**自动回到 `draft`**，
+  管理员即可直接通过；新增 `DELETE /api/evolution/candidates/{id}` 与审批页「🗑 下架」按钮，
+  可一键把误批入库的条目移出检索。
+- 召回端：`app/evolution/retrieval.py` 过滤历史遗留的「无信息」条目，避免它们占掉引用位。
 
 ### 2026-09-27
 

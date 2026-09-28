@@ -64,8 +64,10 @@ def list_candidates(status: str | None = None, limit: int = 100) -> CandidateLis
              dependencies=[Depends(require_admin_token)])
 def approve_candidate(candidate_id: str, req: CandidateApproveRequest) -> OkResponse:
     """审批通过并把候选写入知识库（active）。"""
-    if not approval_service.approve(candidate_id, reason=req.reason):
-        raise ApiError("candidate_not_found", "候选不存在或当前状态不可审批", status_code=404)
+    ok, message = approval_service.approve(candidate_id, reason=req.reason)
+    if not ok:
+        code = "candidate_not_found" if message == "候选不存在" else "candidate_not_approvable"
+        raise ApiError(code, message, status_code=404 if code == "candidate_not_found" else 400)
     return OkResponse(code=200, message="approved")
 
 
@@ -85,3 +87,12 @@ def edit_candidate(candidate_id: str, req: CandidateEditRequest) -> OkResponse:
     if not approval_service.edit(candidate_id, faq_question=req.faq_question, faq_answer=req.faq_answer):
         raise ApiError("edit_failed", "编辑失败或没有实际改动", status_code=400)
     return OkResponse(code=200, message="edited")
+
+
+@router.delete("/candidates/{candidate_id}", response_model=OkResponse,
+               dependencies=[Depends(require_admin_token)])
+def remove_candidate(candidate_id: str) -> OkResponse:
+    """下架候选：删除元数据，并从向量库移除已入库的条目。"""
+    if not approval_service.remove_candidate(candidate_id):
+        raise ApiError("candidate_not_found", "候选不存在或下架失败", status_code=404)
+    return OkResponse(code=200, message="removed")

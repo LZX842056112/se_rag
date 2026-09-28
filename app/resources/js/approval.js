@@ -22,7 +22,8 @@
     active: '已入库',
     rejected: '已驳回',
     hold: '观察中',
-    removed: '已下架'
+    removed: '已下架',
+    need_info: '待人工补充'
   };
 
   // 审批写操作令牌：仅当前标签页会话有效（sessionStorage），输入时即时持久化
@@ -115,8 +116,25 @@
       actButton(ops, '✎ 编辑', 'plain', () => beginEdit(item, card));
       return;
     }
+    if (item.status === 'need_info') {
+      // 无证据 / 生成答案不含事实：不允许直接通过，先编辑补充真实答案
+      ops.appendChild(App.create('span', 'greet', '该候选没有可用事实，请先「编辑」补充答案，保存后即可通过'));
+      actButton(ops, '✎ 编辑', 'plain', () => beginEdit(item, card));
+      return;
+    }
     if (item.status === 'active') {
       ops.appendChild(App.create('span', 'greet', '已写入知识库（active）'));
+      // 误批入库（例如「未提及…建议联系官方」这类没有事实的条目）可一键下架
+      actButton(ops, '🗑 下架', 'bad', async (btn) => {
+        if (!(await App.confirm('确认下架该知识条目？下架后不再参与检索。',
+                                { confirmText: '下架', danger: true }))) return;
+        btn.disabled = true;
+        try {
+          await App.fetchJson(App.PATHS.candidateRemove(item.id), { method: 'DELETE' });
+          toast('已下架');
+          reload();
+        } catch (e) { btn.disabled = false; toast('下架失败：' + e.message); }
+      });
     } else if (item.status === 'rejected') {
       ops.appendChild(App.create('span', 'greet', '已驳回（rejected）'));
     } else {

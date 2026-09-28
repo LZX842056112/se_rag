@@ -206,7 +206,8 @@ def test_import_query_and_evolution_flow(require_e2e, sample_doc):
         from app.evolution.approval import service as approval_service
 
         candidate_id = str(drafts[0]["_id"])
-        assert approval_service.approve(candidate_id), "候选审批通过失败"
+        approved_ok, approved_msg = approval_service.approve(candidate_id)
+        assert approved_ok, f"候选审批通过失败：{approved_msg}"
         approved = evolution_repo.k_candidates.find_one({"_id": drafts[0]["_id"]})
         evo_doc_id = approved.get("evo_doc_id")
         assert evo_doc_id, "审批后未生成 evo_doc_id"

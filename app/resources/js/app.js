@@ -20,6 +20,9 @@
     candidateAction: function (id, action) {
       return '/api/evolution/candidates/' + encodeURIComponent(id) + '/' + action;
     },
+    candidateRemove: function (id) {
+      return '/api/evolution/candidates/' + encodeURIComponent(id);
+    },
     upload: '/api/import/upload',
     taskStatus: function (taskId) { return '/api/import/status/' + encodeURIComponent(taskId); }
   };

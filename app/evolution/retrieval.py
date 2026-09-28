@@ -8,6 +8,7 @@ from typing import Any
 
 from app.rag.item_name.catalog import expand_item_names
 from app.rag.item_name.config import GLOBAL_ITEM_NAME
+from app.evolution.quality import looks_like_non_answer
 from app.shared.clients.milvus_gateway import eq_expr, in_expr, milvus_gateway
 from app.shared.models import llm_providers
 from app.shared.runtime.logger import logger
@@ -24,23 +25,35 @@ _EVOLUTION_OUTPUT_FIELDS = [
 
 
 def _format(milvus_list: list[dict]) -> list[dict[str, Any]]:
-    """把 Milvus 原始命中格式化为与知识库 chunk 同构的结构。"""
-    return [
-        {
-            "chunk_id": item.get("entity", {}).get("evo_doc_id"),
+    """把 Milvus 原始命中格式化为与知识库 chunk 同构的结构。
+
+    历史数据里可能残留「未提及…建议联系官方」这类没有事实的条目（修复前误批入库的），
+    它们被召回只会占掉引用位并让模型继续答“无法作答”，因此这里直接跳过。
+    """
+    items: list[dict[str, Any]] = []
+    for item in milvus_list or []:
+        entity = item.get("entity", {}) or {}
+        answer = entity.get("faq_answer")
+        if looks_like_non_answer(answer):
+            logger.warning(
+                f"跳过无事实的进化条目 {entity.get('evo_doc_id')}："
+                f"{(entity.get('faq_question') or '')[:30]}"
+            )
+            continue
+        items.append({
+            "chunk_id": entity.get("evo_doc_id"),
             "score": item.get("distance", 0.0),
-            "title": item.get("entity", {}).get("faq_question"),
+            "title": entity.get("faq_question"),
             "file_title": "__evolution__",
             "parent_title": "",
             "part": 0,
-            "item_name": item.get("entity", {}).get("item_name"),
-            "content": item.get("entity", {}).get("faq_answer"),
+            "item_name": entity.get("item_name"),
+            "content": answer,
             "source": "evolution",
             "type": "milvus",
             "url": "",
-        }
-        for item in (milvus_list or [])
-    ]
+        })
+    return items
 
 
 def _search(rewritten_query: str, expr: str, limit: int, embedding: dict[str, list] | None) -> list[dict]:
