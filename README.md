@@ -207,6 +207,7 @@ uv sync            # 依据 pyproject.toml + uv.lock 创建环境并安装依赖
 | `EVOLUTION_SCHEDULE_ENABLED` / `EVOLUTION_SCHEDULE_INTERVAL_MINUTES` | 调度器 | `true` / `30` |
 | `EVOLUTION_ADMIN_TOKEN` | 审批写操作令牌 | 无 |
 | `MCP_TIMEOUT_SECONDS` | 联网检索 MCP 超时（秒） | `30` |
+| `WEB_MAX_IN_CONTEXT` | 本地有命中时，最终上下文保留的联网结果条数上限 | `2` |
 
 ### 4.3 启动服务
 
@@ -402,6 +403,15 @@ E2E_ENABLED=1 uv run pytest -m e2e tests/e2e -s
   管理员即可直接通过；新增 `DELETE /api/evolution/candidates/{id}` 与审批页「🗑 下架」按钮，
   可一键把误批入库的条目移出检索。
 - 召回端：`app/evolution/retrieval.py` 过滤历史遗留的「无信息」条目，避免它们占掉引用位。
+
+**⑨ 重排来源优先级（修复「入库了仍答不出、且没有引用」）**
+
+- 根因：进化条目重排时只喂了答案（“配对码123456”），没带 FAQ 问题 → 跨编码器打分 0.4793；
+  4 条联网结果 0.999x 全排在前面 → 动态截断在断崖处把本地知识整体切掉 → 无引用、答“无法作答”。
+- 修复：① 进化条目重排文本改为「FAQ 问题 + 答案」（同一 FAQ 0.4793 → **0.9999**）；
+  ② 新增 `cap_web_docs`，本地有命中时联网最多保留 2 条（`WEB_MAX_IN_CONTEXT` 可调）；
+  ③ 新增 `ensure_evolution_docs`，重排截断后把权威条目补回并置于上下文最前。
+- 复验：真实链路与浏览器均得到 **“HAK 180 烫金机的蓝牙配对码是123456。”** + `自进化` 引用 + 置信度 100%。
 
 ### 2026-09-27
 

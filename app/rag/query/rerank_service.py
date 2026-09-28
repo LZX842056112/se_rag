@@ -15,6 +15,7 @@ from app.rag.query.config import (
     RERANK_MIN_TOPK,
     RERANK_SUMMARY_CHAR_RATIO,
     RERANK_SUMMARY_MAX_WORKERS,
+    WEB_MAX_IN_CONTEXT,
     get_rerank_topk,
 )
 from app.shared.models import llm_providers
@@ -41,7 +42,13 @@ def deal_rrf_and_web_result(rrf_chunks: list, web_search_docs: list) -> list[dic
     reranker_docs = [
         {
             "chunk_id": chunk.get("chunk_id"),
-            "text": chunk.get("content"),
+            # 自进化条目是「问题 + 答案」结构：只喂答案会让很短的答案（如“配对码123456”）
+            # 与问句不匹配、被重排压低甚至截断；带上 FAQ 问题才符合它的语义。
+            "text": (
+                f"{chunk.get('title')}\n{chunk.get('content')}"
+                if chunk.get("source") == "evolution" and chunk.get("title")
+                else chunk.get("content")
+            ),
             "title": chunk.get("title"),
             "score": 0,  # 占位：稍后由 reranker 打分覆盖
             "type": "milvus",
@@ -63,6 +70,38 @@ def deal_rrf_and_web_result(rrf_chunks: list, web_search_docs: list) -> list[dic
         for doc in web_search_docs
     )
     return reranker_docs
+
+
+@step_log("cap_web_docs")
+def cap_web_docs(docs: list[dict], *, limit: int = WEB_MAX_IN_CONTEXT) -> list[dict]:
+    """限制联网结果条数：本地有命中时联网只作补充，避免把本地知识挤出上下文。"""
+    local = [d for d in docs if d.get("type") != "web"]
+    web = [d for d in docs if d.get("type") == "web"]
+    if not local or len(web) <= limit:
+        return docs
+    logger.info(f"联网结果 {len(web)} 条、本地命中 {len(local)} 条 → 仅保留前 {limit} 条联网结果")
+    keep = {id(d) for d in local} | {id(d) for d in web[:limit]}
+    return [d for d in docs if id(d) in keep]
+
+
+@step_log("ensure_evolution_docs")
+def ensure_evolution_docs(docs: list[dict], candidates: list[dict]) -> list[dict]:
+    """权威条目保底：自进化条目是人工审批过的知识，不能被重排截断丢掉。
+
+    :param docs: 动态截断后的最终上下文
+    :param candidates: 截断前的完整候选（用于找回被切掉的权威条目）
+
+    与 RRF 阶段的「防挤出」对齐，否则会出现「审批入库了，但重排把 FAQ 切掉、客服仍答不出」。
+    """
+    authority = [d for d in candidates if d.get("source") == "evolution"]
+    if not authority:
+        return docs
+    existing = {d.get("chunk_id") for d in docs}
+    missing = [d for d in authority if d.get("chunk_id") not in existing]
+    if not missing:
+        return docs
+    logger.info(f"重排截断后补回 {len(missing)} 条自进化权威条目：{[d.get('chunk_id') for d in missing]}")
+    return missing + docs
 
 
 def _summarize_for_rerank(rewritten_query: str, answer: str, limit: int) -> str:
@@ -183,7 +222,11 @@ def rerank_documents(state: QueryGraphState) -> QueryGraphState:
     reranker_docs = deal_rrf_and_web_result(rrf_chunks, web_search_docs)
     question_answer_pair_list = create_question_answer_lists(rewritten_query, reranker_docs)
     use_reranker_deal_score(question_answer_pair_list, reranker_docs)
+    # 联网只作补充 → 动态截断 → 权威条目保底
+    reranker_docs = cap_web_docs(reranker_docs)
+    scored_docs = list(reranker_docs)  # 截断前的完整候选（权威条目保底用）
     reranker_docs = dyn_limit_reranker_docs(reranker_docs)
+    reranker_docs = ensure_evolution_docs(reranker_docs, scored_docs)
     state["reranked_docs"] = reranker_docs
     logger.info(
         "重排完成：候选 {} 条，保留 {} 条；Top3={}".format(
