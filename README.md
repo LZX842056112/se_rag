@@ -1,251 +1,283 @@
-# 企业化 RAG 知识库客服系统（含自进化闭环）
+# se_rag · 企业化 RAG 知识库客服系统
 
-面向企业的检索增强生成（RAG）客服系统：把企业文档导入向量库，在网页上通过自然语言提问，并在其
-基础上实现「知识自进化」——自动发现客服答不出的问题、生成知识候选，经人工审批后回流知识库。
+面向企业的检索增强生成（RAG）客服系统：把企业文档导入向量库，在网页上用自然语言提问，
+并在此基础上实现**知识自进化**——自动发现客服答不出的问题、生成知识候选，经人工审批后回流知识库。
 
-> 语言约定：核心逻辑、关键函数与复杂流程均配有中文注释与文档字符串，方便中文团队维护。
+> 三个页面：客服对话 `/`、自进化审批 `/approval`、文件导入 `/import`。
+> 两个服务：导入服务 `:8000`、查询服务 `:8001`（共用同一份 `app/` 代码，仅挂载路由不同）。
+> 技术栈：Python ≥3.11 · FastAPI · LangGraph · Milvus · MongoDB · MinIO · BGE-M3 / BGE-Reranker · DashScope Qwen。
 
 ## 目录
 
 - [一、功能与定位](#一功能与定位)
 - [二、架构与技术栈](#二架构与技术栈)
 - [三、核心流程](#三核心流程)
-- [四、使用手册](#四使用手册)
+- [四、快速开始](#四快速开始)
 - [五、开发与测试](#五开发与测试)
-- [六、注意事项](#六注意事项)
+- [六、注意事项与排障](#六注意事项与排障)
 - [七、变更记录](#七变更记录)
 
 ## 一、功能与定位
 
-通用大模型不了解企业内部专有知识，而企业知识更新快、手工维护成本高。本项目通过
-「导入 → 检索增强生成 → 反馈 → 缺口发现 → 候选生成 → 审批 → 回流」的闭环，让知识库随真实
-客服数据持续自我完善。
+通用大模型不了解企业内部专有知识，而企业知识更新快、人工维护成本高。本项目用
+「导入 → 检索增强生成 → 反馈 → 缺口发现 → 候选生成 → 人工审批 → 回流」的闭环，让知识库随真实客服数据持续自我完善。
 
-| 特性 | 说明 |
-| --- | --- |
-| 多格式文档导入 | PDF（MinerU 云解析）/ Markdown，经切分、主体识别、向量化后入库 |
-| 多路混合检索 | 普通向量检索 + HyDE 查询改写检索 + MCP 联网搜索，RRF 融合 + BGE-Reranker 重排 |
-| 流式回答 | SSE 流式输出答案，附带引用片段（citations）与接地性（groundedness）评分 |
-| 会话历史 | 按会话读取 / 清空历史，跨轮次上下文保持 |
-| 用户反馈 | 每条答案可点赞 / 点踩，反馈落库参与自进化 |
-| 知识自进化 | 缺口扫描 → 候选生成 → 人工审批 → 回流 Milvus → 参与后续召回 |
-| 自动调度 | 内置调度器定时扫描未解决反馈并生成候选（单 worker 部署） |
-| 在线评估 | LLM 评估答案接地性，统计召回 / 采纳率 / 缺口率等指标 |
+| 能力 | 说明 | 入口 |
+| --- | --- | --- |
+| 文档导入 | Markdown 直接处理；PDF 经 MinerU 云解析转 Markdown；图片自动生成说明并上传 MinIO | 导入页 `:8000/import` |
+| 混合检索 | 稠密 + 稀疏（BGE-M3）混合检索；并行 HyDE 假设性检索与 MCP 联网补充 | 客服页内部 |
+| 主体识别与对齐 | 从提问中识别商品主体，与库内标准名对齐；无法确认时**列出相似主体供点选** | 客服页 |
+| 流式回答 | SSE 逐字输出，附引用来源（知识库 / 自进化 / 联网）与回答置信度 | 客服页 |
+| 会话历史 | 按会话读取 / 清空，支持跨轮次主体的指代消解 | 客服页 |
+| 用户反馈 | 每条回答可 👍/👎，反馈落库并参与自进化 | 客服页 |
+| 知识自进化 | 缺口扫描 → 候选生成（含质量闸门 / PII 拦截）→ 人工审批 → 回流向量库 → 参与后续召回 | 审批页 `:8001/approval` |
+| 自动调度 | 内置调度器：每轮扫描生成；（默认）每小时指标快照与参数自调、每天回测止损 | 查询服务 lifespan |
+| 在线评估 | LLM 判定答案接地性；统计采纳率 / 缺口率等指标并落库 | `GET /api/evolution/status` |
+
+**边界**：只支持 `.md` / `.pdf`；上传其他类型在入口即被拒绝（422）。知识库与自进化共用同一套 Milvus / MongoDB。
 
 ## 二、架构与技术栈
 
-### 2.1 分层结构
+### 2.1 分层与依赖方向
 
-调用方向单向，禁止反向依赖：
+依赖严格单向：`api → process → rag → evolution → shared → 外部系统`；`shared` 不反向依赖任何业务层。
 
-```
-app/api         HTTP 组装与路由（app/api/http/*_server.py + app/api/routers/*）
-app/process     LangGraph 节点编排（导入图 / 查询图）
-app/rag         业务逻辑（导入链路 / 查询链路 / 主体名目录）
-app/evolution   自进化闭环（反馈 / 缺口 / 候选 / 审批 / 索引 / 在线评估 / 参数自调）
-app/shared      唯一基础设施底座（config / clients / models / runtime / utils）
-app/rag_eval    离线检索质量评估子系统（可整体迁移）
-app/resources   前端页面与静态资源（html / css / js / prompts）
-```
+| 分层 | 规模 | 职责 | 改什么时来这里 |
+| --- | --- | --- | --- |
+| `app/api` | 14 文件 / 578 行 | 服务组装、路由、Pydantic 契约、统一错误体、页面与静态资源 | 加接口、改路由 |
+| `app/process` | 25 文件 / 371 行 | LangGraph 图与节点（薄编排，平均 15 行/文件） | 调流程分支/并行 |
+| `app/rag` | 30 文件 / 2275 行 | 业务实现：解析、切分、主体识别、召回、融合、重排、作答 | 改检索/生成行为 |
+| `app/evolution` | 26 文件 / 1250 行 | 反馈 → 缺口 → 候选 → 审批 → 回流；指标 / 自调 / 回测 | 改自进化规则 |
+| `app/shared` | 26 文件 / 1453 行 | 唯一底座：配置单点、外部客户端、模型门面、日志、工具 | 换模型 / 换存储 |
+| `app/rag_eval` | 5 文件 / 866 行 | 离线评估子系统（独立包边界） | 改评估指标 |
+| `app/resources` | 18 文件 / 1888 行 | 三页 HTML + 4 CSS + 4 JS + 7 个提示词模板 | 改前端交互 |
 
 ```mermaid
-flowchart TB
-    subgraph FE["前端（app/resources）"]
-        UI1["客服对话页 /"]
-        UI2["审批后台 /approval"]
+flowchart LR
+    subgraph FE["前端（原生 JS，无构建链）"]
+        UI1["客服页 /"]
+        UI2["审批页 /approval"]
         UI3["导入页 /import"]
     end
-    subgraph API["HTTP 层（app/api）"]
+    subgraph API["app/api"]
         QS["查询服务 :8001"]
         IS["导入服务 :8000"]
     end
-    subgraph FLOW["LangGraph 编排（app/process）"]
-        QG["查询图"]
-        IG["导入图"]
+    subgraph PROC["app/process（LangGraph）"]
+        QG["查询图 7 节点"]
+        IG["导入图 7 节点"]
     end
-    subgraph RAG["业务层（app/rag）"]
-        RQ["rag/query"]
-        RI["rag/import_"]
-        IN["rag/item_name"]
+    subgraph RAG["app/rag（业务）"]
+        RQ["query：主体确认 / 召回 / RRF / 重排 / 作答"]
+        RI["import_：解析 / 切分 / 主体 / 向量化 / 入库"]
     end
-    subgraph EVO["自进化（app/evolution）"]
-        FB["反馈"] --> GAP["缺口"] --> CAND["候选"] --> APV["审批"] --> IDX["回流"]
-        EVAL["在线评估"]
+    subgraph EVO["app/evolution"]
+        LOOP["反馈 → 缺口 → 候选 → 审批 → 回流"]
     end
-    subgraph SH["共享底座（app/shared）"]
-        CFG["config 配置"]
-        CLI["clients Milvus/Mongo/MinIO"]
-        MOD["models LLM/向量/重排"]
-        RUN["runtime 日志/提示词"]
-        UTL["utils 校验/文本/SSE/任务"]
-    end
-    subgraph STORE["外部系统"]
-        MV["Milvus"]
-        MG["MongoDB"]
-        MO["MinIO"]
-        LLM["DashScope Qwen"]
-    end
+    SH["app/shared（config / clients / models / runtime / utils）"]
+    EXT[("Milvus · MongoDB · MinIO · 模型服务 · MCP · MinerU")]
     UI1 --> QS
     UI2 --> QS
     UI3 --> IS
-    QS --> QG
-    IS --> IG
-    QG --> RQ
-    IG --> RI
-    RQ --> IN
-    IN --> IDX
-    QG --> EVO
-    RAG --> SH
-    EVO --> SH
-    SH --> STORE
+    QS --> QG --> RQ --> LOOP
+    IS --> IG --> RI
+    RQ --> SH
+    RI --> SH
+    LOOP --> SH
+    SH --> EXT
 ```
 
 ### 2.2 技术栈
 
-| 类别 | 技术 | 说明 |
+| 类别 | 技术 | 用途 | 依据 |
+| --- | --- | --- | --- |
+| 语言 / 依赖管理 | Python ≥3.11 + `uv` | 后端全部逻辑；`pyproject.toml` + `uv.lock` 锁版本 | `pyproject.toml:5` |
+| Web | FastAPI + Uvicorn + SSE | 两个服务、Pydantic 契约、流式回答 | `app/api/http/*_server.py` |
+| 编排 | LangGraph（`StateGraph`） | 导入图 / 查询图，条件边 + 并行召回 | `app/process/*/agent/main_graph.py` |
+| 向量库 | Milvus（`pymilvus[model]`） | 三集合稠密 + 稀疏混合检索 | `app/shared/clients/milvus_gateway.py` |
+| 文档库 | MongoDB（`pymongo`） | 会话、反馈、缺口、候选、指标、参数 | `app/shared/clients/mongo.py` |
+| 对象存储 | MinIO | Markdown 图片外链（公开只读桶） | `app/shared/clients/minio_gateway.py` |
+| 模型 | BGE-M3（本地，稠密+稀疏）、BGE-Reranker-Large（本地）、DashScope Qwen（云端） | 向量化、重排、生成/视觉/接地性评估 | `app/shared/models/` |
+| 联网检索 | 百炼 MCP（`openai-agents` + `requests`） | 补充实时信息，失败降级为空 | `app/rag/query/web_search_service.py` |
+| PDF 解析 | MinerU 云服务 | PDF → Markdown | `app/rag/import_/pdf_parse_service.py` |
+| 前端 | 原生 HTML / CSS / JS | 三页 UI，无构建链 | `app/resources/` |
+| 日志 | loguru | 控制台 + 文件双通道；`sys._getframe` 定位真实调用点 | `app/shared/runtime/logger.py` |
+| 测试 | pytest（+ `mongomock`） | 离线单测 + 可选真机 e2e | `pyproject.toml:35-46` |
+
+### 2.3 数据契约（改名这类操作必须绕开这些）
+
+**Milvus 三个集合**
+
+| 集合 | 主键 | 字段 | 向量 / 口径 |
+| --- | --- | --- | --- |
+| `kb_chunks` | `chunk_id` INT64 **自增** | `file_title` / `item_name` / `title` / `parent_title` / `part` / `content` | dense **COSINE** + sparse IP |
+| `kb_item_names` | `pk` INT64（显式） | `file_title` / `item_name` | dense **COSINE** + sparse IP |
+| `kb_evolution_items` | `evo_doc_id` VARCHAR(128)（`evo_<12hex>`） | `faq_question` / `faq_answer` / `source_refs` / `item_name` / `status` / `file_title` | dense **IP**（BGE-M3 已 L2 归一化） |
+
+**MongoDB 六个集合**（库名见 `MONGO_DB_NAME`）
+
+| 集合 | 内容 | 唯一写入者 |
 | --- | --- | --- |
-| 语言 / 依赖管理 | Python ≥ 3.11 + `uv`（`pyproject.toml` / `uv.lock`） | 依赖按实际引用裁剪 |
-| Web | FastAPI + Uvicorn + SSE | 两个服务进程，路由统一挂 `/api` 前缀 |
-| 编排 | LangGraph（`StateGraph`） | 导入图 / 查询图，节点薄封装 + 业务服务 |
-| 存储 | Milvus（向量）/ MongoDB（结构化）/ MinIO（对象） | 集合与字段名属数据契约，重构期间保持不变 |
-| 模型 | BGE-M3（稠密+稀疏）、BGE-Reranker-Large、DashScope Qwen | 均进程内单例，首次加载较慢 |
-| 文档解析 | MinerU 云服务（HTTP） | PDF → Markdown → 图片增强 → 切分 |
+| `chat_message` | 会话历史（含 `citations` / `groundedness`） | `history_repository.save_message` |
+| `fb_events` | 反馈事件（`adopt` / `thumbs` / `cited_chunk_ids` / `item_names` / `source`） | `app/evolution/feedback/collector.py` |
+| `k_gaps` | 知识缺口（`confidence` / `signals` / `status`） | `app/evolution/gap/detector.py` |
+| `k_candidates` | 候选知识（`draft` / `need_info` / `active` / `rejected` / `deprecated`） | 生成器 + 审批状态机 |
+| `k_metrics` | 指标快照（`adopt_rate` / `gap_rate` / `params_snapshot`） | `app/evolution/online_eval/metrics.py` |
+| `param_registry` | 参数注册表（`RRF_K` / `RRF_TOP` / `RERANK_TOP_K` + `rev`） | `app/evolution/tuning/param_registry.py` |
 
-### 2.3 数据存储
+**三条不变式**（改动前先想清楚）
 
-Milvus 集合：
-
-| 集合 | 用途 |
-| --- | --- |
-| `kb_chunks` | 知识库分片（稠密 + 稀疏向量） |
-| `kb_item_names` | 主体名索引（用于主体识别与目录匹配） |
-| `kb_evolution_items` | 自进化已审批条目（`status == 'active'` 参与召回） |
-
-MongoDB 集合（库名见 `MONGO_DB_NAME`）：
-
-| 集合 | 用途 |
-| --- | --- |
-| `chat_message` | 会话历史 |
-| `fb_events` | 反馈事件与未解决信号 |
-| `k_gaps` | 知识缺口 |
-| `k_candidates` | 审批候选 |
-| `k_metrics` | 指标快照 |
-| `param_registry` | 参数注册表（自调） |
+1. 集合名与字段名属数据契约；LangGraph `state` 键名、SSE 事件名同理。
+2. `kb_chunks` 是自增主键 + 「按 `file_title` 先删后插」→ **重复导入会重新分配 `chunk_id`**，绑在它上面的评估标注会失效。
+3. `EVOLUTION_*` 开关语义、`app/rag_eval` 包边界保持不变。
 
 ## 三、核心流程
 
-### 3.1 导入流程
+### 3.1 导入流程（:8000，7 节点）
 
 ```
-node_entry（类型分派）
-  → node_pdf_to_md（PDF→MD，仅 pdf）
-  → node_md_img（图片说明 + MinIO 上传 + 链接替换）
-  → node_document_split（标题粗切 + 超长细切 + 短块合并）
-  → node_item_name_recognition（主体识别 + 归并 + 写主体名索引）
-  → node_bge_embedding（稠密 + 稀疏向量）
-  → node_import_milvus（同 file_title 幂等覆盖写入）
+POST /api/import/upload   校验扩展名（仅 md/pdf）→ 落盘 → 后台任务 → 立即返回 task_ids
+  → node_entry                     按后缀分派 md / pdf，写 file_title
+  → node_pdf_to_md                 仅 PDF：MinerU 解析（轮询 600s 上限 / 3s 间隔）→ 下载解压
+  → node_md_img                    图片 → 视觉模型生成说明 → 上传 MinIO → 链接替换
+  → node_document_split            标题粗切 → 超长细切(>1000 字) → 同标题短块合并(<400 字)
+  → node_item_name_recognition     LLM 读前 10 片识别主体 → 归并库内标准名 → 写 kb_item_names
+  → node_bge_embedding             分批（6 条/批）生成稠密 + 稀疏向量
+  → node_import_milvus             按 file_title 先删后插（幂等覆盖）写 kb_chunks
 ```
 
-### 3.2 查询流程
+不支持的文档类型会显式标记任务 `FAILED`（图内会静默走到 END，靠业务层兜底），不会出现「已完成但未入库」。
+进度记录不立即清理，由 `TASK_STATE_TTL_SECONDS`（默认 6h）回收，保证前端仍能轮询到终态。
+
+### 3.2 查询流程（:8001，7 节点 + 1 条条件短路）
 
 ```
-node_item_name_confirm（历史上下文 + 主体识别 + 问题改写，必要时反问）
-  → node_search_embedding（知识库向量检索；开启自进化时并行召回演进条目）
-  → node_search_embedding_hyde（HyDE 假设性文档检索）
-  → node_web_search_mcp（联网检索，失败降级）
-  → node_rrf（RRF 融合，演进权威条目防挤出）
-  → node_rerank（BGE-Reranker 打分 + 动态截断）
-  → node_answer_output（生成答案 / 图片抽取 / 引用与接地性回填 / 落库）
+POST /api/query    流式：先建 SSE 通道再后台执行，立即返回 session_id；非流式：同步等待
+  → node_item_name_confirm   历史上下文 → LLM 抽主体 + 改写问题 → 向量对齐 → 四态判定
+  → 条件边                   主体已确认 → 继续；未确认（answer 已就绪）→ 直接作答 END
+  → 并行三路召回             ① 知识库混合检索（含自进化条目）② HyDE 假设性检索 ③ MCP 联网（失败降级空）
+  → node_rrf                 多路 RRF 融合，强制并入自进化权威条目
+  → node_rerank              本地优先排序 → 限联网条数 → BGE-Reranker 打分 → 累计断崖截断 → 权威条目保底
+  → node_answer_output       有现成答案则跳过 LLM；否则作答 → 抽图 → 回填引用/信号/接地性 → 落库
+  → SSE final + close        返回 answer / citations / groundedness / item_name_options
 ```
 
-同一次提问中，`rewritten_query` 只做一次向量化，供知识库与自进化两路检索复用。
+**主体确认四态**（`app/rag/query/item_name_confirm_service.py`）：
+
+| 判定 | 触发条件 | 行为 |
+| --- | --- | --- |
+| 确认 | 完整命中库内标准名，或 top1 达下限且与次优主体间距达标 | 正常多路召回 |
+| 可选 | 向量分落在 `0.60 ~ 0.65` 区间 | 列出候选主体，请用户点选 |
+| 相似 | 目录子串 / token 前缀 / 问句里出现库内关键词 | 列相似主体供点选 |
+| 无主体 | 以上都不成立 | 提示补充产品名称 |
+
+一次提问只对 `rewritten_query` 编码一次向量，知识库与自进化两路复用。
 
 ### 3.3 自进化闭环
 
 ```
-用户点踩 / 零命中 / 命中却答不出
-  → fb_events（MongoDB，30s 幂等去重）
-  → 缺口扫描（加权置信度分级 strong / weak / none）
-  → 候选生成（LLM 提炼 FAQ + PII 拦截 + 问题级去重）
+点踩 / 零命中 / 命中却答不出
+  → fb_events（30s 幂等窗口）
+  → 缺口扫描（ts 升序 + 游标；加权置信度分级 strong / weak / none）
+  → 候选生成（LLM 提炼 FAQ；无证据或疑似「无信息」→ need_info；命中 PII / 重复 → rejected）
   → 人工审批（通过 / 驳回 / 编辑，写操作需 X-Internal-Token）
-  → 索引回流（kb_evolution_items，active）
-  → 后续查询经 RRF 并入并重排
-  → 在线评估（groundedness / 采纳率 / 缺口率）+ 参数自调与回测止损
+  → 索引回流（kb_evolution_items，status=active；源缺口回写 resolved / rejected）
+  → 后续查询经 RRF 并入、重排置顶，引用标签显示「自进化」
 ```
 
-## 四、使用手册
+| 闸门 | 规则 | 目的 |
+| --- | --- | --- |
+| 缺口分级 | `strong ≥ 0.65`、`weak ≥ 0.45`（权重 user/retrieval/generation = 0.4/0.3/0.3） | 只有 strong 才生成候选 |
+| 缺口去重 | **按问题**（不是按会话）+ 1 小时窗口 | 同一会话的后续新问题仍能被扫到 |
+| 候选质量 | 无证据 → `need_info`；答案像「未提及…建议联系官方」→ 拒绝通过 | 不让伪知识入库 |
+| 回测止损 | 观察窗内命中 ≥ `EVOLUTION_BACKTEST_MIN_HITS`（默认 3）且拒绝率超限才下架 | 防单条差评误杀已审批知识 |
+
+调度节拍（`app/evolution/scheduler.py`）：每轮扫描生成；指标快照 + 参数自调按 `EVOLUTION_METRIC_INTERVAL_MINUTES`（默认 60 分钟）；
+回测止损按 `EVOLUTION_BACKTEST_INTERVAL_HOURS`（默认 24 小时）。参数自调基线取**历史**快照，避免与本轮快照自比自。
+
+### 3.4 SSE 协议与前端
+
+| 事件 | 载荷要点 |
+| --- | --- |
+| `ready` | 连接建立（服务端先回放订阅前缓冲，避免 POST 与 GET 竞态） |
+| `progress` | `status` / `done_list` / `running_list`（节点进度） |
+| `delta` | `delta`（LLM 增量文本） |
+| `final` | `answer` / `image_urls` / `item_names` / `citations` / `groundedness` / `item_name_options` |
+| `error` | `code` / `message` |
+| `close` | 服务端关闭（前端停止等待） |
+
+前端三页共用 `/static/app.js`（`fetchJson` / `openStream` / `formatDateTime` / `checkFreshness` 等），
+页面自身只管业务交互；资源以 `?v=<内容指纹>` 引用，`/api/health` 回传同一指纹，发现页面过期会提示刷新。
+
+## 四、快速开始
 
 ### 4.1 环境要求
 
-- Python ≥ 3.11（推荐 `uv` 管理）
+- Python ≥ 3.11（推荐用 `uv` 管理依赖）
 - 可访问的 Milvus / MongoDB / MinIO
-- 可用的模型服务：DashScope（Qwen）API Key；本地 BGE-M3 与 BGE-Reranker 模型
-- 可选的 MinerU API Token（仅导入 PDF 时需要）
+- DashScope（Qwen）API Key；本地 BGE-M3 与 BGE-Reranker-Large 模型文件
+- 可选：MinerU API Token（仅导入 PDF 需要）、百炼 MCP 地址（联网检索）
 
-### 4.2 安装与配置
+### 4.2 安装
 
 ```bash
-uv sync            # 依据 pyproject.toml + uv.lock 创建环境并安装依赖
+uv sync                 # 依据 pyproject.toml + uv.lock 创建 .venv 并安装依赖
 ```
 
-配置根目录 `.env`（不要提交真实密钥）。主要变量：
+### 4.3 配置（项目根目录 `.env`）
 
-| 变量 | 说明 | 缺省 |
-| --- | --- | --- |
-| `OPENAI_API_KEY` / `OPENAI_BASE_URL` | DashScope Key 与 OpenAI 兼容地址 | 无 |
-| `LLM_DEFAULT_MODEL` / `VL_MODEL` | 生成模型 / 视觉模型 | 无 |
-| `BGE_M3_PATH` / `BGE_DEVICE` / `BGE_FP16` | 嵌入模型 | 无 / cpu / false |
-| `BGE_RERANKER_LARGE` / `BGE_RERANKER_DEVICE` | 重排模型 | 无 / 无 |
-| `MILVUS_URL` / `CHUNKS_COLLECTION` / `ITEM_NAME_COLLECTION` | 向量库 | 无 / 无 / 无 |
-| `EVOLUTION_COLLECTION` | 进化条目集合 | `kb_evolution_items` |
-| `MONGO_URL` / `MONGO_DB_NAME` | MongoDB | 无 / 无 |
-| `MONGO_SERVER_SELECTION_TIMEOUT_MS` | Mongo 选主超时（毫秒） | `5000` |
-| `MINIO_*` | 对象存储（`MINIO_IMG_DIR` 建议 `/upload-images`） | 无 |
-| `APP_HOST` / `IMPORT_APP_PORT` / `QUERY_APP_PORT` | 服务监听 | `0.0.0.0` / 8000 / 8001 |
-| `TASK_STATE_TTL_SECONDS` | 任务进度内存保留时长 | `21600`（6 小时） |
-| `EVOLUTION_ENABLED` | 自进化总开关 | `false` |
-| `EVOLUTION_SCHEDULE_ENABLED` / `EVOLUTION_SCHEDULE_INTERVAL_MINUTES` | 调度器 | `true` / `30` |
-| `EVOLUTION_METRIC_INTERVAL_MINUTES` | 指标快照 + 参数自调的执行周期（0 = 每轮） | `60` |
-| `EVOLUTION_BACKTEST_ENABLED` / `EVOLUTION_BACKTEST_INTERVAL_HOURS` | 回测止损开关与周期 | `true` / `24` |
-| `EVOLUTION_BACKTEST_MIN_HITS` | 回测下架的最小命中数（防单条差评误杀） | `3` |
-| `EVOLUTION_ADMIN_TOKEN` | 审批写操作令牌 | 无 |
-| `MCP_TIMEOUT_SECONDS` | 联网检索 MCP 超时（秒） | `30` |
-| `WEB_MAX_IN_CONTEXT` | 本地有命中时，最终上下文保留的联网结果条数上限 | `2` |
+> `app/shared/config/common.py` 使用 `load_dotenv(override=True)`：**`.env` 会覆盖同名系统环境变量**，
+> 想用环境变量临时改配置会失效。不要提交真实密钥。
 
-### 4.3 启动服务
+| 分组 | 变量 |
+| --- | --- |
+| LLM | `OPENAI_API_KEY`、`OPENAI_BASE_URL`、`LLM_DEFAULT_MODEL`、`VL_MODEL`、`LLM_DEFAULT_TEMPERATURE` |
+| 嵌入 / 重排 | `BGE_M3`、`BGE_M3_PATH`、`BGE_DEVICE`、`BGE_FP16`、`BGE_RERANKER_LARGE`、`BGE_RERANKER_DEVICE`、`BGE_RERANKER_FP16` |
+| Milvus | `MILVUS_URL`、`CHUNKS_COLLECTION`、`ITEM_NAME_COLLECTION`、`EVOLUTION_COLLECTION`（默认 `kb_evolution_items`） |
+| MongoDB | `MONGO_URL`、`MONGO_DB_NAME`、`MONGO_SERVER_SELECTION_TIMEOUT_MS`（默认 5000）、各集合名 `MONGO_CHAT_COLLECTION` / `EVOLUTION_FB_EVENTS_COLLECTION` / `EVOLUTION_K_GAPS_COLLECTION` / `EVOLUTION_K_CANDIDATES_COLLECTION` / `EVOLUTION_K_METRICS_COLLECTION` / `EVOLUTION_PARAM_REGISTRY_COLLECTION` |
+| MinIO | `MINIO_ENDPOINT`、`MINIO_ACCESS_KEY`、`MINIO_SECRET_KEY`、`MINIO_BUCKET_NAME`、`MINIO_IMG_DIR`、`MINIO_SECURE` |
+| 外部服务 | `MINERU_BASE_URL`、`MINERU_API_TOKEN`、`MCP_DASHSCOPE_BASE_URL`、`MCP_TIMEOUT_SECONDS`（默认 30） |
+| 服务 | `APP_HOST`（默认 0.0.0.0）、`IMPORT_APP_PORT`（8000）、`QUERY_APP_PORT`（8001）、`CORS_ORIGINS`、`APP_ENV`、`IMPORT_APP_NAME`、`QUERY_APP_NAME` |
+| 日志 | `LOG_CONSOLE_ENABLE` / `LOG_CONSOLE_LEVEL` / `LOG_FILE_ENABLE` / `LOG_FILE_LEVEL`（默认 INFO）/ `LOG_FILE_RETENTION`（默认 `7 days`） |
+| 运行期 | `TASK_STATE_TTL_SECONDS`（默认 21600）、`WEB_MAX_IN_CONTEXT`（默认 2）、`CHUNK_DENSE_METRIC` / `ITEM_NAME_DENSE_METRIC`（默认 COSINE） |
+| 主体判定 | `ITEM_NAME_CONFIRM_MIN_SCORE`（0.65）、`ITEM_NAME_CONFIRM_MARGIN`（0.02）、`ITEM_NAME_OPTION_MIN_SCORE`（0.60）、`ITEM_NAME_CATALOG_TTL_SECONDS`（60）、`ITEM_NAME_SEARCH_LIMIT`（10） |
+| 自进化 | `EVOLUTION_ENABLED`（默认 false）、`EVOLUTION_ADMIN_TOKEN`、`EVOLUTION_SCHEDULE_ENABLED` / `EVOLUTION_SCHEDULE_INTERVAL_MINUTES`、`EVOLUTION_METRIC_INTERVAL_MINUTES`、`EVOLUTION_BACKTEST_ENABLED` / `EVOLUTION_BACKTEST_INTERVAL_HOURS` / `EVOLUTION_BACKTEST_MIN_HITS`、`EVOLUTION_OBSERVE_WINDOW_DAYS`、`EVOLUTION_SCAN_BATCH`、`EVOLUTION_GEN_CONTEXT_ENABLED`、`EVOLUTION_GAP_WEIGHT_USER` / `_RETRIEVAL` / `_GENERATION`、`EVOLUTION_GAP_STRONG_THRESHOLD` / `_WEAK_THRESHOLD`、`EVOLUTION_ATTAIN_RATE_MIN`、`EVOLUTION_REJECT_RATE_MAX`、`EVOLUTION_ALARM_ADOPT_DROP`、`EVOLUTION_RECALL_LIMIT`、`EVOLUTION_RRF_WEIGHT`、`EVOLUTION_GROUNDEDNESS_MIN`、`EVOLUTION_GRAY_ENABLED` |
+
+### 4.4 启动
 
 ```bash
-# 查询服务（客服对话 + 审批后台 + 自进化接口）
+# 查询服务（客服对话 + 审批后台 + 自进化接口 + 调度器）
 uvicorn app.api.http.query_server:app --host 0.0.0.0 --port 8001
 
 # 导入服务（文件上传与导入）
 uvicorn app.api.http.import_server:app --host 0.0.0.0 --port 8000
 ```
 
-也可直接执行模块入口（端口取 `.env`）：`python -m app.api.http.query_server` /
-`python -m app.api.http.import_server`。
+也可用模块入口（端口取 `.env`）：`python -m app.api.http.query_server` / `python -m app.api.http.import_server`。
 
-| 页面 / 资源 | 地址 |
+| 页面 | 地址 |
 | --- | --- |
-| 客服对话页 | `http://127.0.0.1:8001/` |
-| 自进化审批后台 | `http://127.0.0.1:8001/approval` |
-| 文件导入页 | `http://127.0.0.1:8000/import` |
-| 前端公共库 / 样式 | `http://<host>/static/app.js`、`/static/app.css` |
+| 客服对话 | `http://127.0.0.1:8001/` |
+| 自进化审批 | `http://127.0.0.1:8001/approval` |
+| 文件导入 | `http://127.0.0.1:8000/import` |
 
-### 4.4 接口速查
+> 首次启动较慢（BGE-M3 / BGE-Reranker 需要加载模型），属正常现象。
+> **调度器只随查询服务启动**，因此不要为同一个库同时跑多个查询服务实例（无分布式锁，会重复扫描）。
+
+### 4.5 接口速查
 
 查询服务（:8001）：
 
 | 方法与路径 | 说明 |
 | --- | --- |
-| `GET /api/health` | 健康检查 |
-| `POST /api/query` | 提交问题（`is_stream=true` 时异步执行，返回 `session_id`） |
+| `GET /api/health` | 健康检查（含 `asset_version` 静态资源指纹） |
+| `POST /api/query` | 提交问题（`is_stream=true` 时异步执行并返回 `session_id`） |
 | `GET /api/stream/{session_id}` | SSE 事件流（`ready → progress → delta → final → close`） |
 | `GET /api/history/{session_id}` | 读取会话历史 |
 | `DELETE /api/history/{session_id}` | 清空会话历史 |
-| `POST /api/evolution/feedback` | 提交反馈（`thumbs`=1 / -1） |
+| `POST /api/evolution/feedback` | 提交反馈（`thumbs` = 1 / -1） |
 | `GET /api/evolution/candidates` | 候选列表（可按 `status` 筛选） |
-| `GET /api/evolution/status` | 闭环运行状态（缺口/候选计数、调度进度、最近指标快照） |
+| `GET /api/evolution/status` | 闭环状态（缺口/候选计数、调度进度、最近指标快照） |
 | `POST /api/evolution/candidates/{id}/approve` `/reject` `/edit` | 审批写操作（需 `X-Internal-Token`） |
 | `DELETE /api/evolution/candidates/{id}` | 下架候选（已入库条目同时移出向量库，需 Token） |
 
@@ -256,266 +288,144 @@ uvicorn app.api.http.import_server:app --host 0.0.0.0 --port 8000
 | `POST /api/import/upload` | 上传文件（仅 md / pdf，其余入口直接 422） |
 | `GET /api/import/status/{task_id}` | 任务状态与节点进度 |
 
-错误响应统一为 `{"code": "<机器码>", "message": "<中文提示>"}`（HTTP 状态码保持语义）。
+错误响应统一为 `{"code": "<机器码>", "message": "<中文提示>"}`。
 
 ## 五、开发与测试
 
+### 5.1 门禁命令
+
 ```bash
-# 静态检查（无告警为准）
-python -m pyflakes app tests
-
-# 字节码编译检查
-python -m compileall -q app tests
-
-# 离线单测（默认，不访问任何外部服务）
-uv run pytest
-
-# 真机端到端（需要真实 Milvus / MongoDB / MinIO / 模型服务，会产生模型调用费用）
-E2E_ENABLED=1 uv run pytest -m e2e tests/e2e -s
+python -m pyflakes app tests          # 静态检查（期望 0 输出）
+python -m compileall -q app tests     # 字节码编译
+pytest -q                             # 离线单测（默认 -m 'not e2e'，不访问外部服务）
+E2E_ENABLED=1 pytest -m e2e tests/e2e -s   # 真机端到端（会产生模型调用与真实写库）
 ```
 
-真机 E2E 覆盖：小 md 导入 → Milvus 落库校验 → 一次查询的 SSE 全事件序列 → 反馈与缺口扫描 →
-候选审批回流；测试数据均带 `e2e_` 前缀并在用例结束后清理。
+仓库当前状态：`pyflakes` 0 告警、`compileall` 通过、离线 **159 passed / 1 deselected**（33 个测试文件）。
+真机 E2E 覆盖：小 md 导入 → Milvus 落库校验 → 一次查询的完整 SSE 事件序列 → 反馈与缺口扫描 → 候选审批回流；
+测试数据带 `e2e_` 前缀并在用例结束后「删除 → 等待 → 复核」。
 
-### 5.1 目录速查
+### 5.2 目录速查
 
 | 路径 | 职责 |
 | --- | --- |
 | `app/api/http/*_server.py` | 服务组装（FastAPI 实例、CORS、lifespan、路由挂载） |
-| `app/api/routers/` | 路由层（query / import_ / evolution / pages） |
+| `app/api/routers/` | 路由层（query / evolution / import_ / pages / health） |
 | `app/api/errors.py` | 统一错误模型与异常处理器 |
 | `app/process/*/agent/` | LangGraph 状态、节点与图定义 |
-| `app/rag/query/` | 检索、RRF、重排、作答、引用、历史上下文 |
+| `app/rag/query/` | 主体确认、检索、RRF、重排、作答、引用、历史上下文 |
 | `app/rag/import_/` | 入口分派、PDF 解析、图片增强、切分、主体识别、向量化、入库 |
-| `app/rag/item_name/` | 主体名配置、目录缓存、检索判定 |
-| `app/evolution/` | 自进化各环节（feedback / gap / candidate / approval / index / online_eval / backtest / tuning / scheduler） |
-| `app/shared/config/` | 唯一配置出口（`settings`） |
-| `app/shared/clients/` | Milvus / MongoDB / MinIO 访问与仓储 |
+| `app/rag/item_name/` | 主体名配置、目录缓存、检索判定与相似兜底 |
+| `app/evolution/` | feedback / gap / candidate / approval / index / online_eval / tuning / backtest / scheduler |
+| `app/shared/config/` | 唯一配置出口 `settings` |
+| `app/shared/clients/` | Milvus / MongoDB / MinIO 客户端与会话历史仓储 |
 | `app/shared/models/` | LLM / 向量 / 重排模型入口（`llm_providers`） |
-| `app/shared/runtime/` | 日志（低开销位置修正）与提示词加载 |
+| `app/shared/runtime/` | 日志与提示词加载 |
 | `app/shared/utils/` | 校验、文本归一、JSON 解析、SSE 通道、任务状态、限速 |
 | `app/rag_eval/` | 离线检索评估（导入测试数据 → 分层评测 → 报告） |
 | `tests/unit`、`tests/e2e` | 离线单测与真机端到端 |
+| `docs/` | 架构与优化报告、浏览器联调验证报告、项目讲解 |
 
-## 六、注意事项
+### 5.3 常调参数（改这些会直接改变行为）
 
-- **只支持 md / pdf 上传**：其他类型在 `/api/import/upload` 入口即返回 422；图内另有一层防御，
-  若最终状态既无 `md_path` 也无 `pdf_path`，任务标记为 `FAILED`，不会出现「已完成但未入库」。
+| 参数 | 默认 | 作用 |
+| --- | --- | --- |
+| `ITEM_NAME_CONFIRM_MIN_SCORE` / `_MARGIN` | 0.65 / 0.02 | 主体自动确认下限与 top1–top2 间距 |
+| `ITEM_NAME_OPTION_MIN_SCORE` | 0.60 | 低于它就进入「相似主体点选」兜底 |
+| `RRF_K` / `RRF_TOP`（`param_registry` 可覆盖，默认 60 / 5） | 60 / 5 | RRF 平滑常数与融合后保留条数 |
+| `RERANK_MAX_TOPK` / `RERANK_MIN_TOPK` / `GAP_RATIO` / `GAP_ABS` | 6 / 2 / 0.2 / 0.2 | 重排保留上限、无条件保留数、累计断崖截断 |
+| `RERANK_MAX_INPUT_TOKENS` | 512 | 重排输入预算（超长先 LLM 压缩再按 token 硬截断） |
+| `WEB_MAX_IN_CONTEXT` | 2 | 本地有命中时联网结果条数上限 |
+| `EVOLUTION_GAP_STRONG_THRESHOLD` / `_WEAK_THRESHOLD` | 0.65 / 0.45 | 缺口分级门槛 |
+| `EVOLUTION_OBSERVE_WINDOW_DAYS` / `EVOLUTION_SCAN_BATCH` | 7 / 50 | 缺口扫描窗口与每轮批量 |
+| `EVOLUTION_METRIC_INTERVAL_MINUTES` / `_BACKTEST_INTERVAL_HOURS` / `_BACKTEST_MIN_HITS` | 60 / 24 / 3 | 指标、回测、回测下架门槛 |
+| `TASK_STATE_TTL_SECONDS` | 21600 | 任务进度内存回收 |
+
+`app/rag/import_/config.py` 另含切分策略：`CHUNK_MAX_SIZE` 1000 / `CHUNK_SIZE` 600 / `CHUNK_OVERLAP` 50 / `CHUNK_MIN` 400 / 向量化批大小 6。
+
+## 六、注意事项与排障
+
+### 6.1 必须知道的约束
+
+- **单进程部署**：SSE 通道、任务进度、主体目录缓存、参数注册表缓存都在进程内存里，调度器也没有分布式锁。
+  多 worker 会丢流、进度错乱、重复扫描；要水平扩展先引入 Redis。
+- **一个端口只能有一个进程**：Windows 允许两个进程绑定同一端口，连接会被随机分发；如果「POST /api/query」与
+  「GET /api/stream」落到不同进程，流式回答就会卡住。用
+  `Get-NetTCPConnection -State Listen | Where-Object LocalPort -eq 8001` 确认只有一行。
+- **长开的旧页面不会自动换脚本**：后端已部署新版但页面仍是旧 JS 时，会出现「按钮不渲染 / 置信度 0%」这类
+  看似没修好的现象。刷新页面即可；系统检测到资源版本变化会主动提示「请按 Ctrl+F5 刷新」。
+- **`.env` 覆盖系统环境变量**（`load_dotenv(override=True)`）；密钥请勿提交。
+- **Milvus metric 口径必须与建表一致**：`kb_chunks` / `kb_item_names` dense 用 COSINE、`kb_evolution_items` 用 IP；
+  不一致会让 Milvus 报 `metric type not match` 并静默返回 None。
+- **`kb_chunks` 主键是自增的**：按 `file_title` 重导入会重新分配 `chunk_id`，绑在它上面的外部标注会失效。
+- **`app/rag_eval` 会写共享 Milvus**：执行离线评估前确认不影响线上库，或改用独立集合。
 - **自进化需显式开启**：`EVOLUTION_ENABLED=false` 时反馈接口仅幂等接受不落库，进化条目不参与召回。
-- **审批写操作鉴权**：未配置或未正确携带 `EVOLUTION_ADMIN_TOKEN`（`X-Internal-Token`）时
-  通过 / 驳回 / 编辑会被拒绝（503 / 401）。
-- **候选必须携带事实**：无检索证据或生成答案只是「未提及 / 建议联系官方」时，候选会登记为
-  `need_info`（审批页显示「待人工补充」），此时无法直接通过——请先「编辑」补充真实答案，
-  保存后状态自动回到 `待审批（draft）`，再通过即可被客服正常作答。
-- **误批条目可下架**：审批页对 `active` 条目提供「🗑 下架」，下架后立即移出检索（历史遗留的
-  「无信息」条目在召回端也会被自动过滤）。
-- **兜底话术是缺口依据**：命中内容但模型仍回复「未查询到该问题相关信息 / 无法作答」也会记为未解决信号。
-- **反馈幂等**：同一会话、问题、反馈类型在 30 秒内重复提交会被去重。
-- **调度器单 worker**：调度器随查询服务 `lifespan` 启停，仅在单 worker 部署下有效。
-- **首次启动较慢**：BGE-M3 / BGE-Reranker 首次加载耗时较长属正常现象。
-- **离线评估会写库**：`app/rag_eval` 会把合成测试数据写入共享 Milvus，请在确认不影响线上库后再执行。
+- **审批写操作需鉴权**：未配置或未正确携带 `EVOLUTION_ADMIN_TOKEN`（请求头 `X-Internal-Token`）会被拒绝（503 / 401）。
+
+### 6.2 常见现象 → 排查路径
+
+| 现象 | 先看这里 | 说明 |
+| --- | --- | --- |
+| 提问答不出 / 没有引用 | 客服页「引用来源 / 回答置信度」→ `GET /api/evolution/status` → `logs/ui-query.out.log` | 置信度显示「未评估」表示证据为空或评估失败（不是 0 分）；日志有节点耗时与降级告警 |
+| 一直回「请补充产品名称」 | 日志中 `模型识别item_name` / `相似主体` 两条 | 主体识别失败：确认库内主体名目录是否有该型号，必要时看 `ITEM_NAME_*` 阈值 |
+| 审批页没有候选 | `GET /api/evolution/status` 的 gaps / candidates 计数 | 缺口扫描只处理观察窗内未解决信号；同问题在 1 小时窗口内会去重 |
+| 点了「通过」但状态没变 | 审批页 toast 文案 | `need_info` 或疑似「无信息」答案会被拒绝通过，需先「编辑」补充事实 |
+| 上传后一直「处理中」 | `GET /api/import/status/{task_id}` + 终端日志 | PDF 走 MinerU 轮询（600s 上限）；不支持的扩展名会在入口 422 |
+| 页面样式/交互异常 | `/api/health` 的 `asset_version` 与页面脚本 `?v=` | 版本不一致即页面过期，刷新即可 |
 
 ## 七、变更记录
 
-### 2026-09-28 架构重构与性能优化
+### 2026-09-30
 
-**① 分层收敛**
+- **项目更名**：`sgg_KB_RAG` → `se_rag`（本地目录、IDE 模块 `.idea/se_rag.iml`、文档标题；`pyproject.toml` 包名原本已是 `se_rag`）。
+  数据契约与代码逻辑未改动，无需数据迁移。
+- **README 重写**：按「定位 → 架构 → 数据契约 → 流程 → 快速开始 → 开发测试 → 注意事项与排障 → 变更记录」重组，
+  补齐字段级数据契约、可调参数表与排障路径。
 
-- 删除整个 `app/infra`（此前只是对 `app/shared` 的转发包装层：`InfraConfig`、`LLMProvider`、
-  `MilvusGateway`、`MinioGateway`、`HistoryRepository`），能力全部并入 `app/shared` 的
-  `config / clients / models / runtime / utils`；调用方向变为单向的四层结构。
-- 配置收敛为唯一出口 `app/shared/config/settings.py`：原先 8 个分散的单例模块合并为聚合
-  `settings`，消除 `EVOLUTION_COLLECTION` 被两处读取、`ENTITY_NAME_COLLECTION` 只读不用等问题。
-- `app/evolution/repositories.py` 不再硬编码集合名、不再自建第二套 `MongoClient`（此前配置项失效
-  且连接池翻倍）；全项目共用一份惰性加载的 MongoDB 连接。
+### 2026-09-29
 
-**② 接口统一（前端同步改造）**
+- **D17（相似主体「有的出有的不出」）**：模型没抽出主体时（如「烫金机怎么安装」被判为品类）链路完全跳过目录匹配，
+  只回「也没有找到相似主体」。新增 `catalog.find_names_mentioned_in()`（问句里出现库内关键词即算命中）与
+  `match.similar_from_query()` 兜底链（主体名相似 → 问句关键词 → 小知识库列目录），`confirm_item_name` 在
+  `item_names` 为空时也走该链路。
+- **旧页面识别**：`/api/health` 增加静态资源内容指纹，前端记录本页脚本 `?v=` 并比对，不一致时提示刷新
+  （此前两次把「旧页面」误判为「功能没修好」）。
+- **联网来源与排序**：新增 `rerank_service.prefer_local_docs()`——本地有命中时联网文档排序分被压到不超过本地最高分，
+  本地知识永远优先；`citations` 扩展为 `kb / evolution / web` 三类，联网引用带标题与原网页链接（仅 http/https），
+  前端标「联网」；反馈载荷剔除联网引用，避免 URL 被当作 `chunk_id`。
+- **接地性语义**：`compute_groundedness` 在证据为空 / 调用失败 / 解析失败时返回 `None`，界面显示「未评估」而不是 0%。
+- **闭环接线**：`record_metric` / `adjust_step` / `run_backtest` 此前无任何调用方；现由 `run_evolution_cycle_once()`
+  按周期编排（指标 60 分钟、回测 24 小时），自调基线排除本轮快照，回测新增最小命中数门槛；新增
+  `GET /api/evolution/status` 并在审批页显示闭环状态。
+- **缺口扫描游标**：由「取最新 batch 条」改为 ts 升序 + 游标推进并在窗口扫完后复扫，早期未解决信号不再饿死。
+- **D16（没主体时给相似主体点选）**：型号前缀（如 `hak180`）主体向量分只有 0.409（低于可选阈值 0.60）时，
+  不再整批丢弃候选，而是列出相似主体供点选；新增 `find_similar_names()` 与前端 `.option-btn` 渲染。
+- **D15（兜底话术与图片互斥）**：命中「无法作答」话术时不再回填检索图片，避免「说答不出却给出图」。
 
-- 所有接口统一挂 `/api` 前缀，页面统一为 `/`（客服）、`/approval`（审批）、`/import`（导入），
-  前端公共库统一为 `/static/app.js` + `/static/app.css`（三页不再各自实现 `esc/toast/fmtTs/fetch`）。
-- 错误体统一为 `{"code","message"}`；SSE 事件名统一为 `ready/progress/delta/final/close/error`
-  （原 `__close__` 改为 `close`），并去掉前端从未收到过的 `final_answer` 监听。
+### 2026-09-28
 
-**③ 性能与稳定性**
-
-- 日志位置修正从「每条日志 `inspect.stack()` 全栈遍历」改为 `sys._getframe` 逐层回溯
-  （实测 ~1085µs/条 → ~418µs/条，约 2.6×），`step_log` 降为 DEBUG 级，避免每步两行 INFO 刷屏。
-- 单次提问的查询向量只编码一次（知识库 + 自进化两路复用），embedding 调用由 3 次降为 2 次。
-- SSE 由「`queue.Queue` + 线程池阻塞轮询（每连接占用一个线程）」改为 `asyncio` 事件通道，
-  支持订阅前缓冲回放（修复 POST /query 与 /stream 的竞态），并回收空闲通道。
-- 任务进度表加锁 + TTL 回收（修复导入侧字典只增不减的内存泄漏），删除从未使用的任务结果存储。
-- 参数注册表加载失败也计入 TTL，避免 Mongo 不可用时每次读取都重试；Mongo 选主超时默认 5s。
-- 大型对象不再整份打进 INFO 日志（改为条数 + Top3 摘要）；重排前的长文本压缩改为有界并发。
-- 联网检索补整体超时与异常降级（MCP 卡住不再阻塞整条查询）；重排输入按 token 预算硬截断，
-  消除超长切片的 tokenizer 越界告警。
-
-**④ 缺陷修复**
-
-- `build_image_url` 运算符优先级错误（`MINIO_SECURE=true` 时只返回 `"https://"`）。
-- MinIO 对象键与访问 URL 的前导斜杠口径不一致（旧实现上传后的图片链接实际 404，且按前缀
-  清理旧图片永远匹配不到）。
-- PDF 解析结果下载误用轮询超时常量（600s），现使用独立的下载超时。
-- Milvus 过滤表达式统一转义构造（此前 `item_name in [Python 列表字面量]` 未转义，含引号会解析失败）。
-- 文档切分缺少「无标点长文本」兜底分隔符，导致代码块 / 表格 / 无标点长文可能整块超长入库。
-- 引用构造（API 层与业务层各一份）合并为 `app/rag/query/citations.py` 单一实现。
-- MongoDB 访问层锁改为可重入（修复首次读取会话历史时的自死锁）；Mongo 选主超时默认 5s。
-- 联网检索补整体超时与异常降级（MCP 卡住不再阻塞整条查询）；重排输入按 token 预算硬截断。
-
-**⑤ 浏览器真实环境联调修复（2026-09-28 下午）**
-
-- **D1**：用户点踩不会被缺口扫描消费（扫描只查 `adopt=False`，而点踩事件 `adopt=None`），
-  自进化闭环少了一条入口 → 过滤条件改为「未采纳或点踩」，并补离线用例。
-- **D2**：导入页把预期业务拒绝（422）打成 `console.error` → 改为 `console.warn`，不再污染错误监控。
-- **D3**：查询侧主体抽取对纯型号/编号不稳定（同句多次采样会返回空 → 「请您明确主体」兜底话术）→
-  `rewritten_query_and_itemnames.prompt` 增加「型号/编号/系列代号只要指向产品就必须提取」规则。
-- **D4**：导入服务缺少健康检查路由 → 新增共享 `app/api/routers/health.py`，两服务统一 `/api/health`。
-- **D6**：刷新页面后历史不回显（`ReferenceError: formatTime is not defined`）→ 删除 `common.js` 后
-  chat 页漏了该别名，且被 `catch(_)` 静默吞掉；已补别名、让 catch 打印错误，并新增前端静态守卫测试。
-- **D5**：原生 `confirm()`/`alert()` 会阻塞渲染进程（自动化点击超时、标签页可能卡死）→
-  新增公共库 `App.confirm()` 页内确认浮层，审批页驳回与问答页清空对话改用它，并新增
-  「页面不得使用原生 confirm/alert/prompt」静态守卫测试。
-- **D7**：`tests/e2e` 清理只删不验，Milvus 可见性延迟会留下 `e2e_sample_*` 残留 →
-  清理改为「删除 → 等待 → 复核」，仍有残留则重试并最终断言失败；跑批后审计零残留。
-- 依赖裁剪后做了一致性验证：`uv lock --check` 通过、已移除的直依赖在 venv 中确已不存在、
-  离线 73 例与真机 E2E 均通过，浏览器三页冒烟正常（详见验证报告第 5.1 节）。
-
-**⑥ 测试与文档**
-
-- 新增 `tests/unit`（离线）与 `tests/e2e`（真机端到端，含导入 / SSE / 自进化闭环与数据清理）；
-  `pyproject.toml` 增加 pytest 配置与 `e2e` 标记，默认只跑离线用例。
-- 依赖按实际引用裁剪（移除未使用的直依赖），`pyproject.toml` 补齐项目描述。
-- 新增架构与优化报告 `docs/architecture-review-20260928.md` 与浏览器联调验证报告
-  `docs/verification-report-20260928.md`。
-
-**⑦ 前端资源与外链化优化**
-
-- 三页把内联 CSS/JS 全部外链为 `/static/{app,chat,approval,import}.{css,js}`：
-  `chat.html` 36.1KB → 2.0KB（-94%）、`approval.html` 11.8KB → 1.9KB、`import.html` 12.8KB → 1.4KB。
-- 公共库补齐 `create / STATUS_LABEL / renderAnswerWithImages / parseAnswerAndImages / extractUrlsLoose`
-  等跨页能力，删除页内死代码；页面骨架（顶栏/品牌/面板）统一到 `app.css`。
-- 缓存策略：HTML `no-cache`；静态资源 `public, max-age=86400, immutable`，并用
-  `?v=<内容指纹>`（`app/api/routers/pages.py` 注入）保证更新立即生效；
-  `/static/{asset}` 改为白名单路由，未登记资源 404。
-
-**⑧ 候选知识质量闸门（修复「审批已入库但客服仍答不出」）**
-
-- 根因：候选生成器在**无检索证据**时会把「未提及…建议联系官方」写成 FAQ 答案，审批后作为知识入库；
-  客服能召回它（引用标签显示「自进化」），但内容本身没有事实，模型只能继续回答「无法作答」。
-- 生成端：新增 `app/evolution/quality.py`（`looks_like_non_answer`）；无证据或生成答案疑似「无信息结论」
-  的候选登记为 **`need_info`（待人工补充）**，不再产生 `draft`。
-- 审批端：`approve` 拒绝 `need_info` 与「无信息」答案并回显原因；`edit` 补齐事实后**自动回到 `draft`**，
-  管理员即可直接通过；新增 `DELETE /api/evolution/candidates/{id}` 与审批页「🗑 下架」按钮，
-  可一键把误批入库的条目移出检索。
-- 召回端：`app/evolution/retrieval.py` 过滤历史遗留的「无信息」条目，避免它们占掉引用位。
-
-**⑨ 重排来源优先级（修复「入库了仍答不出、且没有引用」）**
-
-- 根因：进化条目重排时只喂了答案（“配对码123456”），没带 FAQ 问题 → 跨编码器打分 0.4793；
-  4 条联网结果 0.999x 全排在前面 → 动态截断在断崖处把本地知识整体切掉 → 无引用、答“无法作答”。
-- 修复：① 进化条目重排文本改为「FAQ 问题 + 答案」（同一 FAQ 0.4793 → **0.9999**）；
-  ② 新增 `cap_web_docs`，本地有命中时联网最多保留 2 条（`WEB_MAX_IN_CONTEXT` 可调）；
-  ③ 新增 `ensure_evolution_docs`，重排截断后把权威条目补回并置于上下文最前。
-- 复验：真实链路与浏览器均得到 **“HAK 180 烫金机的蓝牙配对码是123456。”** + `自进化` 引用 + 置信度 100%。
-
-**⑩ 缺口去重改为按问题 + 缺口生命周期闭环**
-
-- 根因：缺口去重按**会话**判定（该会话已有 pending/candidate 缺口就整条跳过），而缺口在候选通过/驳回后
-  从不复位 —— 于是同一会话里**后续所有问题永远扫不到**（日志表现为「产出 strong 缺口 0 条」）。
-- 修复：去重改为**按问题**（同问题有 pending 缺口、或窗口内出现过才跳过；已生成候选的问题由候选级
-  `_exists_question` 去重）；`KnowledgeGap.gap_id` 透传到候选，`approve`/`reject` 把来源缺口分别标记为
-  `resolved`/`rejected`，缺口不再永久残留。
-- 复验：用真实未解决信号复跑调度得到 `{"scanned":1,"generated":1}`（修复前恒为 0），并产出对应缺口与候选。
-
-**⑪ 第二轮浏览器联调复验（D11–D14，2026-09-28 晚）**
-
-> 背景：上述 ⑧⑨⑩ 修复后工作区又有 7 处改动，需在**外部真实浏览器**中对「导入 → 问答 → 反馈 →
-> 缺口 → 候选 → 审批 → 回流」重做一次端到端复验（详见 `docs/verification-report-20260928.md` 第 8 节）。
-
-- **D11**：历史会话讨论过 A 主体后，用户改问 B 主体，模型会把主体**替换成历史里的 A**，导致按错误主体
-  召回 → 答「无法作答」。根因有二：提示词缺少「当前问题主体优先」的强约束；且规则示例直接用了库内真实
-  主体名 `HAK180`，既污染识别又诱导模型照抄。修复：`rewritten_query_and_itemnames.prompt` 新增
-  「主体以当前问题为准、禁止用历史主体替换」最高优先级段，示例型号名改为中性占位；新增
-  `tests/unit/test_item_name_prompt.py` 三条静态守卫（断言提示词不得出现真实主体名）。
-- **D12**：前端时间显示成 **1970 年**。根因：秒级时间戳本身是**合法的毫秒值**，`new Date()` 不会得到
-  `Invalid Date`，故「仅在 Invalid 时才纠正」的兜底永不触发。修复：`app.js::formatDateTime` 改为
-  **按量级判定**秒/毫秒（`n > 1e11` 视作毫秒，否则 ×1000）。
-- **D13**：自动会话信号被**静默丢弃**、缺口漏检。根因：Milvus 数值型主键被解析成 `int`，
-  `FeedbackEvent.cited_chunk_ids(list[str])` 校验失败抛异常后被上层 `catch` 吞掉。修复：
-  `answer_service.backfill_evolution_outputs` 落状态前统一 `str()` 归一；新增
-  `tests/unit/test_evolution_signal_integrity.py` 回归断言。
-- **D14**：显式 👎 反馈未携带 `item_names` → 缺口/候选**主体丢失**。修复：非流式响应 schema 与 SSE
-  `final` 增加 `item_names`，`chat.js` 的 `buildBotMeta` / 历史回显 / 反馈载荷全链路透传，并补回归用例。
-- 复验结果：全链路再次跑通；离线 `pytest` **114 passed / 1 deselected**、`pyflakes` 0 告警；测试数据
-  `e2e_` 残留全部为 0，生产数据未受影响。
-
-**⑫ 兜底话术与图片互斥（D15）**
-
-- 现象：提问「烫金机怎么安装」，回答是「现有参考内容与历史对话中未查询到该问题相关信息，无法作答」，
-  **下方却渲染出了安装示意图**——「说答不出、却给出图」自相矛盾，并会产出假缺口/假候选。
-- 根因：说明书切片是「零碎文字 + 多张配图」形态。作答提示词限定模型**只能用文字信息**，模型读到零碎
-  步骤文字（看不到图像像素）判为答不出而输出兜底话术；但 `extract_text_image_url` **独立地**从同一批
-  切片抽出图片并回填，前端照常渲染。
-- 修复：新增共享口径 `app/shared/utils/answer.py`（`NO_ANSWER_MARKERS` / `is_no_answer`），查询端
-  `extract_text_image_url` 命中兜底话术时**不回填图片**，自进化端 `collector` 改用同一判定（此前各写一份，
-  易漂移）。新增 `tests/unit/test_answer_image_fallback.py` 4 条回归。
-- 复验：离线 **118 passed / 1 deselected**；真实库 + 真实模型跑图，明确主体时正常作答且图片正常回传
-  （正常链路未误伤），全程无「答不出却给图」的矛盾。
-
-**⑬ 第三轮全量复查 + 「没主体时给相似主体点选」（D16）**
-
-- 背景：用户提问只有一个**型号前缀**（如 `hak180`）时，主体向量分只有 `0.409`（低于可选阈值 `0.60`），
-  旧实现把候选**整批丢弃**，只回一句「本次问题没有关联到任何主体……请您明确主体再提问」——
-  库里明明只有一个 `Brother HAK 180 烫金机`，用户仍然问不下去（死路）。
-- 修复：主体匹配新增**相似兜底链路** `find_similar_names()`（目录归一化子串 → token 前缀 → 低分向量命中 →
-  小知识库直接列目录），由 `select_item_names` 返回 `similar_list`；`apply_item_name_result` 把它写进
-  `state["item_name_options"]`，经 API 非流式响应与 SSE `final` 透出，前端渲染成**可点选主体按钮**，
-  点一下即以该主体重新提问。文案也从「请您明确主体再提问」改为「以下可能是您要找的：X。请点击下方主体直接提问。」
-- 复验：真实浏览器实测 `hak180` → 出选项按钮 `Brother HAK 180 烫金机` → 点选后得到真实说明书答案
-  （A4 90–350g/m²、15ppm/7ppm、44 页 ADF）+ `引用来源（3）` + 置信度 90%；见
-  `docs/verification-report-20260928.md` 第 10 节与截图 `verify-22`/`verify-23`。
-- 同轮全量复查（`pyflakes` 0 告警、`compileall` 通过、**129 passed / 1 deselected**、127 模块导入冒烟 0 失败）：
-  删除两处遗留的 `__main__` 演示块（`app/process/{import_,query}/agent/state.py`，其中一处含 `print` 调试输出）
-  及随之失效的 `import json` / `logger` 导入；把最后 3 处行内 `style=` 属性收敛为样式表 class，
-  并新增 2 条前端守卫用例（页面与脚本生成的标记均不得出现 `style="`）；确认 `app.infra` 已无任何引用、
-  「无法作答」判定只有 `app/shared/utils/answer.py` 一份口径。详见
-  `docs/architecture-review-20260928.md` 第 15 节。
-
-**⑭ 复查三项遗留问题全部修复（联网排名/引用、闭环接线、缺口扫描游标）**
-
-- **联网不再抢走本地知识，且联网来源有独立引用**：新增 `rerank_service.prefer_local_docs()`——本地有命中时，
-  联网文档的排序分被压到「不超过本地最高分」（同分时本地排前），本地知识永远在联网补充之前；
-  `citations` 现在覆盖 `kb / evolution / web` 三类来源，联网引用带 `source="web"` + 标题 + 原网页链接，
-  前端标「**联网**」并可点开（只接受 http/https）。反馈载荷会**剔除联网引用**，避免 URL 被当成 `chunk_id`
-  污染缺口信号。
-- **接地性区分「未评估」**：`compute_groundedness` 在证据为空 / 调用失败 / 输出不可解析时返回 `None`，
-  API 与前端显示「回答置信度 未评估」，不再一律渲染成 0%（此前与「答案确实不接地」不可区分）。
-- **闭环真正闭环**：`record_metric` / `adjust_step` / `run_backtest` 此前**没有任何调用方**（文档里的自调参
-  与回测从未运行）。现由 `scheduler.run_evolution_cycle_once()` 编排：每轮扫描生成 →（按 `EVOLUTION_METRIC_INTERVAL_MINUTES`）
-  指标快照 + 参数自调 →（按 `EVOLUTION_BACKTEST_INTERVAL_HOURS`）回测止损；自调基线取**历史**快照
-  （避免与本轮快照自比自导致永不触发），回测新增 `backtest_min_hits` 门槛（默认 3，防单条差评误杀人工审批的知识）。
-  新增 `GET /api/evolution/status` 并把「闭环：缺口 N · 候选 M · 近一次自评 <时间>」显示在审批页顶部，
-  排障不必再翻日志（审批/驳回/下架后随列表一起刷新，不会停在旧数字）。
-- **缺口扫描不再饿死早期信号**：`scan_unresolved_feedbacks` 由「取最新 batch 条」改为**按 ts 升序 + 游标推进**，
-  窗口扫完后游标归零复扫（重复由问题级去重兜住），事件再多也不会漏掉更早的未解决信号。
-- 复验：真实库 + 真实模型实测 `引用来源（5）= 3 知识库 + 2 联网`、置信度 90%、控制台 0 error；
-  调度日志出现「指标快照 / 回测完成」与「游标 … → 0」的复扫记录；离线 **153 passed / 1 deselected**、
-  `pyflakes` 0 告警。详见 `docs/verification-report-20260928.md` 第 10.8 节。
-
-**⑮ 「有的出相似主体、有的不出」修复（D17）+ 旧页面识别**
-
-- 现象：同一界面上问 `hak180` 会给出相似主体提示，问 `烫金机怎么安装` 却只回「也没有找到相似主体」。
-- 根因有两个，各修一处：
-  1. **模型没抽出主体时链路不查目录**：问「烫金机怎么安装」时模型认为「烫金机」是品类，返回空
-     `item_names`，代码于是完全跳过目录匹配。新增 `find_names_mentioned_in()`（问句里出现库内主体名的
-     关键词即算命中）+ `similar_from_query()` 兜底链（主体名相似 → 问句关键词 → 小知识库列目录），
-     `confirm_item_name` 在 `item_names` 为空时也走这条链。
-  2. **旧页面不会自动换脚本**：长开的旧标签页仍跑旧 JS——「选项按钮不渲染」「置信度显示 0%」都是旧页面所致
-     （实测两次踩坑）。现在 `/api/health` 返回静态资源内容指纹，公共库记录本页加载的版本，
-     发现不一致时提示「系统已更新，请按 Ctrl+F5 刷新页面」。
-- 复验：真实浏览器（新开页面）提问 `烫金机怎么安装` → 出按钮 `Brother HAK 180 烫金机` → 点击后得到完整安装步骤
-  （`引用来源（5）`、置信度 100%）；`hak180` 同样出按钮；控制台 0 error。离线 **159 passed / 1 deselected**。
+- **结构收敛**：删除整个 `app/infra`（对 `app/shared` 的转发包装层），配置收敛为唯一出口 `settings`；
+  `evolution/repositories.py` 不再硬编码集合名、不再自建第二套 `MongoClient`。
+- **接口统一**：全部挂 `/api` 前缀；页面统一 `/`、`/approval`、`/import`；错误体统一 `{code,message}`；
+  SSE 事件统一为 `ready / progress / delta / final / close / error`。
+- **性能与稳定性**：日志位置修正改用 `sys._getframe`（~1085µs → ~418µs/条）；单次提问查询向量只编码一次；
+  SSE 改为 asyncio 通道（支持订阅前缓冲回放）；任务进度加 TTL 回收；大对象日志改为条数 + Top3；
+  重排前长文本压缩改为有界并发；MCP 联网补整体超时与降级；重排输入按 token 预算硬截断。
+- **缺陷修复**：`build_image_url` 运算符优先级、MinIO 键与 URL 前导斜杠不一致、PDF 下载误用轮询超时、
+  Milvus 过滤表达式未转义、无标点长文切分兜底、引用构造双实现合并、Mongo 访问层自死锁（改 RLock）。
+- **D1–D7**：点踩不进缺口扫描（扫描条件改为「未采纳或点踩」）；导入页 422 不再打 `console.error`；
+  提示词补「型号/编号必须提取」；导入服务补 `/api/health`；历史回显 `formatTime` 未定义；
+  原生 `confirm/alert` 改页内浮层；E2E 清理改为「删除 → 等待 → 复核」。
+- **D8–D14**：候选知识质量闸门（无证据 → `need_info`，审批拒绝「无信息」答案，新增下架接口）；
+  重排来源优先级（进化条目补 FAQ 问题文本、限联网条数、权威条目保底）；缺口去重改为按问题 + 缺口生命周期闭环；
+  历史主体覆盖当前问题（提示词加「当前问题主体优先」）；前端时间显示 1970（按量级判定秒/毫秒）；
+  自动会话信号因 `int` 主键校验失败被静默丢弃（统一 `str()` 归一）；👎 反馈未携带 `item_names`。
+- **前端外链化与缓存**：三页内联 CSS/JS 外链为 `/static/*`（`chat.html` 36.1KB → 2.0KB）；
+  资源用内容指纹 `?v=`，HTML `no-cache`、静态资源长缓存；`/static/{asset}` 白名单化。
+- **测试与文档**：新增离线 `tests/unit` 与真机 `tests/e2e`；新增
+  `docs/architecture-review-20260928.md`、`docs/verification-report-20260928.md`。
 
 ### 2026-09-27
 
-- 反馈按钮渲染修复、上传类型校验（L1）、接地性（groundedness）评估修复、演进知识召回链路修复、
-  商品名近重复归一、离线评估导入修复（详见 git 历史）。
+- 反馈按钮渲染修复、上传类型校验、接地性评估修复、演进知识召回链路修复、商品名近重复归一、离线评估导入修复
+  （详见 git 历史）。
