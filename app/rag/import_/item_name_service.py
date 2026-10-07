@@ -95,7 +95,7 @@ def upsert_item_name(item_name: str, file_title: str) -> None:
 
 @step_log("recognize_and_index_item_name")
 def recognize_and_index_item_name(state: ImportGraphState) -> ImportGraphState:
-    """主体识别服务入口：识别 → 归并 → 回填 chunks → 写主体名索引。"""
+    """主体识别服务入口：识别 → 归并 → 回填 chunks 与 parent_chunks → 写主体名索引。"""
     chunks = load_chunks(state)
     file_title = load_subject(state, "file_title", default_name="default_title")
 
@@ -105,6 +105,9 @@ def recognize_and_index_item_name(state: ImportGraphState) -> ImportGraphState:
 
     for chunk in chunks:
         chunk["item_name"] = item_name
+    # 父块在切分阶段早于主体识别生成，此处必须一并回填，否则父块集合的 item_name 为空
+    for parent in state.get("parent_chunks") or []:
+        parent["item_name"] = item_name
     upsert_item_name(item_name, file_title)
 
     state["chunks"] = chunks

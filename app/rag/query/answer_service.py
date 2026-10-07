@@ -12,7 +12,7 @@ from langchain_core.messages import HumanMessage
 from app.evolution.online_eval.grounding import compute_groundedness
 from app.process.query.agent.state import QueryGraphState
 from app.rag.config import SUPPORTED_IMAGE_EXTENSIONS
-from app.rag.query.citations import build_citations, split_cited
+from app.rag.query.citations import build_citations, build_doc_meta, split_cited
 from app.rag.query.history_utils import build_history_context
 from app.shared.clients.history_repository import history_repository
 from app.shared.config import settings
@@ -41,13 +41,21 @@ def state_exists_answer(state: QueryGraphState) -> bool:
 
 
 def load_answer_prompt(state: QueryGraphState) -> str:
-    """组装答案生成提示词（问题 + 上下文 + 主体 + 历史）。"""
+    """组装答案生成提示词（问题 + 上下文 + 主体 + 历史）。
+
+    本地子块会附带所属章节的背景与页码：子块负责精确命中，章节背景补足跨子块的语义连续性
+    （见 ``node_parent_expand``）；联网结果与自进化条目没有父块，字段自动省略。
+    """
     context = ""
     for index, doc in enumerate(state.get("reranked_docs", []), start=1):
         source = "网络搜索" if doc.get("type") == "web" else "向量库"
+        page = doc.get("page")
+        page_text = f",页码:{page}" if isinstance(page, int) and page > 0 else ""
+        background = doc.get("parent_content")
+        background_text = f",章节背景:{background}" if background else ""
         context += (
             f"第{index}部分,标题:{doc.get('title')},来源:{source} ,"
-            f"置信度: {doc.get('score')},内容:{doc.get('text')}\n"
+            f"置信度: {doc.get('score')}{page_text}{background_text},内容:{doc.get('text')}\n"
         )
     item_names = f"{','.join(state.get('item_names', []))}"
     history_text = build_history_context(state.get("session_id"), limit=6)
@@ -109,7 +117,7 @@ def backfill_evolution_outputs(state: QueryGraphState) -> QueryGraphState:
     # 否则 FeedbackEvent.cited_chunk_ids(list[str]) 校验失败，自动会话信号被静默丢弃（缺口漏检）
     state["cited_chunk_ids"] = [str(c) for c in cited]
     state["faq_evo_ids"] = [str(c) for c in evolution_ids]
-    state["citations"] = build_citations(cited, evolution_ids, web_docs)
+    state["citations"] = build_citations(cited, evolution_ids, web_docs, build_doc_meta(reranked_docs))
     state["retrieval_signals"] = {
         "zero_hit": len(reranked_docs) == 0,
         "no_retrieval": not state.get("embedding_chunks") and not state.get("hyde_embedding_chunks"),

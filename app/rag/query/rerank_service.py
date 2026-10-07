@@ -38,7 +38,11 @@ def _require_rerank_inputs(state: QueryGraphState) -> tuple[str, list, list]:
 
 @step_log("deal_rrf_and_web_result")
 def deal_rrf_and_web_result(rrf_chunks: list, web_search_docs: list) -> list[dict]:
-    """把本地召回与联网结果统一成重排输入结构（text/title/score/type/url）。"""
+    """把本地召回与联网结果统一成重排输入结构（text/title/score/type/url）。
+
+    同时透传 ``parent_id`` / ``page`` / ``heading_path`` / ``file_title``：本函数会重建 dict，
+    若不带过去，后续的父块回溯（``node_parent_expand``）就没有分组键可用。
+    """
     reranker_docs = [
         {
             "chunk_id": chunk.get("chunk_id"),
@@ -54,6 +58,10 @@ def deal_rrf_and_web_result(rrf_chunks: list, web_search_docs: list) -> list[dic
             "type": "milvus",
             "source": chunk.get("source"),  # 保留来源标志（milvus/evolution）供引用回填
             "url": None,
+            "parent_id": chunk.get("parent_id"),
+            "page": chunk.get("page"),
+            "heading_path": chunk.get("heading_path"),
+            "file_title": chunk.get("file_title"),
         }
         for chunk in rrf_chunks
     ]

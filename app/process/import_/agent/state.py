@@ -22,7 +22,9 @@ class ImportGraphState(TypedDict):
 
     md_content: str # md文件内容
 
-    chunks : list # 装切割后的文本块 dict
+    chunks : list # 装切割后的文本块 dict（子块，检索单元）
+
+    parent_chunks : list # 装章节级父块 dict（供检索命中后回填背景）
 
     item_name: str  # 主体 file_title兜底
 
@@ -41,6 +43,7 @@ default_state:ImportGraphState ={
     "local_dir": "",
     "md_content": "",
     "chunks": [],
+    "parent_chunks": [],
     "item_name": "",
     "embeddings_content": []
 }

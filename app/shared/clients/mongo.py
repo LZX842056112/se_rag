@@ -76,6 +76,8 @@ def ensure_indexes() -> None:
         db[mongo.k_candidates_collection].create_index([("status", 1)])
         db[mongo.k_metrics_collection].create_index([("ts", -1)])
         db[mongo.param_registry_collection].create_index([("key", 1)], unique=True)
+        db[mongo.parent_chunks_collection].create_index([("parent_id", 1)], unique=True)
+        db[mongo.parent_chunks_collection].create_index([("doc_id", 1)])
     except Exception as exc:  # noqa: BLE001 - 索引属增强项，失败不阻断业务
         logger.warning(f"MongoDB 索引初始化失败：{exc}")
         return

@@ -95,6 +95,9 @@ class MongoSettings:
     k_candidates_collection: str
     k_metrics_collection: str
     param_registry_collection: str
+    # 章节级父块：只按 parent_id 批量取回、从不参与向量检索，故存 Mongo 而非 Milvus，
+    # 同时避开 Milvus VARCHAR(65535) 字节上限，长章节可完整存储
+    parent_chunks_collection: str
 
 
 @dataclass
@@ -217,6 +220,7 @@ def _build_settings() -> Settings:
             k_candidates_collection=env_str("EVOLUTION_K_CANDIDATES_COLLECTION", "k_candidates"),
             k_metrics_collection=env_str("EVOLUTION_K_METRICS_COLLECTION", "k_metrics"),
             param_registry_collection=env_str("EVOLUTION_PARAM_REGISTRY_COLLECTION", "param_registry"),
+            parent_chunks_collection=env_str("PARENT_CHUNKS_COLLECTION", "kb_parent_chunks"),
         ),
         api=ApiSettings(
             import_app_name=env_str("IMPORT_APP_NAME", "Enterprise RAG Import Service"),

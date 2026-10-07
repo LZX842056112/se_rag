@@ -37,6 +37,7 @@ _NODE_NAME_TO_CN: Dict[str, str] = {
     "node_item_name_confirm": "确认问题产品",
     "node_answer_output": "生成答案",
     "node_rerank": "重排序",
+    "node_parent_expand": "父块回溯",
     "node_rrf": "倒排融合",
     "node_web_search_mcp": "网络搜索",
     "node_search_embedding": "切片搜索",

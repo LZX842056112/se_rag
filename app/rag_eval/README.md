@@ -23,6 +23,8 @@ app/rag_eval/
   __init__.py
   runner.py
   dataset.py
+  split_dataset.py
+  split_metrics.py
   metrics.py
   tester.py
   README.md
@@ -34,9 +36,15 @@ app/rag_eval/
   - 提供统一测试类 `RagEvalTester`
   - 对外只暴露两个方法
 - `dataset.py`
-  - 维护导入测试数据
-  - 维护批量问题样本
-  - 读写评测题库文件
+  - 维护常量与题库文件读写
+  - 维护联网占位结果
+  - 保留历史手工切片 `build_import_chunks()`（已不参与评测主路径）
+- `split_dataset.py`
+  - 把评测知识组织成 Markdown 文档，经**真实切分器**产出黄金切片
+  - 由**内容关键词**推导 gold，不依赖切片序号
+  - 读取已缓存的 MinerU 解析产物，用于切分质量基线
+- `split_metrics.py`
+  - 切分质量纯函数指标：源内容覆盖率、表格完整率、碎片率、面包屑覆盖率、页码溯源覆盖率、父子关联
 - `metrics.py`
   - 提取 `chunk_id`
   - 计算主体命中率
@@ -45,7 +53,7 @@ app/rag_eval/
   - 通过真实导入链路写入评测数据
   - 执行单条评测
   - 执行批量评测与汇总
-  - 生成中文报告
+  - 生成中文报告（含切分质量段）
 
 ## 3. 当前评估流程
 
@@ -59,10 +67,20 @@ app/rag_eval/
 - `node_bge_embedding`
 - `node_import_milvus`
 
+切片不再手工编写，而是由 `split_dataset.split_eval_document()` 调**真实切分器**
+（`section_splitter.split_blocks`，与线上导入同一套逻辑）产出。因此：
+
+- 切分策略的改动会被评估覆盖到；
+- `chunk_id` 是确定性哈希，可在本地算出来，**不再需要「先入库再回查自增主键」**；
+- gold 由内容关键词推导，切片数量变化不会让标注失效。
+
 执行后会完成两件事：
 
-1. 将测试 chunks 写入 `item_name` 集合和 `chunks` 集合
+1. 将测试 chunks 写入 `item_name` 集合和 `chunks` 集合（父块写入 MongoDB）
 2. 生成批量评测样本文件 `app/rag_eval/artifacts/hak180_eval_cases.json`
+
+> 注意：回查 chunk 集合只用于**校验写入成功**。过滤条件必须使用「实际写入的主体名」——
+> 主体识别会把新名归并到库内标准名（如 `HAK 180` → `HAK 180 烫金机`），硬编码常量会稳定查到 0 行。
 
 ### 第二步：执行批量评测
 
@@ -81,6 +99,23 @@ app/rag_eval/
 - `reranked_docs`
 
 最后用标注好的 `gold_chunk_ids` 和 `must_hit_chunk_ids` 做对比，统计指标。
+
+### 切分质量（报告新增段）
+
+`runner.collect_split_quality()` 会对**评测文档**与**已缓存的真实解析产物**分别计算切分质量，
+写入报告的 `切分质量` 段。这是切分策略变更后唯一可比的证据：
+
+| 指标 | 含义 | 期望 |
+| --- | --- | --- |
+| 源内容覆盖率 | 源块文本都能在某个切片中找到 | 100% |
+| 表格完整率 | 每个数据行都出现在「带表头」的切片里 | 100% |
+| 碎片率 | 分别给出碎片块**数量占比**与**内容占比** | 看内容占比 |
+| 章节面包屑覆盖率 | 切片带 `heading_path` 的比例 | 100% |
+| 页码溯源覆盖率 | 切片带有效 `page` 的比例 | 结构感知路径 100% |
+| 父子关联 | 每个子块的 `parent_id` 都能在父块列表中找到 | 100% |
+
+碎片率口径说明：结构感知切分下，短小节会天然产出短切片——**不同标题的切片不合并**，以保证切片标题与
+引用溯源精确（合并会让标题与实际内容不符）。因此验收看的是碎片块**承载的内容占比**，而不是数量占比。
 
 ## 4. 如何获取每层召回结果
 
@@ -151,10 +186,11 @@ eval_result = tester.run_eval()
 
 返回值包含：
 
-- `item_name`
+- `item_name`（**实际写入的主体名**，可能是归并后的库内标准名）
 - `item_rows`
 - `chunk_rows`
 - `case_count`
+- `split_quality`
 
 ### 7.2 `tester.run_eval()`
 
@@ -163,12 +199,14 @@ eval_result = tester.run_eval()
 - 读取题库
 - 执行 embedding / HyDE / RRF / rerank 四层评测
 - 统计主体命中率、召回率、精确率、必命中率
+- 汇总切分质量
 - 输出报告文件
 
 返回值包含：
 
 - `eval_results`
 - `summary`
+- `split_quality`
 - `report_path`
 
 ## 8. 为什么适合迁移

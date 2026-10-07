@@ -41,6 +41,9 @@ class CitationModel(BaseModel):
     source: str = "kb"  # kb | evolution | web
     # 联网引用没有 chunk_id，用标题（退化时用 URL）给用户看
     title: str = ""
+    # 页码与章节面包屑：来自切分阶段的结构化元数据，供引用溯源
+    page: int | None = None
+    heading: str = ""
 
 
 class OkResponse(BaseModel):

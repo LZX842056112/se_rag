@@ -110,11 +110,14 @@ flowchart LR
 
 | 集合 | 主键 | 字段 | 向量 / 口径 |
 | --- | --- | --- | --- |
-| `kb_chunks` | `chunk_id` INT64 **自增** | `file_title` / `item_name` / `title` / `parent_title` / `part` / `content` | dense **COSINE** + sparse IP |
+| `kb_chunks` | `chunk_id` VARCHAR(40) **确定性哈希** | `doc_id` / `parent_id` / `file_title` / `item_name` / `title` / `parent_title` / `heading_path` / `part`(INT16) / `seq` / `page` / `content` / `content_hash` | dense **COSINE** + sparse IP |
 | `kb_item_names` | `pk` INT64（显式） | `file_title` / `item_name` | dense **COSINE** + sparse IP |
 | `kb_evolution_items` | `evo_doc_id` VARCHAR(128)（`evo_<12hex>`） | `faq_question` / `faq_answer` / `source_refs` / `item_name` / `status` / `file_title` | dense **IP**（BGE-M3 已 L2 归一化） |
 
-**MongoDB 六个集合**（库名见 `MONGO_DB_NAME`）
+`kb_chunks` 的 `chunk_id = sha1(doc_id#heading_path#occurrence#part)`：只编码结构、不编码内容，
+因此**重复导入后 id 稳定**，标注与引用不再失效；内容变更由 `content_hash` 感知。
+
+**MongoDB 七个集合**（库名见 `MONGO_DB_NAME`）
 
 | 集合 | 内容 | 唯一写入者 |
 | --- | --- | --- |
@@ -124,11 +127,16 @@ flowchart LR
 | `k_candidates` | 候选知识（`draft` / `need_info` / `active` / `rejected` / `deprecated`） | 生成器 + 审批状态机 |
 | `k_metrics` | 指标快照（`adopt_rate` / `gap_rate` / `params_snapshot`） | `app/evolution/online_eval/metrics.py` |
 | `param_registry` | 参数注册表（`RRF_K` / `RRF_TOP` / `RERANK_TOP_K` + `rev`） | `app/evolution/tuning/param_registry.py` |
+| `kb_parent_chunks` | 章节级父块（`parent_id` / `doc_id` / `title` / `heading_path` / `page` / `content` / `child_count`） | `app/rag/import_/parent_index_service.py` |
+
+父块只按 `parent_id` 批量取回、从不参与向量检索，故存 Mongo 而非 Milvus：避开 `VARCHAR(65535)`
+字节上限，长章节可完整存储，也无需为父块额外生成向量。
 
 **三条不变式**（改动前先想清楚）
 
 1. 集合名与字段名属数据契约；LangGraph `state` 键名、SSE 事件名同理。
-2. `kb_chunks` 是自增主键 + 「按 `file_title` 先删后插」→ **重复导入会重新分配 `chunk_id`**，绑在它上面的评估标注会失效。
+2. `kb_chunks` 按 `file_title` 先删后插（幂等覆盖），`kb_parent_chunks` 按 `doc_id` 先删后插；
+   `chunk_id` 为确定性哈希，**重复导入不会重新分配**。
 3. `EVOLUTION_*` 开关语义、`app/rag_eval` 包边界保持不变。
 
 ## 三、核心流程
@@ -140,16 +148,16 @@ POST /api/import/upload   校验扩展名（仅 md/pdf）→ 落盘 → 后台�
   → node_entry                     按后缀分派 md / pdf，写 file_title
   → node_pdf_to_md                 仅 PDF：MinerU 解析（轮询 600s 上限 / 3s 间隔）→ 下载解压
   → node_md_img                    图片 → 视觉模型生成说明 → 上传 MinIO → 链接替换
-  → node_document_split            标题粗切 → 超长细切(>1000 字) → 同标题短块合并(<400 字)
-  → node_item_name_recognition     LLM 读前 10 片识别主体 → 归并库内标准名 → 写 kb_item_names
+  → node_document_split            结构感知解析 → 章节识别 → 两级切片（父块 + 子块）
+  → node_item_name_recognition     LLM 读前 10 片识别主体 → 归并库内标准名 → 回填 chunks 与 parent_chunks
   → node_bge_embedding             分批（6 条/批）生成稠密 + 稀疏向量
-  → node_import_milvus             按 file_title 先删后插（幂等覆盖）写 kb_chunks
+  → node_import_milvus             按 file_title 先删后插写 kb_chunks；父块写 Mongo
 ```
 
 不支持的文档类型会显式标记任务 `FAILED`（图内会静默走到 END，靠业务层兜底），不会出现「已完成但未入库」。
 进度记录不立即清理，由 `TASK_STATE_TTL_SECONDS`（默认 6h）回收，保证前端仍能轮询到终态。
 
-### 3.2 查询流程（:8001，7 节点 + 1 条条件短路）
+### 3.2 查询流程（:8001，8 节点 + 1 条条件短路）
 
 ```
 POST /api/query    流式：先建 SSE 通道再后台执行，立即返回 session_id；非流式：同步等待
@@ -158,9 +166,15 @@ POST /api/query    流式：先建 SSE 通道再后台执行，立即返回 sess
   → 并行三路召回             ① 知识库混合检索（含自进化条目）② HyDE 假设性检索 ③ MCP 联网（失败降级空）
   → node_rrf                 多路 RRF 融合，强制并入自进化权威条目
   → node_rerank              本地优先排序 → 限联网条数 → BGE-Reranker 打分 → 累计断崖截断 → 权威条目保底
+  → node_parent_expand       命中子块 → 按 parent_id 批量取章节级父块 → 按预算注入章节背景
   → node_answer_output       有现成答案则跳过 LLM；否则作答 → 抽图 → 回填引用/信号/接地性 → 落库
   → SSE final + close        返回 answer / citations / groundedness / item_name_options
 ```
+
+**父块回溯（Small-to-Big）**：重排仍以**子块**文本打分（子块短、主题集中，打分精度高），父块只作为
+最终上下文的补充——若把长父块一并喂给重排，会稀释相关性分数、把精确命中的子块压下去。父块按分数
+降序分配预算（`PARENT_MAX_CHARS` 单块 / `PARENT_TOTAL_BUDGET_CHARS` 合计），同一父块被多个子块命中
+只注入一次；联网结果与自进化条目没有父块，自动跳过。
 
 **主体确认四态**（`app/rag/query/item_name_confirm_service.py`）：
 
@@ -314,15 +328,15 @@ E2E_ENABLED=1 pytest -m e2e tests/e2e -s   # 真机端到端（会产生模型�
 | `app/api/errors.py` | 统一错误模型与异常处理器 |
 | `app/process/*/agent/` | LangGraph 状态、节点与图定义 |
 | `app/rag/query/` | 主体确认、检索、RRF、重排、作答、引用、历史上下文 |
-| `app/rag/import_/` | 入口分派、PDF 解析、图片增强、切分、主体识别、向量化、入库 |
+| `app/rag/import_/` | 入口分派、PDF 解析、图片增强、结构感知切分（两级切片）、主体识别、向量化、入库、schema 迁移 |
 | `app/rag/item_name/` | 主体名配置、目录缓存、检索判定与相似兜底 |
 | `app/evolution/` | feedback / gap / candidate / approval / index / online_eval / tuning / backtest / scheduler |
 | `app/shared/config/` | 唯一配置出口 `settings` |
-| `app/shared/clients/` | Milvus / MongoDB / MinIO 客户端与会话历史仓储 |
+| `app/shared/clients/` | Milvus / MongoDB / MinIO 客户端、会话历史仓储、章节父块仓储 |
 | `app/shared/models/` | LLM / 向量 / 重排模型入口（`llm_providers`） |
 | `app/shared/runtime/` | 日志与提示词加载 |
 | `app/shared/utils/` | 校验、文本归一、JSON 解析、SSE 通道、任务状态、限速 |
-| `app/rag_eval/` | 离线检索评估（导入测试数据 → 分层评测 → 报告） |
+| `app/rag_eval/` | 离线检索评估（真实切分器产出样本 → 分层评测 + 切分质量 → 报告） |
 | `tests/unit`、`tests/e2e` | 离线单测与真机端到端 |
 | `docs/` | 架构与优化报告、浏览器联调验证报告、项目讲解 |
 
@@ -336,12 +350,16 @@ E2E_ENABLED=1 pytest -m e2e tests/e2e -s   # 真机端到端（会产生模型�
 | `RERANK_MAX_TOPK` / `RERANK_MIN_TOPK` / `GAP_RATIO` / `GAP_ABS` | 6 / 2 / 0.2 / 0.2 | 重排保留上限、无条件保留数、累计断崖截断 |
 | `RERANK_MAX_INPUT_TOKENS` | 512 | 重排输入预算（超长先 LLM 压缩再按 token 硬截断） |
 | `WEB_MAX_IN_CONTEXT` | 2 | 本地有命中时联网结果条数上限 |
+| `PARENT_MAX_CHARS` / `PARENT_TOTAL_BUDGET_CHARS` | 1200 / 4000 | 单个父块的背景注入上限与全部父块的合计预算 |
 | `EVOLUTION_GAP_STRONG_THRESHOLD` / `_WEAK_THRESHOLD` | 0.65 / 0.45 | 缺口分级门槛 |
 | `EVOLUTION_OBSERVE_WINDOW_DAYS` / `EVOLUTION_SCAN_BATCH` | 7 / 50 | 缺口扫描窗口与每轮批量 |
 | `EVOLUTION_METRIC_INTERVAL_MINUTES` / `_BACKTEST_INTERVAL_HOURS` / `_BACKTEST_MIN_HITS` | 60 / 24 / 3 | 指标、回测、回测下架门槛 |
 | `TASK_STATE_TTL_SECONDS` | 21600 | 任务进度内存回收 |
 
-`app/rag/import_/config.py` 另含切分策略：`CHUNK_MAX_SIZE` 1000 / `CHUNK_SIZE` 600 / `CHUNK_OVERLAP` 50 / `CHUNK_MIN` 400 / 向量化批大小 6。
+`app/rag/import_/config.py` 另含切分策略：`CHUNK_MAX_SIZE` 1000（硬上限：仅单个原子块超过它才从中间切开）
+/ `CHUNK_SIZE` 600（软目标：决定多个原子块如何打包）/ `CHUNK_OVERLAP` 50（仅在单个原子块必须切开时生效）
+/ `CHUNK_MIN` 400（同章节内过短分块向后合并的门槛）/ 向量化批大小 6。三个长度阈值一律按**正文口径**
+比较（不含切片前置标题）。
 
 ## 六、注意事项与排障
 
@@ -357,7 +375,10 @@ E2E_ENABLED=1 pytest -m e2e tests/e2e -s   # 真机端到端（会产生模型�
 - **`.env` 覆盖系统环境变量**（`load_dotenv(override=True)`）；密钥请勿提交。
 - **Milvus metric 口径必须与建表一致**：`kb_chunks` / `kb_item_names` dense 用 COSINE、`kb_evolution_items` 用 IP；
   不一致会让 Milvus 报 `metric type not match` 并静默返回 None。
-- **`kb_chunks` 主键是自增的**：按 `file_title` 重导入会重新分配 `chunk_id`，绑在它上面的外部标注会失效。
+- **`kb_chunks` 主键是确定性哈希**：`chunk_id = sha1(doc_id#heading_path#occurrence#part)`，只编码结构不编码
+  内容，因此重导入后 id 稳定，绑在它上面的标注与引用不会失效。但 schema 变更无法自动生效（集合「存在即跳过」），
+  需显式调用 `app/rag/import_/schema_migration.py:migrate_chunk_schema(force=True)` 重建集合（**会清空数据**）。
+- **父块存 MongoDB**：`kb_parent_chunks` 只按 `parent_id` 批量取回，不参与向量检索；父块写入失败只告警不阻断导入。
 - **`app/rag_eval` 会写共享 Milvus**：执行离线评估前确认不影响线上库，或改用独立集合。
 - **自进化需显式开启**：`EVOLUTION_ENABLED=false` 时反馈接口仅幂等接受不落库，进化条目不参与召回。
 - **审批写操作需鉴权**：未配置或未正确携带 `EVOLUTION_ADMIN_TOKEN`（请求头 `X-Internal-Token`）会被拒绝（503 / 401）。
@@ -374,6 +395,34 @@ E2E_ENABLED=1 pytest -m e2e tests/e2e -s   # 真机端到端（会产生模型�
 | 页面样式/交互异常 | `/api/health` 的 `asset_version` 与页面脚本 `?v=` | 版本不一致即页面过期，刷新即可 |
 
 ## 七、变更记录
+
+### 2026-10-07
+
+**切分流程重构：结构感知解析 + 两级切片（父块 / 子块）+ 父块回溯检索。**
+
+- **解析层**：切分输入从「MinerU 渲染出的 Markdown」改为优先消费结构化产物 `*_content_list.json`
+  （可拿到 block 类型、标题层级 `text_level`、页码 `page_idx`、表格 HTML），缺失时**自动回退** Markdown
+  解析，不中断导入。新增 `content_list.py` / `markdown_blocks.py` / `section_splitter.py` / `ids.py`。
+- **修掉 4 个已复现的切分缺陷**：①前言被截断等长前缀（`本手册适用于 H3C…` → `C MSR…`）；
+  ②无正文的章节标题整段丢失；③代码块缩进与空行被抹平；④长表格被字符切割后丢失表头
+  （实测 1411 字符参数表切成 3 块、其中 2 块是无表头碎片）。另修：短块合并因长度口径错误而**从未生效**
+  （死代码）、正文仅超阈值 1 字符就产出 `[600, 56]` 碎片、中文分隔符缺「，、：」导致按字符硬切。
+- **两级切片**：一个标题对应一个章节级**父块**（`content` 为整棵子树文本，供命中后回填背景），
+  章节自身文本切为**子块**（检索单元）。子块不再包含嵌套子章节文本，避免重复入库。
+  长度阈值统一为**正文口径**（不含标题前缀）。
+- **确定性 chunk_id**：`kb_chunks` 重建，`chunk_id` 由自增 INT64 改为 `sha1(doc_id#heading_path#occurrence#part)`，
+  重复导入后 id 稳定；新增 `doc_id` / `parent_id` / `heading_path` / `seq` / `page` / `content_hash`，
+  `part` 由 INT8 升为 INT16。`occurrence` 用于消歧重名标题（手册中 `## 设备` 会重复出现）。
+- **父块存 MongoDB**：新增集合 `kb_parent_chunks`，只按 `parent_id` 批量取回、不参与向量检索，
+  避开 Milvus `VARCHAR(65535)` 字节上限；写入失败只告警不阻断导入。
+- **父块回溯检索**：查询图新增 `node_parent_expand`（`node_rerank` 之后）。重排仍用**子块**打分，
+  父块按分数降序、按预算注入上下文；引用新增 `page` / `heading` 字段，可溯源到原文位置。
+- **评估闭环重建**：评测样本不再手工编写，改由真实切分器产出（`split_dataset.py`）；gold 由**内容关键词**
+  推导，不再依赖切片序号；新增切分质量指标（`split_metrics.py`）并写入报告。
+  实测真实产物：源内容覆盖率 100%、表格完整率 100%、页码溯源覆盖率 100%、父子关联 100%。
+- **迁移入口**：新增 `schema_migration.py:migrate_chunk_schema(force=True)`（全仓唯一的 schema 重建入口，
+  默认只告警不执行，**会清空集合数据**）。
+- **README / rag_eval README**：同步更新数据契约、流程节点、可调参数与注意事项。
 
 ### 2026-09-30
 

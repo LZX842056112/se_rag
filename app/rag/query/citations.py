@@ -41,9 +41,14 @@ def build_citations(
     cited_ids: list | None,
     evolution_ids: list | None = None,
     web_docs: list | None = None,
+    doc_meta: dict[str, dict] | None = None,
 ) -> list[dict]:
-    """按「本地引用 id + 自进化 id + 联网文档」构造引用列表（去重保序）。"""
+    """按「本地引用 id + 自进化 id + 联网文档」构造引用列表（去重保序）。
+
+    :param doc_meta: 可选的 ``{chunk_id: 命中文档}``，用于补充页码与章节面包屑（引用溯源）
+    """
     evolution_set = {str(i) for i in (evolution_ids or [])}
+    meta_map = doc_meta or {}
     citations: list[dict] = []
     seen: set[str] = set()
     for cid in cited_ids or []:
@@ -53,9 +58,14 @@ def build_citations(
         if key in seen:
             continue
         seen.add(key)
+        meta = meta_map.get(key) or {}
+        heading = str(meta.get("heading_path") or meta.get("title") or "").strip()
+        page = meta.get("page")
         citations.append(CitationModel(
             faq_id=key,
             source="evolution" if key in evolution_set else "kb",
+            page=page if isinstance(page, int) and page > 0 else None,
+            heading=heading,
         ).model_dump())
     for doc in web_docs or []:
         url = str(doc.get("url") or "").strip()
@@ -71,7 +81,20 @@ def build_citations(
     return citations
 
 
+def build_doc_meta(reranked_docs: list | None) -> dict[str, dict]:
+    """把重排结果整理成 ``{chunk_id: 文档}``，供引用补充页码与章节信息。"""
+    meta: dict[str, dict] = {}
+    for doc in reranked_docs or []:
+        if not isinstance(doc, dict):
+            continue
+        chunk_id = doc.get("chunk_id")
+        if chunk_id is None:
+            continue
+        meta.setdefault(str(chunk_id), doc)
+    return meta
+
+
 def citations_from_reranked_docs(reranked_docs: list | None) -> list[dict]:
     """一步到位：由 ``reranked_docs`` 直接构造引用列表（读链路三处共用）。"""
     cited, evolution_ids, web_docs = split_cited(reranked_docs)
-    return build_citations(cited, evolution_ids, web_docs)
+    return build_citations(cited, evolution_ids, web_docs, build_doc_meta(reranked_docs))

@@ -28,6 +28,13 @@ WEB_MAX_IN_CONTEXT: int = env_int("WEB_MAX_IN_CONTEXT", 2)
 # RRF 抛错 → /query 500」。BGE-M3 稠密向量已 L2 归一化，COSINE 与 IP 排序等价。
 CHUNK_DENSE_METRIC: str = env_str("CHUNK_DENSE_METRIC", "COSINE")
 
+# ==================== 父块回溯（Small-to-Big）参数 ====================
+# 检索命中的是子块，父块（章节级）只作为背景注入上下文，用于补足跨子块的语义连续性。
+# 单个父块可能很长，故按分数降序分配预算，超出部分从头部截断。
+PARENT_MAX_CHARS: int = env_int("PARENT_MAX_CHARS", 1200)
+# 全部父块的合计字符预算，耗尽后其余命中不再附带背景
+PARENT_TOTAL_BUDGET_CHARS: int = env_int("PARENT_TOTAL_BUDGET_CHARS", 4000)
+
 
 # ==================== 自进化读侧参数读取 ====================
 def _read_param(key: str):

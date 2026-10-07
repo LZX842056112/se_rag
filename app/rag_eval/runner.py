@@ -20,7 +20,7 @@ from pathlib import Path
 from statistics import mean
 from unittest.mock import patch
 
-from app.shared.clients.milvus_gateway import milvus_gateway
+from app.shared.clients.milvus_gateway import eq_expr, milvus_gateway
 from app.shared.config import settings
 from app.process.import_.agent.nodes.node_bge_embedding import node_bge_embedding
 from app.process.import_.agent.nodes.node_import_milvus import node_import_milvus
@@ -35,13 +35,19 @@ from app.rag_eval.dataset import (
     ARTIFACTS_DIR,
     TEST_FILE_TITLE,
     TEST_ITEM_NAME,
-    build_batch_eval_cases,
-    build_import_chunks,
     build_web_search_docs,
     load_batch_eval_cases,
     write_batch_eval_cases,
 )
 from app.rag_eval.metrics import evaluate_query_state
+from app.rag_eval.split_dataset import (
+    ARTIFACT_DOC_NAME,
+    build_cases_from_split,
+    split_eval_document,
+    split_real_artifact,
+)
+from app.rag_eval.split_metrics import evaluate_split_quality
+from app.shared.utils.paths import PROJECT_ROOT
 LAYER_LABELS = {
     "embedding_chunks": "普通检索",
     "hyde_embedding_chunks": "HyDE检索",
@@ -99,6 +105,7 @@ def milvus_ready() -> bool:
 def _query_chunk_rows_with_retry(
     milvus_client,
     *,
+    item_name: str,
     file_title: str,
     expected_count: int,
     retry_times: int = 5,
@@ -108,6 +115,8 @@ def _query_chunk_rows_with_retry(
 
     参数：
     - milvus_client：当前项目的 Milvus 客户端
+    - item_name：本次导入**实际写入**的主体名（不能硬编码期望值：主体识别会把新名归并到
+      库内标准名，例如 `HAK 180` → `HAK 180 烫金机`，硬编码过滤会稳定查到 0 行）
     - file_title：本次导入文件标题，用于过滤出当前测试数据
     - expected_count：期望查回多少条 chunk
     - retry_times：最多重试次数
@@ -117,16 +126,27 @@ def _query_chunk_rows_with_retry(
 
     为什么要重试：
     - 向量库刚写完数据时，马上查询有时会出现短暂延迟。
+
+    注意：本函数只用于**校验写入是否成功**。gold 标注不再依赖回查结果（历史实现靠回查自增
+    主键拿 gold，导致切片标识一变标注即失效），排序键也从 ``part`` 改为全局序号 ``seq``。
+
+    首次未读到时先 ``flush`` 一次：Milvus 的 ``query`` 对尚未 seal 的 growing segment 存在
+    可见性延迟，仅靠短睡眠重试可能稳定读到 0 行。flush 只用于评估路径，不影响导入热路径。
     """
-    for _ in range(retry_times):
+    for attempt in range(retry_times):
+        if attempt == 1:
+            try:
+                milvus_client.flush(collection_name=milvus_gateway.chunk_collection_name)
+            except Exception as exc:  # noqa: BLE001 - flush 失败继续走后续重试
+                logger.warning(f"Milvus flush 失败（继续重试）：{exc}")
         chunk_rows = milvus_client.query(
             collection_name=milvus_gateway.chunk_collection_name,
-            filter=f"item_name == '{TEST_ITEM_NAME}'",
-            output_fields=["chunk_id", "item_name", "title", "part", "file_title", "content"],
+            filter=eq_expr("item_name", item_name),
+            output_fields=["chunk_id", "item_name", "title", "part", "seq", "file_title", "content"],
         )
         chunk_rows = [row for row in chunk_rows if row.get("file_title") == file_title]
         if len(chunk_rows) >= expected_count:
-            chunk_rows.sort(key=lambda row: row["part"])
+            chunk_rows.sort(key=lambda row: row.get("seq") or 0)
             return chunk_rows
         time.sleep(0.3)
     return []
@@ -144,10 +164,10 @@ def insert_batch_eval_dataset() -> dict:
 
     执行步骤：
     1. 检查环境；
-    2. 构造导入 state；
+    2. 用真实切分器切出评测切片（chunk_id 本地确定性可算）；
     3. 走真实导入节点；
-    4. 查询回刚写入的数据；
-    5. 根据真实 chunk_id 生成题库；
+    4. 查询回刚写入的数据（仅校验写入）；
+    5. 由内容关键词推导题库 gold；
     6. 返回本次入库结果。
     """
     if not insert_env_ready():
@@ -157,27 +177,34 @@ def insert_batch_eval_dataset() -> dict:
     if milvus_client is None:
         raise RuntimeError("MilvusClient 未成功初始化，无法执行评测数据入库。")
 
-    # 1. 准备导入 state。
+    # 1. 评测切片由真实切分器产出：评估链路第一次真正覆盖了切分策略。
+    split = split_eval_document()
+    chunks = split["children"]
+    if not chunks:
+        raise RuntimeError("评测文档切分后为空，无法执行评测数据入库。")
+
+    # 2. 准备导入 state。
     # 参数说明：
     # - task_id：本次导入任务标识
     # - file_title：这份测试知识的标题
-    # - chunks：待导入的测试知识数据集
+    # - chunks / parent_chunks：真实切分器产出的子块与章节级父块
     state = create_default_state(
         task_id="rag_eval_batch_insert",
         file_title=TEST_FILE_TITLE,
-        chunks=build_import_chunks(),
+        chunks=chunks,
+        parent_chunks=split["parents"],
     )
 
-    # 2. 固定主体识别结果，保证测试数据每次都稳定。
+    # 3. 固定主体识别结果，保证测试数据每次都稳定。
     # 这里不让大模型自由识别，是为了避免测试数据每次导入出来的主体名称不一致。
     with patch("app.rag.import_.item_name_service.recognize_item_name_by_chunks", return_value=TEST_ITEM_NAME):
         state = node_item_name_recognition(state)  # item_name  item_name存储到向量数据库
 
-        # 3. 继续走真实导入链路：向量化 -> 写入 Milvus。
+        # 4. 继续走真实导入链路：向量化 -> 写入 Milvus。
         state = node_bge_embedding(state)
         state = node_import_milvus(state)
 
-    # 4. 查询 item_name 集合，确认主体索引已经写入。
+    # 5. 查询 item_name 集合，确认主体索引已经写入。
     item_rows = milvus_client.query(
         collection_name=milvus_gateway.item_name_collection_name,
         filter=f"file_title == '{TEST_FILE_TITLE}'",
@@ -186,28 +213,30 @@ def insert_batch_eval_dataset() -> dict:
     if not item_rows:
         raise RuntimeError("item_name 集合中未查询到评测数据。")
 
-    # 5. 查询 chunk 集合，拿到真实 chunk_id。
-    # 后面题库标注和指标统计都基于这些真实 id。
+    # 6. 回查 chunk 集合，仅用于确认写入成功。
+    # 注意用「实际写入的主体名」而非硬编码期望值：主体识别会把新名归并到库内标准名。
+    resolved_item_name = state["item_name"]
     chunk_rows = _query_chunk_rows_with_retry(
         milvus_client,
+        item_name=resolved_item_name,
         file_title=TEST_FILE_TITLE,
-        expected_count=len(build_import_chunks()),
+        expected_count=len(chunks),
     )
-    if len(chunk_rows) != len(build_import_chunks()):
-        raise RuntimeError("chunks 集合中的评测数据数量与预期不一致。")
+    if len(chunk_rows) != len(chunks):
+        raise RuntimeError(
+            f"chunks 集合中的评测数据数量与预期不一致：实际 {len(chunk_rows)}，预期 {len(chunks)}。"
+        )
 
-    # 6. 用“真实 chunk_id”生成题库，这样后面的评测才能精确比对命中情况。
-    case_list = build_batch_eval_cases(
-        gold_chunk_ids=[str(row["chunk_id"]) for row in chunk_rows],
-        expected_item_names=[TEST_ITEM_NAME],
-    )
+    # 7. gold 由内容关键词本地推导，不再依赖回查得到的自增主键。
+    case_list = build_cases_from_split(split, expected_item_names=[resolved_item_name])
     write_batch_eval_cases(case_list)
 
     return {
-        "item_name": state["item_name"],
+        "item_name": resolved_item_name,
         "item_rows": item_rows,
         "chunk_rows": chunk_rows,
         "case_count": len(case_list),
+        "split_quality": evaluate_split_quality(chunks, split["parents"], split["blocks"]),
     }
 
 
@@ -341,21 +370,42 @@ def _to_chinese_summary(summary: dict) -> dict:
     }
 
 
+def collect_split_quality() -> dict:
+    """
+    汇总切分质量：评测文档 + 已缓存的真实解析产物两套切片。
+
+    真实产物缺失时只保留评测文档一段——切分质量属评估增强项，不应阻断检索评测。
+    """
+    split = split_eval_document()
+    quality = {
+        "评测文档": evaluate_split_quality(split["children"], split["parents"], split["blocks"]),
+    }
+    real = split_real_artifact(PROJECT_ROOT)
+    if real is not None:
+        quality[f"真实产物:{ARTIFACT_DOC_NAME}"] = evaluate_split_quality(
+            real["children"], real["parents"], real["blocks"]
+        )
+    return quality
+
+
 def save_batch_eval_report(
     eval_results: list[dict],
     summary: dict,
+    split_quality: dict | None = None,
     report_name: str = "rag_eval_batch_report.json",
 ) -> Path:
     """
     保存批量评测报告。
 
-    报告里同时放两部分：
+    报告里同时放三部分：
     1. 汇总结果；
-    2. 每道题的详细结果。
+    2. 每道题的详细结果；
+    3. 切分质量（切分策略变更后的可比证据）。
 
     参数：
     - eval_results：每道题的详细评测结果
     - summary：整体汇总结果
+    - split_quality：切分质量指标（可选）
     - report_name：报告文件名，默认 `rag_eval_batch_report.json`
 
     返回值：
@@ -363,17 +413,13 @@ def save_batch_eval_report(
     """
     ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
     report_path = ARTIFACTS_DIR / report_name
-    report_path.write_text(
-        json.dumps(
-            {
-                "汇总结果": _to_chinese_summary(summary),
-                "详细结果": [_to_chinese_case_result(result) for result in eval_results],
-            },
-            ensure_ascii=False,
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
+    payload = {
+        "汇总结果": _to_chinese_summary(summary),
+        "详细结果": [_to_chinese_case_result(result) for result in eval_results],
+    }
+    if split_quality:
+        payload["切分质量"] = split_quality
+    report_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return report_path
 
 
@@ -394,8 +440,9 @@ def run_batch_eval(case_list: list[dict] | None = None) -> dict:
     2. 读取题库；
     3. 逐题调用 `run_query_eval_case()`；
     4. 汇总指标；
-    5. 保存报告；
-    6. 返回结果。
+    5. 汇总切分质量；
+    6. 保存报告；
+    7. 返回结果。
     """
     if not batch_eval_ready():
         raise RuntimeError("缺少批量评测依赖配置，无法执行批量检索评测。")
@@ -410,10 +457,13 @@ def run_batch_eval(case_list: list[dict] | None = None) -> dict:
     eval_results = [run_query_eval_case(case_data) for case_data in real_case_list]
     # 再把所有题的结果做平均汇总。
     summary = summarize_eval_results(eval_results)
+    # 切分质量与检索指标分开统计：前者反映切分策略，后者反映检索链路。
+    split_quality = collect_split_quality()
     # 最后把结果写到报告文件。
-    report_path = save_batch_eval_report(eval_results, summary)
+    report_path = save_batch_eval_report(eval_results, summary, split_quality)
     return {
         "eval_results": eval_results,
         "summary": summary,
+        "split_quality": split_quality,
         "report_path": report_path,
     }

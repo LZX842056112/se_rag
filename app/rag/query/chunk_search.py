@@ -18,10 +18,15 @@ from app.shared.utils.require import require_state_list, require_state_str
 # 检索输出字段（chunk 业务字段）
 CHUNK_OUTPUT_FIELDS = [
     "chunk_id",
+    "doc_id",
+    "parent_id",
     "file_title",
     "title",
     "parent_title",
+    "heading_path",
     "part",
+    "seq",
+    "page",
     "item_name",
     "content",
 ]
@@ -97,6 +102,12 @@ def to_chunks(milvus_list) -> list[dict]:
             "part": entity.get("part"),
             "item_name": entity.get("item_name"),
             "content": entity.get("content"),
+            # 父块回溯所需字段：parent_id 用于批量取回章节背景，page/heading_path 用于引用溯源
+            "doc_id": entity.get("doc_id"),
+            "parent_id": entity.get("parent_id"),
+            "heading_path": entity.get("heading_path"),
+            "seq": entity.get("seq"),
+            "page": entity.get("page"),
             "source": "milvus",
             "type": "milvus",
             "url": "",

@@ -4,7 +4,8 @@
 
     E2E_ENABLED=1 pytest -m e2e tests/e2e -s
 
-测试数据全部带 ``e2e_`` 前缀，结束后按 ``file_title`` / ``evo_doc_id`` / ``session_id`` 清理。
+测试数据全部带 ``e2e_`` 前缀，结束后按 ``file_title`` / ``doc_id`` / ``evo_doc_id`` /
+``session_id`` 清理（父块存 MongoDB，需按 ``doc_id`` 单独清理）。
 """
 from __future__ import annotations
 
@@ -22,9 +23,11 @@ from app.evolution.index.update import deactivate
 from app.evolution.models import FeedbackEvent
 from app.evolution.repositories import evolution_repo
 from app.evolution.scheduler import run_scan_and_generate_once
+from app.rag.import_.ids import make_doc_id
 from app.rag.import_.pipeline import invoke_import_graph
 from app.rag.query.pipeline import invoke_query_graph
 from app.shared.clients.milvus_gateway import milvus_gateway
+from app.shared.clients.mongo import get_collection
 from app.shared.config import settings
 from app.shared.runtime.logger import logger
 from app.shared.utils.sse_broker import drop_channel, stream_events
@@ -94,6 +97,7 @@ def sample_doc(tmp_path: Path):
     md_path.write_text(_SAMPLE_MD, encoding="utf-8")
     yield file_title, md_path
     _cleanup_milvus(file_title)
+    _cleanup_parents(file_title)
 
 
 def _delete_and_verify(collection: str, filter_expr: str, *, retries: int = 3,
@@ -138,6 +142,11 @@ def _cleanup_milvus(file_title: str) -> None:
         _delete_and_verify(collection, filter_expr)
 
 
+def _cleanup_parents(file_title: str) -> None:
+    """按 doc_id 清理测试产生的章节级父块（父块存 MongoDB，不在 Milvus 里）。"""
+    get_collection(settings.mongo.parent_chunks_collection).delete_many({"doc_id": make_doc_id(file_title)})
+
+
 def _cleanup_evolution_item(evo_doc_id: str) -> None:
     """下架进化条目并复核（同样是删除 + 等待 + 复核）。"""
     from app.shared.clients.milvus_gateway import eq_expr
@@ -162,10 +171,20 @@ def test_import_query_and_evolution_flow(require_e2e, sample_doc):
     assert client is not None, "Milvus 客户端不可用"
     from app.shared.clients.milvus_gateway import eq_expr
 
-    rows = _query_chunks(client, eq_expr("file_title", file_title), ["chunk_id", "item_name", "content"])
+    rows = _query_chunks(client, eq_expr("file_title", file_title),
+                         ["chunk_id", "item_name", "content", "parent_id", "heading_path", "seq", "page"])
     assert rows, "知识库中未查询到本次导入的切片"
     item_name = rows[0]["item_name"]
     assert item_name, "导入结果缺少主体名"
+
+    # ---------- 1.5 结构化元数据与章节级父块 ----------
+    assert all(row["parent_id"] for row in rows), "切片缺少 parent_id，父块回溯无从分组"
+    assert all(row["heading_path"] for row in rows), "切片缺少章节面包屑"
+    assert sorted(row["seq"] for row in rows) == list(range(len(rows))), "切片 seq 不连续"
+    parent_doc_id = make_doc_id(file_title)
+    parents = list(get_collection(settings.mongo.parent_chunks_collection).find({"doc_id": parent_doc_id}))
+    assert parents, "未写入章节级父块"
+    assert {row["parent_id"] for row in rows} <= {p["parent_id"] for p in parents}, "存在无父块的孤儿切片"
 
     # ---------- 2. 查询：真实走 主体确认 → 多路召回 → 融合重排 → 作答 ----------
     session_id = f"e2e_sess_{uuid.uuid4().hex[:8]}"
@@ -177,6 +196,18 @@ def test_import_query_and_evolution_flow(require_e2e, sample_doc):
     )
     assert state is not None, "查询流程执行失败"
     assert state.get("answer"), "未生成答案"
+
+    # ---------- 2.5 父块回溯与引用溯源 ----------
+    kb_docs = [
+        doc for doc in state.get("reranked_docs", [])
+        if doc.get("type") != "web" and doc.get("source") != "evolution"
+    ]
+    assert kb_docs, "重排结果中没有知识库切片"
+    assert any(doc.get("parent_content") for doc in kb_docs), "命中切片未回填章节背景（父块回溯未生效）"
+    assert all(doc.get("heading_path") for doc in kb_docs), "重排结果丢失了章节面包屑"
+    kb_citations = [c for c in (state.get("citations") or []) if c.get("source") == "kb"]
+    assert kb_citations, "缺少知识库引用"
+    assert any(c.get("heading") for c in kb_citations), "引用缺少章节信息，无法溯源"
 
     chunks = asyncio.run(_drain_stream(session_id))
     joined = "".join(chunks)

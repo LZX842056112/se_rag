@@ -1,8 +1,9 @@
-"""查询流程图：主体确认 → 三路召回（向量 / HyDE / 联网）→ RRF 融合 → 重排 → 作答。"""
+"""查询流程图：主体确认 → 三路召回（向量 / HyDE / 联网）→ RRF 融合 → 重排 → 父块回溯 → 作答。"""
 from langgraph.graph import END, StateGraph
 
 from app.process.query.agent.nodes.node_answer_output import node_answer_output
 from app.process.query.agent.nodes.node_item_name_confirm import node_item_name_confirm
+from app.process.query.agent.nodes.node_parent_expand import node_parent_expand
 from app.process.query.agent.nodes.node_rerank import node_rerank
 from app.process.query.agent.nodes.node_rrf import node_rrf
 from app.process.query.agent.nodes.node_search_embedding import node_search_embedding
@@ -20,6 +21,7 @@ query_graph_builder.add_node(node_search_embedding_hyde)
 query_graph_builder.add_node(node_web_search_mcp)
 query_graph_builder.add_node(node_rrf)
 query_graph_builder.add_node(node_rerank)
+query_graph_builder.add_node(node_parent_expand)
 query_graph_builder.add_node(node_answer_output)
 
 # 2. 入口节点
@@ -47,7 +49,8 @@ query_graph_builder.add_edge("node_search_embedding", "node_rrf")
 query_graph_builder.add_edge("node_search_embedding_hyde", "node_rrf")
 query_graph_builder.add_edge("node_web_search_mcp", "node_rrf")
 query_graph_builder.add_edge("node_rrf", "node_rerank")
-query_graph_builder.add_edge("node_rerank", "node_answer_output")
+query_graph_builder.add_edge("node_rerank", "node_parent_expand")
+query_graph_builder.add_edge("node_parent_expand", "node_answer_output")
 query_graph_builder.add_edge("node_answer_output", END)
 
 query_app = query_graph_builder.compile()
