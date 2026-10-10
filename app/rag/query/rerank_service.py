@@ -21,7 +21,6 @@ from app.rag.query.config import (
 from app.shared.models import llm_providers
 from app.shared.runtime.logger import logger, step_log
 from app.shared.runtime.prompts import load_prompt
-from app.shared.utils.rate_limit import apply_api_rate_limit
 from app.shared.utils.require import require_state_list, require_state_str
 
 
@@ -143,7 +142,6 @@ def ensure_evolution_docs(docs: list[dict], candidates: list[dict]) -> list[dict
 
 def _summarize_for_rerank(rewritten_query: str, answer: str, limit: int) -> str:
     """超长文本压缩：仅用于重排打分，不改变最终答案上下文。"""
-    apply_api_rate_limit()
     prompt_text = load_prompt("rerank_text_refine", question=rewritten_query, answer=answer, limit=limit)
     chain = llm_providers.chat() | StrOutputParser()
     return chain.invoke([HumanMessage(content=prompt_text)])

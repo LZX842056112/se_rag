@@ -15,9 +15,30 @@ from app.shared.clients.minio_gateway import minio_gateway
 from app.shared.models import llm_providers
 from app.shared.runtime.logger import logger, step_log
 from app.shared.runtime.prompts import load_prompt
-from app.shared.utils.rate_limit import apply_api_rate_limit
 from app.shared.utils.require import require_state_str
 
+# 图片上下文窗口（字符数）：取图片引用前后的字符片段作为视觉模型的语义线索
+CONTEXT_WINDOW = 200
+# Markdown 图片引用模板：`![说明](地址)`，中间插入 re.escape 后的图片名以定位单张图。
+# 注意转义括号 `\[` `\]` `\(` `\)` 不可写作 `$`（`$` 是行尾锚点，会导致永不匹配）。
+_IMAGE_REF_TEMPLATE = r"\!\[.*?\]\(.*?%s.*?\)"
+
+
+def _image_ref_pattern(image_name: str) -> re.Pattern[str]:
+    """构造定位单张图片引用的正则（图片名为字面量，需转义）。"""
+    return re.compile(_IMAGE_REF_TEMPLATE % re.escape(image_name))
+
+
+def _extract_context(md_content: str, anchor: int, window: int, *, pre: bool) -> str:
+    """取 ``anchor`` 位置前/后 ``window`` 字符的上下文，并剥离首尾空白。
+
+    不做句界对齐：图片通常独占一行，其紧邻的换行本身就是「最近句界」，
+    按句界收缩会得到空串，使上下文完全失效。此处按窗口硬截断即可——
+    提示词中已明确告知这是「上文/下文」片段，无需保证句子完整。
+    """
+    if pre:
+        return md_content[max(0, anchor - window):anchor].strip()
+    return md_content[anchor:min(len(md_content), anchor + window)].strip()
 
 @step_log("validate_markdown_source")
 def validate_markdown_source(state: ImportGraphState) -> tuple[str, Path, Path]:
@@ -43,13 +64,13 @@ def scan_images(images_dir: Path, md_content: str) -> list[tuple[str, str, tuple
         image_name = image_obj.name
         if image_obj.suffix.lower() not in SUPPORTED_IMAGE_EXTENSIONS:
             continue
-        match = re.search(r"\!\[.*?\]\(.*?" + re.escape(image_name) + r".*?\)", md_content)
+        match = _image_ref_pattern(image_name).search(md_content)
         if not match:
             logger.debug(f"{image_name} 未被 Markdown 引用，跳过")
             continue
         start, end = match.span()
-        pre_context = md_content[max(0, start - 100):start]
-        post_context = md_content[end:min(end + 100, len(md_content))]
+        pre_context = _extract_context(md_content, start, CONTEXT_WINDOW, pre=True)
+        post_context = _extract_context(md_content, end, CONTEXT_WINDOW, pre=False)
         image_context.append((image_name, str(image_obj), (pre_context, post_context)))
     return image_context
 
@@ -64,7 +85,6 @@ def summarize_images(
     chain = vision_client | StrOutputParser()
     summaries: dict[str, str] = {}
     for image_name, image_path_str, image_context in image_content:
-        apply_api_rate_limit()  # 视觉模型有每分钟调用上限
         prompt_text = load_prompt("image_summary", root_folder=stem, image_content=image_context)
         image_base64 = base64.b64encode(Path(image_path_str).read_bytes()).decode(encoding="utf-8")
         message = HumanMessage(content=[
@@ -105,7 +125,7 @@ def upload_images_and_replace(
     # 3. 替换 ![](xxx) 为 ![图片说明](公网地址)
     for image_name, image_url in image_urls.items():
         summary = summaries_images.get(image_name) or ""
-        pattern = re.compile(r"\!\[.*?\]\(.*?" + re.escape(image_name) + r".*?\)")
+        pattern = _image_ref_pattern(image_name)
         md_content = pattern.sub(lambda _: f"![{summary}]({image_url})", md_content)
     return md_content
 
