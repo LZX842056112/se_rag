@@ -77,19 +77,48 @@ def prepare_item_name_collection() -> None:
     logger.info(f"已创建主体名集合：{collection_name}")
 
 
+def _extract_insert_ids(insert_result) -> list:
+    """从 Milvus ``insert`` 返回值中取回自增主键（字段名跨版本不同）。"""
+    if not isinstance(insert_result, dict):
+        return []
+    ids = insert_result.get("ids") or insert_result.get("primary_keys") or []
+    return list(ids)
+
+
 @step_log("upsert_item_name")
 def upsert_item_name(item_name: str, file_title: str) -> None:
-    """按 ``file_title`` 幂等写入主体名（先删旧记录再插入）。"""
+    """按 ``file_title`` 幂等写入主体名。
+
+    ``kb_item_names`` 是 ``auto_id=True`` 的自增主键集合，**无法 upsert**，因此采用
+    「先插入新记录并取回自增 pk，再删除该 ``file_title`` 下 pk 不等于新 pk 的旧记录」。
+    即使中途崩溃也只会留下重复行（查询侧 ``catalog`` 按归一化名去重），不会丢失主体名——
+    历史实现的「先删后插」在删除成功、插入失败时会让该文档彻底没有主体名。
+    """
     result = llm_providers.generate_embeddings([item_name])
     client = milvus_gateway.milvus_client
     collection_name = milvus_gateway.item_name_collection_name
-    client.delete(collection_name=collection_name, filter=eq_expr("file_title", file_title))
-    client.insert(collection_name=collection_name, data=[{
+    row = {
         "file_title": file_title,
         "item_name": item_name,
         "dense_vector": result["dense"][0],
         "sparse_vector": result["sparse"][0],
-    }])
+    }
+
+    insert_result = client.insert(collection_name=collection_name, data=[row])
+    new_pks = _extract_insert_ids(insert_result)
+
+    if not new_pks:
+        # 极少数驱动不返回 ids：退回「先删后插」并显式告警，保证最终仍只有一条记录
+        logger.warning("主体名写入未取回自增 pk，回退为先删后插")
+        client.delete(collection_name=collection_name, filter=eq_expr("file_title", file_title))
+        client.insert(collection_name=collection_name, data=[row])
+    else:
+        # pk 为 INT64，整型字面量无需转义
+        pk_literals = ", ".join(str(int(pk)) for pk in new_pks)
+        client.delete(
+            collection_name=collection_name,
+            filter=f"{eq_expr('file_title', file_title)} and pk not in [{pk_literals}]",
+        )
     logger.info(f"主体名索引已更新：{item_name}（file_title={file_title}）")
 
 

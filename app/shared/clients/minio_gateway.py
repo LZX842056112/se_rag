@@ -105,6 +105,50 @@ class MinioGateway:
         except Exception as exc:  # noqa: BLE001
             logger.warning(f"清理 MinIO 旧图片失败（忽略继续）：{exc}")
 
+    def _list_object_names(self, stem: str) -> list[str]:
+        """列出某文档目录下的对象名；失败返回空列表。"""
+        try:
+            objects = self.minio_client.list_objects(
+                bucket_name=self.bucket_name,
+                prefix=self.image_prefix(stem),
+                recursive=True,
+            )
+            return [obj.object_name for obj in objects]
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"列举 MinIO 对象失败（忽略继续）：{exc}")
+            return []
+
+    def remove_stale_images(self, stem: str, keep_names: set[str]) -> int:
+        """删除该文档目录下「不在 ``keep_names`` 内」的旧对象，返回删除条数。
+
+        与 ``remove_images`` 的区别：后者是「先清空再上传」，上传失败会让图片全部丢失。
+        本方法配合「先上传新图、后清理残留」的顺序使用，只清理本次未再引用的对象，
+        因此单张上传失败不会导致已有图片消失。
+        """
+        prefix = self.image_prefix(stem)
+        stale: list[str] = []
+        for name in self._list_object_names(stem):
+            rest = name[len(prefix):] if name.startswith(prefix) else name
+            if rest not in keep_names:
+                stale.append(name)
+        if not stale:
+            return 0
+        try:
+            errors = self.minio_client.remove_objects(
+                self.bucket_name,
+                delete_object_list=[DeleteObject(name) for name in stale],
+            )
+            for error in errors:
+                logger.warning(f"MinIO 删除对象失败：{error}")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"清理 MinIO 残留图片失败（忽略继续）：{exc}")
+            return 0
+        return len(stale)
+
+    def count_images(self, stem: str) -> int:
+        """统计某文档目录下的对象数（导入后对账观察用）。"""
+        return len(self._list_object_names(stem))
+
     def upload_image(self, stem: str, image_name: str, file_path: str, content_type: str) -> str:
         """上传单张图片，返回访问地址。"""
         self.minio_client.fput_object(

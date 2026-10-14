@@ -16,12 +16,15 @@ from app.rag.import_.config import (
     MINERU_MODEL_VERSION,
     MINERU_POLL_INTERVAL_SECONDS,
     MINERU_POLL_TIMEOUT_SECONDS,
+    MINERU_REQUEST_TIMEOUT_SECONDS,
+    MINERU_UPLOAD_TIMEOUT_SECONDS,
     PDF_PARSE_SERVICE_LOCAL_DIR,
 )
 from app.shared.config import settings
 from app.shared.runtime.logger import logger, step_log
 from app.shared.utils.paths import PROJECT_ROOT
 from app.shared.utils.require import require_state_str
+from app.shared.utils.retry import retry_call
 
 
 def _headers() -> dict[str, str]:
@@ -57,11 +60,26 @@ def validate_pdf_paths(state: ImportGraphState) -> tuple[Path, Path]:
 def upload_pdf_and_poll(pdf_path_obj: Path) -> str:
     """上传 PDF 到 MinerU 并轮询解析结果，返回结果 zip 的下载地址。"""
     base_url = settings.mineru.base_url
+
     # 1. 申请批量上传的预签名地址
-    response = requests.post(
-        url=f"{base_url}/file-urls/batch",
-        headers=_headers(),
-        json={"files": [{"name": pdf_path_obj.name}], "model_version": MINERU_MODEL_VERSION},
+    #    网络类失败（超时/连接错误）退避重试；4xx 属确定性失败，转成 RuntimeError 不重试。
+    def _request_upload_urls():
+        resp = requests.post(
+            url=f"{base_url}/file-urls/batch",
+            headers=_headers(),
+            json={"files": [{"name": pdf_path_obj.name}], "model_version": MINERU_MODEL_VERSION},
+            timeout=MINERU_REQUEST_TIMEOUT_SECONDS,
+        )
+        if resp.status_code >= 500:
+            # 转成 OSError 子类，交给 retry_call 重试
+            raise ConnectionError(f"MinerU 申请解析返回 HTTP {resp.status_code}")
+        return resp
+
+    response = retry_call(
+        _request_upload_urls,
+        attempts=settings.import_.max_retry_attempts,
+        backoff=settings.import_.retry_backoff_seconds,
+        label="MinerU 申请上传地址",
     )
     if response.status_code != 200:
         raise RuntimeError(f"申请 MinerU 解析失败，HTTP 状态码：{response.status_code}")
@@ -82,9 +100,25 @@ def upload_pdf_and_poll(pdf_path_obj: Path) -> str:
     # 2. 向预签名地址上传 PDF
     # 预签名地址对请求头敏感，故使用 trust_env=False 的会话，避免系统代理注入额外头
     if file_upload_urls:
-        with requests.Session() as session:
-            session.trust_env = False
-            upload_response = session.put(url=file_upload_urls[0], data=pdf_path_obj.read_bytes())
+
+        def _upload_pdf():
+            with requests.Session() as session:
+                session.trust_env = False
+                resp = session.put(
+                    url=file_upload_urls[0],
+                    data=pdf_path_obj.read_bytes(),
+                    timeout=MINERU_UPLOAD_TIMEOUT_SECONDS,
+                )
+            if resp.status_code >= 500:
+                raise ConnectionError(f"上传 PDF 到 MinerU 返回 HTTP {resp.status_code}")
+            return resp
+
+        upload_response = retry_call(
+            _upload_pdf,
+            attempts=settings.import_.max_retry_attempts,
+            backoff=settings.import_.retry_backoff_seconds,
+            label="MinerU 上传 PDF",
+        )
         if upload_response.status_code != 200:
             raise RuntimeError(f"上传 PDF 到 MinerU 失败，HTTP 状态码：{upload_response.status_code}")
 
@@ -96,7 +130,9 @@ def upload_pdf_and_poll(pdf_path_obj: Path) -> str:
             raise TimeoutError(f"MinerU 解析超时（{MINERU_POLL_TIMEOUT_SECONDS}s），batch_id={batch_id}")
 
         try:
-            poll_result = requests.get(result_url, headers=_headers())
+            poll_result = requests.get(
+                result_url, headers=_headers(), timeout=MINERU_REQUEST_TIMEOUT_SECONDS
+            )
         except Exception as exc:  # noqa: BLE001 - 网络抖动按重试处理
             logger.warning(f"MinerU 轮询网络异常（稍后重试）：{exc}")
             time.sleep(MINERU_POLL_INTERVAL_SECONDS)
@@ -161,10 +197,37 @@ def download_and_extract_markdown(zip_url: str, local_dir_obj: Path, file_name: 
     return target
 
 
+def _reuse_existing_markdown(local_dir_obj: Path, pdf_path_obj: Path) -> Path | None:
+    """断点续传的轻量实现：已有「比 PDF 更新」的解析产物时直接复用。
+
+    只做 mtime 比较，避免复用上一次导入残留的旧 Markdown。失败返回 ``None``（走正常解析）。
+    """
+    candidate = local_dir_obj / f"{pdf_path_obj.stem}.md"
+    if not candidate.exists():
+        return None
+    try:
+        if candidate.stat().st_mtime < pdf_path_obj.stat().st_mtime:
+            return None
+    except OSError:
+        return None
+    return candidate
+
+
 @step_log("parse_pdf_to_markdown")
 def parse_pdf_to_markdown(state: ImportGraphState) -> ImportGraphState:
-    """PDF 解析服务入口：校验 → MinerU 解析 → 下载解压 → 回写 ``md_path``。"""
+    """PDF 解析服务入口：校验 →（可复用既有产物）→ MinerU 解析 → 下载解压 → 回写 ``md_path``。
+
+    MinerU 是最贵的一步（外部服务 + 最长 600s 轮询），因此失败重跑时优先复用既有产物。
+    """
     pdf_path_obj, local_dir_obj = validate_pdf_paths(state)
+
+    if settings.import_.checkpoint_enabled:
+        reused = _reuse_existing_markdown(local_dir_obj, pdf_path_obj)
+        if reused is not None:
+            logger.warning(f"复用既有 MinerU 解析产物（跳过云端解析）：{reused}")
+            state["md_path"] = str(reused)
+            return state
+
     zip_url = upload_pdf_and_poll(pdf_path_obj)
     md_path_obj = download_and_extract_markdown(zip_url, local_dir_obj, pdf_path_obj.stem)
     state["md_path"] = str(md_path_obj)

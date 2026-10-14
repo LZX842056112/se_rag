@@ -42,6 +42,9 @@ def get_llm_client(model: str | None = None, json_mode: bool = False) -> ChatOpe
             base_url=settings.llm.base_url,
             extra_body=extra_body,
             model_kwargs=model_kwargs,
+            # 单次调用超时与 SDK 内建重试：模型服务挂起时不再无限等待
+            timeout=settings.import_.llm_timeout_seconds,
+            max_retries=settings.import_.llm_max_retries,
         )
     except LangChainException as exc:
         raise RuntimeError(f"模型【{target_model}】初始化失败（LangChain 层）：{exc}") from exc

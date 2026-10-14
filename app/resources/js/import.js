@@ -6,9 +6,31 @@
 
   App.configure({ fallbackPort: 8000 });
 
+  // 与服务端 IMPORT_MAX_UPLOAD_MB 默认值保持一致；本地先拦一次，避免白传超大文件
+  const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
+
   const dropZone = document.getElementById('dropZone');
   const fileInput = document.getElementById('fileInput');
   const fileList = document.getElementById('fileList');
+  const tokenInput = document.getElementById('importToken');
+  const saveTokenBtn = document.getElementById('saveToken');
+
+  // 导入令牌（IMPORT_ADMIN_TOKEN）：仅当前标签页会话有效，与审批令牌相互独立
+  tokenInput.value = App.getImportToken();
+  saveTokenBtn.addEventListener('click', () => {
+    App.setImportToken(tokenInput.value);
+    tokenInput.classList.remove('attention');
+    App.toast('导入令牌已保存');
+  });
+
+  function currentToken() {
+    return App.getImportToken();
+  }
+
+  function highlightTokenInput() {
+    tokenInput.classList.add('attention');
+    tokenInput.focus();
+  }
 
   dropZone.addEventListener('click', () => fileInput.click());
   dropZone.addEventListener('dragover', (e) => {
@@ -88,7 +110,7 @@
     const stop = (interval) => { clearInterval(interval); pollTimers.delete(interval); };
     const interval = setInterval(async () => {
       try {
-        const data = await App.fetchJson(App.PATHS.taskStatus(taskId));
+        const data = await App.fetchJson(App.PATHS.taskStatus(taskId), { token: currentToken() });
         renderLogs(itemEl, data.done_list, data.running_list);
         if (data.status === 'completed') {
           setBadge(itemEl, '已完成', 'status-completed');
@@ -99,14 +121,29 @@
           setBadge(itemEl, '处理中...', 'status-processing');
         } else if (data.status === 'failed') {
           setBadge(itemEl, '失败', 'status-error');
+          if (data.error_code) {
+            const logListEl = itemEl.querySelector('.log-list');
+            logListEl.innerHTML = '';
+            logListEl.appendChild(App.create('li', null, data.message || data.error_code));
+            itemEl.querySelector('.log-details').open = true;
+          }
           stop(interval);
         }
       } catch (e) {
         console.error('轮询任务状态失败', e);
+        if (e && (e.status === 401 || e.status === 503)) highlightTokenInput();
         stop(interval);
       }
     }, 2000);
     pollTimers.add(interval);
+  }
+
+  function failItem(itemEl, logSummary, logListEl, logDetails, message) {
+    setBadge(itemEl, '失败', 'status-error');
+    logSummary.textContent = '日志（失败，点击展开）';
+    logListEl.innerHTML = '';
+    logListEl.appendChild(App.create('li', null, message));
+    logDetails.open = true;
   }
 
   async function uploadFile(file) {
@@ -131,12 +168,23 @@
     const logDetails = itemEl.querySelector('.log-details');
     const logSummary = itemEl.querySelector('.log-details summary');
     const logListEl = itemEl.querySelector('.log-list');
+
+    // 本地先做大小校验：避免把超大文件白传到服务端再被 413 拒绝
+    if (file.size > MAX_UPLOAD_BYTES) {
+      failItem(itemEl, logSummary, logListEl, logDetails,
+        `文件过大（上限 ${Math.round(MAX_UPLOAD_BYTES / 1024 / 1024)}MB）`);
+      refreshEmptyHint();
+      return;
+    }
+
     const formData = new FormData();
     formData.append('files', file);
 
     try {
       progressContainer.style.display = 'block';
-      const result = await App.fetchJson(App.PATHS.upload, { method: 'POST', body: formData });
+      const result = await App.fetchJson(App.PATHS.upload, {
+        method: 'POST', body: formData, token: currentToken()
+      });
       const ids = Array.isArray(result.task_ids) ? result.task_ids : [];
       if (!ids.length) throw new Error('上传接口未返回 task_id');
       setBadge(itemEl, '处理中...', 'status-processing');
@@ -144,11 +192,9 @@
     } catch (error) {
       // 业务拒绝（如 422 仅支持 md/pdf）属预期路径，用 warn 避免污染错误监控
       console.warn(error);
-      setBadge(itemEl, '失败', 'status-error');
-      logSummary.textContent = '日志（失败，点击展开）';
-      logListEl.innerHTML = '';
-      logListEl.appendChild(App.create('li', null, (error && error.message) ? error.message : String(error)));
-      logDetails.open = true;
+      if (error && (error.status === 401 || error.status === 503)) highlightTokenInput();
+      failItem(itemEl, logSummary, logListEl, logDetails,
+        (error && error.message) ? error.message : String(error));
     } finally {
       refreshEmptyHint();
     }

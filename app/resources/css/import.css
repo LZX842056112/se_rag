@@ -72,3 +72,29 @@ body{
 .log-details summary{cursor:pointer;user-select:none;color:var(--muted)}
 .log-list{margin:6px 0 0 16px;padding:0}
 .log-list li{margin:2px 0;line-height:1.4}
+
+/* 导入令牌输入（IMPORT_ADMIN_TOKEN）：鉴权失败时用 attention 类高亮 */
+.token-input{
+  width:210px;
+  padding:6px 10px;
+  border:1px solid var(--border);
+  border-radius:6px;
+  font-size:12px;
+  font-family:var(--font-base);
+  color:var(--text);
+  background:var(--panel);
+  outline:none;
+}
+.token-input:focus{border-color:var(--brand)}
+.token-input.attention{border-color:var(--danger)}
+.token-save{
+  padding:6px 12px;
+  border:1px solid var(--border);
+  border-radius:6px;
+  font-size:12px;
+  font-family:var(--font-base);
+  color:var(--muted);
+  background:var(--panel);
+  cursor:pointer;
+}
+.token-save:hover{border-color:var(--brand);color:var(--brand)}

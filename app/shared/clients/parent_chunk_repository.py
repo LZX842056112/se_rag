@@ -36,15 +36,43 @@ class ParentChunkRepository:
 
     @step_log("replace_document_parents")
     def replace_document_parents(self, doc_id: str, parents: list[dict[str, Any]]) -> int:
-        """覆盖某文档的全部父块，返回写入条数。"""
+        """覆盖某文档的全部父块，返回写入条数。
+
+        写入顺序为「先按 ``parent_id`` upsert 新数据，再清理本次未产出的旧父块」：
+        - 历史实现是 ``delete_many`` → ``insert_many``，删除成功但插入失败会让该文档
+          的章节背景全部消失（父块虽有降级保护，但会持续缺失）；
+        - ``parent_id`` 上有唯一索引（见 ``mongo.ensure_indexes``），因此不能盲目
+          insert-then-delete，必须按 ``parent_id`` 做 upsert 覆盖。
+        """
         if not doc_id:
             raise ValueError("doc_id 为空，无法写入父块")
         collection = self._collection
-        collection.delete_many({"doc_id": doc_id})
+
         if not parents:
+            collection.delete_many({"doc_id": doc_id})
             return 0
-        collection.insert_many([dict(parent) for parent in parents])
+
+        new_ids = [str(parent.get("parent_id")) for parent in parents if parent.get("parent_id")]
+        # 逐个 replace_one（upsert）而不是 bulk_write：本仓离线单测用 mongomock，
+        # 其 BulkOperationBuilder 不接受当前 pymongo 传入的 sort 参数（TypeError）。
+        # 父块数量为「章节数」量级，逐条写入的往返成本可接受。
+        for parent in parents:
+            parent_id = parent.get("parent_id")
+            if not parent_id:
+                continue
+            collection.replace_one({"parent_id": parent_id}, dict(parent), upsert=True)
+
+        # 清理本次未再产出的旧父块（章节被删除/重命名时产生）
+        if new_ids:
+            collection.delete_many({"doc_id": doc_id, "parent_id": {"$nin": new_ids}})
         return len(parents)
+
+    @step_log("count_document_parents")
+    def count_by_doc(self, doc_id: str) -> int:
+        """统计某文档的父块条数（导入后对账用）。"""
+        if not doc_id:
+            return 0
+        return int(self._collection.count_documents({"doc_id": doc_id}))
 
     @step_log("fetch_parents")
     def fetch_by_ids(self, parent_ids: list[str]) -> dict[str, dict[str, Any]]:

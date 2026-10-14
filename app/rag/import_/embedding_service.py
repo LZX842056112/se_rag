@@ -6,8 +6,10 @@ from typing import Any
 from app.process.import_.agent.state import ImportGraphState
 from app.rag.import_.config import EMBEDDING_BATCH_SIZE
 from app.rag.import_.inputs import load_chunks, load_subject
+from app.shared.config import settings
 from app.shared.models import llm_providers
 from app.shared.runtime.logger import logger, step_log
+from app.shared.utils.retry import retry_call
 
 
 @step_log("batch_generate_embeddings")
@@ -24,7 +26,13 @@ def batch_generate_embeddings(
     for start in range(0, length, batch_size):
         current_chunks = chunks[start:start + batch_size]
         texts = [f"主体:{item_name},内容:{chunk.get('content')}" for chunk in current_chunks]
-        result = llm_providers.generate_embeddings(texts)
+        # BGE-M3 为本地模型，无网络往返；此处仅对瞬时异常做轻量重试
+        result = retry_call(
+            lambda: llm_providers.generate_embeddings(texts),
+            attempts=settings.import_.max_retry_attempts,
+            backoff=settings.import_.retry_backoff_seconds,
+            label="向量生成",
+        )
         for index, chunk in enumerate(current_chunks):
             chunk["dense_vector"] = result["dense"][index]
             chunk["sparse_vector"] = result["sparse"][index]

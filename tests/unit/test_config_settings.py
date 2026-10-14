@@ -29,9 +29,29 @@ def test_evolution_collection_has_single_source():
 
 
 def test_settings_domains_present():
-    for name in ("llm", "embedding", "reranker", "milvus", "minio", "mineru", "mcp", "mongo", "api", "evolution", "runtime"):
+    for name in ("llm", "embedding", "reranker", "milvus", "minio", "mineru", "mcp", "mongo", "api", "import_", "evolution", "runtime"):
         assert getattr(settings, name) is not None
 
 
 def test_task_state_ttl_is_positive():
     assert settings.runtime.task_state_ttl_seconds > 0
+
+
+def test_import_settings_have_sane_defaults():
+    """导入加固参数必须有可用的默认值（避免漏配导致功能不可用）。"""
+    import_ = settings.import_
+    assert import_.max_upload_mb > 0
+    assert import_.milvus_insert_batch_size > 0
+    assert import_.image_summary_max_workers > 0
+    assert import_.llm_timeout_seconds > 0
+    assert import_.llm_max_retries >= 0
+    assert import_.max_retry_attempts >= 1
+    assert import_.retry_backoff_seconds >= 0
+    assert import_.max_concurrent_tasks >= 1
+    assert import_.acquire_timeout_seconds > 0
+
+
+def test_import_admin_token_defaults_to_empty():
+    """默认空 token → 上传接口 fail-closed（503），防止漏配即裸奔。"""
+    assert isinstance(settings.import_.admin_token, str)
+

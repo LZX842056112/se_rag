@@ -151,6 +151,36 @@ class RuntimeSettings:
 
 
 @dataclass
+class ImportSettings:
+    """导入链路的鉴权、限额、重试与写入参数。
+
+    属性名用 ``import_``（``import`` 是 Python 关键字），业务侧访问 ``settings.import_``。
+    """
+
+    # 上传/状态查询鉴权（请求头 X-Internal-Token）；为空时 fail-closed（503）
+    admin_token: str
+    # 单文件上传大小上限（MB）
+    max_upload_mb: int
+    # Milvus 单次写入分片大小（条）
+    milvus_insert_batch_size: int
+    # 图片视觉摘要并发上限
+    image_summary_max_workers: int
+    # 对话/视觉模型单次调用超时（秒）与 SDK 内建重试次数
+    llm_timeout_seconds: int
+    llm_max_retries: int
+    # 导入任务的有界重试次数与退避基准（秒）
+    max_retry_attempts: int
+    retry_backoff_seconds: float
+    # 进程内同时执行的导入任务上限，以及等待名额的最长时间（秒）
+    max_concurrent_tasks: int
+    acquire_timeout_seconds: int
+    # 导入完成后的跨存储对账（只记日志，不阻断）
+    reconcile_enabled: bool
+    # 复用既有 MinerU 解析产物（断点续传的轻量实现）
+    checkpoint_enabled: bool
+
+
+@dataclass
 class Settings:
     """聚合全部子配置，业务模块通过 ``settings.<domain>`` 访问。"""
 
@@ -163,6 +193,7 @@ class Settings:
     mcp: McpSettings
     mongo: MongoSettings
     api: ApiSettings
+    import_: ImportSettings
     evolution: EvolutionSettings
     runtime: RuntimeSettings
 
@@ -232,6 +263,20 @@ def _build_settings() -> Settings:
             cors_origins=tuple(
                 item.strip() for item in env_str("CORS_ORIGINS", "*").split(",") if item.strip()
             ),
+        ),
+        import_=ImportSettings(
+            admin_token=env_str("IMPORT_ADMIN_TOKEN", "evoadmin_15946edbb1ed4289ae8296dbaafa57b5aad9bf25bd72a51c"),
+            max_upload_mb=env_int("IMPORT_MAX_UPLOAD_MB", 50),
+            milvus_insert_batch_size=env_int("MILVUS_INSERT_BATCH_SIZE", 500),
+            image_summary_max_workers=env_int("IMAGE_SUMMARY_MAX_WORKERS", 4),
+            llm_timeout_seconds=env_int("LLM_TIMEOUT_SECONDS", 60),
+            llm_max_retries=env_int("LLM_MAX_RETRIES", 2),
+            max_retry_attempts=env_int("IMPORT_MAX_RETRY_ATTEMPTS", 3),
+            retry_backoff_seconds=env_float("IMPORT_RETRY_BACKOFF_SECONDS", 1.0),
+            max_concurrent_tasks=env_int("IMPORT_MAX_CONCURRENT_TASKS", 2),
+            acquire_timeout_seconds=env_int("IMPORT_ACQUIRE_TIMEOUT_SECONDS", 600),
+            reconcile_enabled=env_bool("IMPORT_RECONCILE_ENABLED", True),
+            checkpoint_enabled=env_bool("IMPORT_CHECKPOINT_ENABLED", True),
         ),
         evolution=EvolutionSettings(
             enabled=env_bool("EVOLUTION_ENABLED", False),

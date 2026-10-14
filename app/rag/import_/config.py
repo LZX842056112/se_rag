@@ -1,14 +1,25 @@
-"""导入链路参数：MinerU 交互与文本切分策略。"""
+"""导入链路参数：MinerU 交互与文本切分策略。
+
+调优类常量支持 ``.env`` 覆盖（沿用 ``app/rag/query/config.py`` 的既有先例）；
+默认值与历史实现完全一致，因此覆盖与否不改变既有行为。
+密钥类配置不走这里，统一由 ``app/shared/config/settings.py`` 提供。
+"""
 from __future__ import annotations
+
+from app.shared.config.common import env_int
 
 # MinerU 模型版本（pipeline / vlm 等）
 MINERU_MODEL_VERSION = "vlm"
 # MinerU 任务轮询最长等待时间（秒），超过判定失败
-MINERU_POLL_TIMEOUT_SECONDS = 600
+MINERU_POLL_TIMEOUT_SECONDS = env_int("MINERU_POLL_TIMEOUT_SECONDS", 600)
 # MinerU 任务轮询间隔（秒）
-MINERU_POLL_INTERVAL_SECONDS = 3
+MINERU_POLL_INTERVAL_SECONDS = env_int("MINERU_POLL_INTERVAL_SECONDS", 3)
 # 解析结果 zip 下载超时（秒）
-MINERU_DOWNLOAD_TIMEOUT_SECONDS = 60
+MINERU_DOWNLOAD_TIMEOUT_SECONDS = env_int("MINERU_DOWNLOAD_TIMEOUT_SECONDS", 60)
+# 申请上传地址 / 轮询状态这类短请求的单次超时（秒）
+MINERU_REQUEST_TIMEOUT_SECONDS = env_int("MINERU_REQUEST_TIMEOUT_SECONDS", 30)
+# 向预签名地址上传 PDF 的超时（秒）：大文件需要更长时间
+MINERU_UPLOAD_TIMEOUT_SECONDS = env_int("MINERU_UPLOAD_TIMEOUT_SECONDS", 120)
 
 # local_dir 缺省值所对应的输出目录名
 PDF_PARSE_SERVICE_LOCAL_DIR = "output"
@@ -21,14 +32,14 @@ PDF_PARSE_SERVICE_LOCAL_DIR = "output"
 # CHUNK_MAX_SIZE 硬上限：只有**单个**原子块超过它才从中间切开，合并结果也不得超过它。
 # 单个原子块落在 [CHUNK_SIZE, CHUNK_MAX_SIZE] 之间时不切——它本身已是语义完整的单元，
 # 按字符切开只会制造纯重叠的碎片尾巴。
-CHUNK_MAX_SIZE = 1000
+CHUNK_MAX_SIZE = env_int("CHUNK_MAX_SIZE", 1000)
 # 单块目标长度
-CHUNK_SIZE = 600
+CHUNK_SIZE = env_int("CHUNK_SIZE", 600)
 # 相邻块重叠长度，仅在「单个原子块必须从中间切开」时生效
-CHUNK_OVERLAP = 50
+CHUNK_OVERLAP = env_int("CHUNK_OVERLAP", 50)
 # 短碎片阈值：同章节内正文低于该长度的分块尝试向后合并（合并上限 CHUNK_MAX_SIZE）
-CHUNK_MIN = 400
+CHUNK_MIN = env_int("CHUNK_MIN", 400)
 # 主体名识别时截取前 N 个切片作为上下文
-CHUNKS_SPLIT_TOP_NUMBER = 10
+CHUNKS_SPLIT_TOP_NUMBER = env_int("CHUNKS_SPLIT_TOP_NUMBER", 10)
 # 向量化批次大小：每批处理 N 条切片，避免显存溢出
-EMBEDDING_BATCH_SIZE = 6
+EMBEDDING_BATCH_SIZE = env_int("EMBEDDING_BATCH_SIZE", 6)

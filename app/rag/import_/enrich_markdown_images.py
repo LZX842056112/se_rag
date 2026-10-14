@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import re
+from concurrent.futures import ThreadPoolExecutor
 from mimetypes import guess_type
 from pathlib import Path
 
@@ -12,10 +13,12 @@ from langchain_core.output_parsers import StrOutputParser
 from app.process.import_.agent.state import ImportGraphState
 from app.rag.config import SUPPORTED_IMAGE_EXTENSIONS
 from app.shared.clients.minio_gateway import minio_gateway
+from app.shared.config import settings
 from app.shared.models import llm_providers
 from app.shared.runtime.logger import logger, step_log
 from app.shared.runtime.prompts import load_prompt
 from app.shared.utils.require import require_state_str
+from app.shared.utils.retry import retry_call
 
 # 图片上下文窗口（字符数）：取图片引用前后的字符片段作为视觉模型的语义线索
 CONTEXT_WINDOW = 200
@@ -80,19 +83,54 @@ def summarize_images(
     image_content: list[tuple[str, str, tuple[str, str]]],
     stem: str,
 ) -> dict[str, str]:
-    """调用视觉模型为每张图片生成说明，返回 ``{图片名: 说明}``。"""
+    """并发调用视觉模型为每张图片生成说明，返回 ``{图片名: 说明}``。
+
+    串行调用在手册（几十张图）下会显著拖慢导入，故用有界线程池并发；整批失败时回退
+    串行并逐张容错，保持「单张图片失败不阻断其余图片」的既有语义。
+    """
+    if not image_content:
+        return {}
+
     vision_client = llm_providers.vision_chat()
     chain = vision_client | StrOutputParser()
-    summaries: dict[str, str] = {}
-    for image_name, image_path_str, image_context in image_content:
+
+    def _summarize_one(item: tuple[str, str, tuple[str, str]]) -> tuple[str, str]:
+        image_name, image_path_str, image_context = item
         prompt_text = load_prompt("image_summary", root_folder=stem, image_content=image_context)
         image_base64 = base64.b64encode(Path(image_path_str).read_bytes()).decode(encoding="utf-8")
         message = HumanMessage(content=[
             {"type": "text", "text": prompt_text},
             {"type": "image_url", "image_url": {"url": f"data:{guess_type(image_name)[0]};base64,{image_base64}"}},
         ])
-        summary = chain.invoke([message])
-        summaries[image_name] = summary
+        summary = retry_call(
+            lambda: chain.invoke([message]),
+            attempts=settings.import_.max_retry_attempts,
+            backoff=settings.import_.retry_backoff_seconds,
+            label=f"图片摘要[{image_name}]",
+        )
+        return image_name, summary
+
+    max_workers = min(max(1, settings.import_.image_summary_max_workers), len(image_content))
+    summaries: dict[str, str] = {}
+
+    if max_workers > 1:
+        try:
+            with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                for image_name, summary in pool.map(_summarize_one, image_content):
+                    summaries[image_name] = summary
+        except Exception as exc:  # noqa: BLE001 - 并发失败回退串行，已产出的结果作废重算
+            logger.warning(f"图片摘要并发失败，回退串行：{exc}")
+            summaries = {}
+
+    if not summaries:
+        for item in image_content:
+            try:
+                image_name, summary = _summarize_one(item)
+                summaries[image_name] = summary
+            except Exception as exc:  # noqa: BLE001 - 单张失败不阻断其余图片
+                logger.warning(f"图片摘要失败（跳过 {item[0]}）：{exc}")
+
+    for image_name in summaries:
         logger.info(f"图片识别完成：{image_name}")
     return summaries
 
@@ -105,10 +143,8 @@ def upload_images_and_replace(
     stem: str,
 ) -> str:
     """上传图片到 MinIO 并把 Markdown 中的图片引用替换为带说明的公网地址。"""
-    # 1. 先清理该文档目录下的旧图片（重复导入时避免残留）
-    minio_gateway.remove_images(stem)
-
-    # 2. 逐张上传；单张失败不影响整体
+    # 1. 逐张上传；同名对象键直接覆盖，**不再先清空目录**——
+    #    历史实现是「先 remove_images 再上传」，上传失败会让该文档的图片全部丢失。
     image_urls: dict[str, str] = {}
     for image_name, image_path_str, _ in image_content:
         try:
@@ -121,6 +157,12 @@ def upload_images_and_replace(
     if not image_urls:
         logger.warning("图片全部上传失败，保留原始 Markdown")
         return md_content
+
+    # 2. 上传成功后再清理「本次未再引用」的旧对象（章节删图时产生）
+    keep_names = {name for name, _, _ in image_content}
+    removed = minio_gateway.remove_stale_images(stem, keep_names)
+    if removed:
+        logger.info(f"已清理 {stem} 的残留图片 {removed} 个")
 
     # 3. 替换 ![](xxx) 为 ![图片说明](公网地址)
     for image_name, image_url in image_urls.items():

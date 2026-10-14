@@ -16,11 +16,14 @@ from pymilvus import DataType
 
 from app.rag.import_.ids import truncate_utf8
 from app.rag.import_.parent_index_service import index_parent_chunks
+from app.rag.import_.reconcile import reconcile_after_import
 from app.shared.clients.milvus_gateway import (
     eq_expr,
+    in_expr,
     milvus_gateway,
     register_vector_fields_and_indexes,
 )
+from app.shared.config import settings
 from app.shared.runtime.logger import logger, step_log
 from app.shared.utils.require import fail, require_state_list
 
@@ -43,6 +46,11 @@ CHUNK_SCALAR_DEFAULTS: dict[str, int] = {"part": 1, "seq": 0, "page": 0}
 
 # 向量字段（由 register_vector_fields_and_indexes 统一注册）
 CHUNK_VECTOR_FIELDS: tuple[str, ...] = ("dense_vector", "sparse_vector")
+
+# 残留旧块对账：单次查询上限（按 file_title 过滤后的条数远小于该值）
+CHUNK_RECONCILE_LIMIT = 16384
+# 删除残留旧块时的分批大小
+CHUNK_DELETE_BATCH_SIZE = 500
 
 
 @step_log("prepare_chunks_collection")
@@ -97,20 +105,85 @@ def _align_to_schema(rows: list[dict]) -> list[dict]:
     return aligned
 
 
+@step_log("batch_upsert_chunks")
+def _batch_upsert(client, collection_name: str, rows: list[dict], batch_size: int) -> int:
+    """分批 upsert，返回累计写入条数。
+
+    ``chunk_id`` 是确定性哈希主键（``auto_id=False``），因此 upsert 是幂等的：
+    同一文件重复导入覆盖同 id，文档新增章节时新 id 被插入。
+    """
+    total = 0
+    for start in range(0, len(rows), batch_size):
+        batch = rows[start:start + batch_size]
+        result = client.upsert(collection_name=collection_name, data=batch)
+        # Milvus upsert 返回 upsert_count；部分版本沿用 insert_count
+        total += int(result.get("upsert_count", result.get("insert_count", 0)))
+    return total
+
+
+@step_log("delete_stale_chunks")
+def _delete_stale_chunks(client, collection_name: str, file_title: str, new_ids: set[str]) -> int:
+    """删除该文档下「本次未再产出」的旧块，返回删除条数。
+
+    为什么必须保留这一步：``chunk_id`` 只编码结构（``doc_key#heading_path#occurrence#part``），
+    文档增删章节 / 重命名标题 / 章节内分块数变化时旧 id 不再被产出，纯 upsert 会让它们永久残留。
+
+    查询失败只告警，**绝不回退到「先删后插」**——那会重新引入「删成功、插失败即丢数据」的空窗。
+    """
+    try:
+        existing = client.query(
+            collection_name=collection_name,
+            filter=eq_expr("file_title", file_title),
+            output_fields=["chunk_id"],
+            limit=CHUNK_RECONCILE_LIMIT,
+        )
+    except Exception as exc:  # noqa: BLE001 - 清理失败不得危及已写入的新数据
+        logger.warning(f"残留旧块对账查询失败（跳过清理，新数据已安全写入）：{exc}")
+        return 0
+
+    stale = [
+        str(row.get("chunk_id"))
+        for row in (existing or [])
+        if row.get("chunk_id") and str(row.get("chunk_id")) not in new_ids
+    ]
+    for start in range(0, len(stale), CHUNK_DELETE_BATCH_SIZE):
+        batch = stale[start:start + CHUNK_DELETE_BATCH_SIZE]
+        client.delete(collection_name=collection_name, filter=in_expr("chunk_id", batch))
+    return len(stale)
+
+
 @step_log("index_chunks")
 def index_chunks(state: dict) -> dict:
-    """入库服务入口：同 ``file_title`` 重复导入时先删旧数据再写新数据（幂等覆盖）。"""
+    """入库服务入口：**先写新数据、再清理本次未产出的旧块**（避免数据空窗）。
+
+    历史实现是 ``delete(file_title)`` → ``insert``：删除成功但插入失败会让该文档
+    从知识库中彻底消失。现改为 upsert + 残留清理，任何时刻集合内都至少有旧数据或新数据。
+    """
     embeddings_content = require_state_list(state, "embeddings_content")
     prepare_chunks_collection()
 
     file_title = state.get("file_title", "")
     client = milvus_gateway.milvus_client
     collection_name = milvus_gateway.chunk_collection_name
-    if file_title:
-        client.delete(collection_name=collection_name, filter=eq_expr("file_title", file_title))
 
-    result = client.insert(collection_name=collection_name, data=_align_to_schema(embeddings_content))
-    logger.info(f"知识库写入完成：insert_count={result.get('insert_count', 0)}")
+    rows = _align_to_schema(embeddings_content)
+    new_ids = {str(row["chunk_id"]) for row in rows}
+
+    # 1) 先写：分批 upsert
+    batch_size = max(1, settings.import_.milvus_insert_batch_size)
+    written = _batch_upsert(client, collection_name, rows, batch_size)
+    logger.info(f"知识库写入完成：upsert_count={written}（分片大小 {batch_size}）")
+
+    # 2) 对账：写入条数与期望不符即失败，避免「静默少写」被当成成功
+    if written != len(rows):
+        fail("insert_count", f"对账失败：写入 {written} 条，期望 {len(rows)} 条")
+
+    # 3) 后清：删除本次未再产出的旧块（章节被删除/重命名时产生）
+    if file_title:
+        removed = _delete_stale_chunks(client, collection_name, file_title, new_ids)
+        if removed:
+            logger.info(f"已清理 {file_title} 的残留旧块 {removed} 条")
 
     index_parent_chunks(state)
+    reconcile_after_import(state)
     return state

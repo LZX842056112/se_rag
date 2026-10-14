@@ -31,7 +31,9 @@
   var state = {
     base: '',
     // 审批写操作令牌：仅当前标签页会话有效
-    adminToken: sessionStorage.getItem('evo_admin_token') || ''
+    adminToken: sessionStorage.getItem('evo_admin_token') || '',
+    // 导入操作令牌：与审批令牌相互独立（IMPORT_ADMIN_TOKEN / EVOLUTION_ADMIN_TOKEN 是两套）
+    importToken: sessionStorage.getItem('import_admin_token') || ''
   };
 
   /**
@@ -68,7 +70,11 @@
   async function fetchJson(path, options) {
     var opts = Object.assign({}, options || {});
     var headers = Object.assign({}, opts.headers || {});
-    if (state.adminToken) headers['X-Internal-Token'] = state.adminToken;
+    // opts.token 可显式指定令牌（导入页用自己的 IMPORT_ADMIN_TOKEN，与审批令牌互不干扰）；
+    // 未指定时沿用审批令牌，保持既有页面行为不变。
+    var token = opts.token != null ? opts.token : state.adminToken;
+    delete opts.token;
+    if (token) headers['X-Internal-Token'] = token;
     if (opts.body && !(opts.body instanceof FormData) && !headers['Content-Type']) {
       headers['Content-Type'] = 'application/json';
     }
@@ -383,6 +389,11 @@
       state.adminToken = String(token || '').trim();
       try { sessionStorage.setItem('evo_admin_token', state.adminToken); } catch (_) { /* 忽略隐私模式异常 */ }
     },
-    getAdminToken: function () { return state.adminToken; }
+    getAdminToken: function () { return state.adminToken; },
+    setImportToken: function (token) {
+      state.importToken = String(token || '').trim();
+      try { sessionStorage.setItem('import_admin_token', state.importToken); } catch (_) { /* 忽略隐私模式异常 */ }
+    },
+    getImportToken: function () { return state.importToken; }
   };
 })();

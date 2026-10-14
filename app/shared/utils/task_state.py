@@ -52,6 +52,9 @@ class _TaskRecord:
     running: List[str] = field(default_factory=list)
     done: List[str] = field(default_factory=list)
     status: str = ""
+    # 失败分类：机器码 + 中文提示（成功任务留空）
+    error_code: str = ""
+    message: str = ""
     updated_at: float = field(default_factory=time.time)
 
 
@@ -149,6 +152,40 @@ def clear_task(task_id: str) -> None:
     """清理任务进度记录（会话/任务结束时调用）。"""
     with _lock:
         _tasks.pop(task_id, None)
+
+
+def set_task_error(task_id: str, code: str, message: str = "") -> None:
+    """登记任务的失败分类（机器码 + 中文提示）。"""
+    with _lock:
+        _prune_locked(time.time())
+        record = _get_locked(task_id)
+        record.error_code = code or ""
+        record.message = message or ""
+
+
+def get_task_error(task_id: str) -> tuple[str, str]:
+    """读取任务的失败分类；未登记时返回空串。"""
+    with _lock:
+        record = _tasks.get(task_id)
+        if record is None:
+            return "", ""
+        return record.error_code, record.message
+
+
+def snapshot(task_id: str) -> dict:
+    """返回任务状态的只读快照（用于落盘，避免在锁内做 IO）。"""
+    with _lock:
+        record = _tasks.get(task_id)
+        if record is None:
+            return {}
+        return {
+            "task_id": task_id,
+            "status": record.status,
+            "done_list": [_to_cn(n) for n in record.done],
+            "running_list": [_to_cn(n) for n in record.running],
+            "error_code": record.error_code,
+            "message": record.message,
+        }
 
 
 def task_count() -> int:
