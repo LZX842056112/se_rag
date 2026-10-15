@@ -25,7 +25,9 @@ def build_history_context(session_id: str, limit: int) -> str:
         logger.warning(f"当前会话 {session_id} 没有有效的历史对话记录，history_text 为空")
         return "无有效对话记录!"
     lines = []
-    for index, item in enumerate(final_message_list, start=1):
+    # list_recent 返回新 → 旧；反转为旧 → 新后编号，让 LLM 看到自然因果时间线
+    # （序号 1 = 最早一条）。GET /api/history 的对外语义仍是新 → 旧，仓储排序不动。
+    for index, item in enumerate(reversed(final_message_list), start=1):
         role_prefix = "提问:" if item.get("role") == "user" else "回答:"
         content = (
             item.get("rewritten_query")

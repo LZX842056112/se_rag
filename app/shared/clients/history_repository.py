@@ -39,23 +39,32 @@ class HistoryRepository:
         groundedness: float = 0.0,
         message_id: Optional[str] = None,
     ) -> str:
-        """新增（无 ``message_id``）或更新（有 ``message_id``）一条消息。"""
-        document = {
-            "session_id": session_id,
-            "role": role,
-            "text": text,
-            "rewritten_query": rewritten_query or "",
-            "item_names": item_names,
-            "image_urls": image_urls,
-            "citations": citations or [],
-            "groundedness": groundedness or 0.0,
-            "ts": datetime.now().timestamp(),
-        }
-        collection = self._collection()
-        if message_id:
-            collection.update_one({"_id": ObjectId(message_id)}, {"$set": document})
-            return message_id
-        return str(collection.insert_one(document).inserted_id)
+        """新增（无 ``message_id``）或更新（有 ``message_id``）一条消息。
+
+        与其它方法一致：Mongo 故障时降级为空串并记录日志，不抛给主链路。
+        答案已生成并推给用户后，落库失败不应再把整笔查询打成 500；
+        下一轮读不到该条属可接受损失（不影响当轮已交付的答案）。
+        """
+        try:
+            document = {
+                "session_id": session_id,
+                "role": role,
+                "text": text,
+                "rewritten_query": rewritten_query or "",
+                "item_names": item_names,
+                "image_urls": image_urls,
+                "citations": citations or [],
+                "groundedness": groundedness or 0.0,
+                "ts": datetime.now().timestamp(),
+            }
+            collection = self._collection()
+            if message_id:
+                collection.update_one({"_id": ObjectId(message_id)}, {"$set": document})
+                return message_id
+            return str(collection.insert_one(document).inserted_id)
+        except Exception as exc:  # noqa: BLE001 - 落库失败降级，不阻断已完成的作答
+            logger.error(f"写入会话历史失败：{exc}")
+            return ""
 
     def update_item_names(self, ids: list[str], item_names: list[str]) -> int:
         """批量更新历史消息的关联主体名。"""

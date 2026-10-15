@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from app.shared.config import settings
-from app.shared.config.common import env_int, env_str
+from app.shared.config.common import env_bool, env_int, env_str
 
 NODE_RRF_K = 60
 NODE_RRF_LIMIT_TOP = 5
@@ -21,6 +21,14 @@ RERANK_SUMMARY_MAX_WORKERS: int = 4
 # 事故背景：某次提问的 4 条联网结果分数 0.999x，把本地手册与已审批 FAQ 全部挤出上下文，
 # 表现为「明明入库了却仍答无法作答且无引用」。
 WEB_MAX_IN_CONTEXT: int = env_int("WEB_MAX_IN_CONTEXT", 2)
+
+# HyDE 分流开关：默认关闭——保持现有「三路无条件扇出」检索行为不变。
+# 开启后，短事实型查询跳过 HyDE：这类问题词汇鸿沟小，假设性文档容易生成
+# 「具体但错误」的答案把检索语义拉偏，而 hyde 与 kb 在 RRF 中等权 1.0
+# （rrf_service.py），噪声会与真实召回升职同权。
+HYDE_GATE_ENABLED: bool = env_bool("HYDE_GATE_ENABLED", False)
+# 短查询阈值（字符）：不超过该长度且命中事实型标记词，才判定为「短事实型查询」
+HYDE_GATE_SHORT_CHARS: int = env_int("HYDE_GATE_SHORT_CHARS", 24)
 
 # kb_chunks 集合 dense 向量检索的 metric_type。
 # 该集合由导入端以 metric_type="COSINE" 创建（sparse 用 IP），而混合检索请求的默认值是

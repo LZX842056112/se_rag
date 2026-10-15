@@ -9,8 +9,9 @@
 from __future__ import annotations
 
 from app.rag.item_name.catalog import expand_item_names
+from app.rag.item_name.config import GLOBAL_ITEM_NAME
 from app.rag.query.config import CHUNK_DENSE_METRIC
-from app.shared.clients.milvus_gateway import in_expr, milvus_gateway
+from app.shared.clients.milvus_gateway import eq_expr, in_expr, milvus_gateway
 from app.shared.models import llm_providers
 from app.shared.runtime.logger import logger
 from app.shared.utils.require import require_state_list, require_state_str
@@ -62,9 +63,15 @@ def search_chunks(
     # 1. 向量化（复用调用方传入的向量，避免同一次提问重复编码）
     vectors = embedding or llm_providers.embed_text(query_text)
 
-    # 2. 主体过滤名单：扩展为同一实体的全部写法，避免近重复主体名导致漏召回
+    # 2. 主体过滤名单：扩展为同一实体的全部写法，并放行未打商品标签的全局条目
+    #    （导入端 load_subject 对未识别主体回退 default_item_name，见 inputs.py；
+    #    不放行时这类 chunk 带主体过滤永远召回不到。口径与 evolution 侧
+    #    app/evolution/retrieval.py 对齐。）
     filter_names = expand_item_names(item_names) if item_names else []
-    expr = in_expr("item_name", filter_names) if filter_names else None
+    if filter_names:
+        expr = f"({in_expr('item_name', filter_names)} or {eq_expr('item_name', GLOBAL_ITEM_NAME)})"
+    else:
+        expr = None
 
     # 3. 组装混合检索请求。dense 的 metric_type 必须与目标集合实际索引一致，
     #    否则 Milvus 报 "metric type not match"、网关静默返回 None -> 召回为空

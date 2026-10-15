@@ -64,7 +64,10 @@ def test_apply_item_name_result_exposes_options_and_guide_text(catalog):
     apply_item_name_result(state, list_dict, "hak180")
 
     assert state["item_name_options"] == list_dict["similar_list"]
-    assert state["item_names"] == ["Brother HAK 180 烫金机"]  # 落库历史，供下一轮消解
+    # 未确认候选只作为可点选选项，不写入 item_names：否则随用户消息落库后，
+    # 下一轮 list_valid_history 会把候选送进主体消解与答案上下文，模型可能
+    # 把「候选」当「已确认主体」误消解。用户点选后前端以「主体名+原问题」重新提问。
+    assert state["item_names"] == []
     assert "请点击下方主体直接提问" in state["answer"]
     assert state["answer"] != "本次问题没有关联到任何主体，也没有找到相似主体。请补充产品名称后再提问。"
 

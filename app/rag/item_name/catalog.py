@@ -21,6 +21,7 @@ import time
 
 from app.rag.item_name.config import ITEM_NAME_CATALOG_TTL_SECONDS
 from app.shared.clients.milvus_gateway import milvus_gateway
+from app.shared.config import settings
 from app.shared.runtime.logger import logger
 from app.shared.utils.text import is_same_entity, name_tokens, normalize_item_name, token_prefix_match
 
@@ -39,16 +40,19 @@ def _ensure_loaded(force: bool) -> None:
 
     names: list[str] = []
     raws: list[str] = []
+    # 目录查询在主体确认节点热路径上（每 60s 缓存失效即触发），必须带超时，
+    # 否则 Milvus 挂起会连带卡住整笔查询
+    timeout = settings.milvus.timeout_seconds
     try:
         client = milvus_gateway.milvus_client
         collection = milvus_gateway.item_name_collection_name
         if client is None:
             logger.warning("主体名目录加载跳过：Milvus 客户端不可用")
-        elif not client.has_collection(collection_name=collection):
+        elif not client.has_collection(collection_name=collection, timeout=timeout):
             logger.warning(f"主体名目录集合不存在：{collection}，目录命中降级为不可用")
         else:
             try:
-                client.load_collection(collection_name=collection)
+                client.load_collection(collection_name=collection, timeout=timeout)
             except Exception as exc:  # noqa: BLE001 - 加载失败不影响后续查询尝试
                 logger.warning(f"主体名目录集合加载失败（继续尝试查询）：{exc}")
             rows = client.query(
@@ -56,6 +60,7 @@ def _ensure_loaded(force: bool) -> None:
                 filter="",
                 output_fields=["item_name"],
                 limit=_QUERY_LIMIT,
+                timeout=timeout,
             )
             seen: set[str] = set()
             for row in rows or []:

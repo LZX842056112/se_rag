@@ -26,9 +26,9 @@ from app.shared.utils.require import require_state_list, require_state_str
 
 @step_log("_require_rerank_inputs")
 def _require_rerank_inputs(state: QueryGraphState) -> tuple[str, list, list]:
-    """校验重排输入：``rewritten_query`` / ``rrf_chunks`` 为硬依赖，联网结果允许为空。"""
+    """校验重排输入：``rewritten_query`` 为硬依赖，两路结果允许为空（降级/零命中路径）。"""
     rewritten_query = require_state_str(state, "rewritten_query")
-    rrf_chunks = require_state_list(state, "rrf_chunks")
+    rrf_chunks = require_state_list(state, "rrf_chunks", allow_empty=True)
     web_search_docs = require_state_list(state, "web_search_docs", allow_empty=True)
     if not web_search_docs:
         logger.warning("web_search_docs 为空，本次仅使用本地召回结果参与重排")
@@ -254,6 +254,15 @@ def dyn_limit_reranker_docs(reranker_docs: list[dict]) -> list[dict]:
 def rerank_documents(state: QueryGraphState) -> QueryGraphState:
     """重排服务入口：合并 → 压缩 → 打分排序 → 动态截断 → 回写 ``reranked_docs``。"""
     rewritten_query, rrf_chunks, web_search_docs = _require_rerank_inputs(state)
+
+    if not rrf_chunks and not web_search_docs:
+        # 全链路零命中（检索降级）：不加载重排模型，直接按空结果进入作答，
+        # 由 answer_out prompt 的无结果兜底规则生成「无法作答」话术。
+        # 只放宽 RRF 不够——这里会在 require_state_list 再次抛错仍是 500。
+        logger.warning("本地召回与联网结果均为空，跳过重排，按零命中作答")
+        state["reranked_docs"] = []
+        return state
+
     reranker_docs = deal_rrf_and_web_result(rrf_chunks, web_search_docs)
     question_answer_pair_list = create_question_answer_lists(rewritten_query, reranker_docs)
     use_reranker_deal_score(question_answer_pair_list, reranker_docs)

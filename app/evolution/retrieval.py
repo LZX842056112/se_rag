@@ -10,6 +10,7 @@ from app.rag.item_name.catalog import expand_item_names
 from app.rag.item_name.config import GLOBAL_ITEM_NAME
 from app.evolution.quality import looks_like_non_answer
 from app.shared.clients.milvus_gateway import eq_expr, in_expr, milvus_gateway
+from app.shared.config import settings
 from app.shared.models import llm_providers
 from app.shared.runtime.logger import logger
 from app.shared.utils.text import name_equivalent
@@ -90,7 +91,8 @@ def search_evolution_items(
         return []
     try:
         if not milvus_gateway.milvus_client.has_collection(
-            collection_name=milvus_gateway.evolution_collection_name
+            collection_name=milvus_gateway.evolution_collection_name,
+            timeout=settings.milvus.timeout_seconds,
         ):
             # 集合尚未创建（还没有审批通过的条目），直接跳过，避免每次检索刷 "collection not found"
             return []

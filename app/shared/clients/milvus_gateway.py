@@ -28,7 +28,7 @@ def get_milvus_client() -> Optional[MilvusClient]:
             if not uri:
                 logger.error("Milvus 客户端连接失败：缺少 MILVUS_URL 环境变量配置")
                 return None
-            _milvus_client = MilvusClient(uri=uri)
+            _milvus_client = MilvusClient(uri=uri, timeout=settings.milvus.timeout_seconds)
             logger.info("Milvus 客户端连接成功")
         return _milvus_client
     except Exception as exc:  # noqa: BLE001
@@ -102,7 +102,11 @@ def create_hybrid_search_requests(dense_vector, sparse_vector, dense_params=None
 
 def hybrid_search(client, collection_name, reqs, ranker_weights=(0.5, 0.5), norm_score=False,
                   limit=5, output_fields=None, search_params=None):
-    """执行加权混合检索；失败返回 None（调用方降级为空结果）。"""
+    """执行加权混合检索；失败返回 None（调用方降级为空结果）。
+
+    ``timeout`` 必须逐次传入：pymilvus 构造参数只覆盖建连等待，不覆盖业务 RPC，
+    缺省为 None 时会一直等到服务端响应或出错。
+    """
     if client is None:
         logger.error(f"Milvus 混合搜索跳过：客户端不可用，集合[{collection_name}]")
         return None
@@ -115,6 +119,7 @@ def hybrid_search(client, collection_name, reqs, ranker_weights=(0.5, 0.5), norm
             limit=limit,
             output_fields=output_fields if output_fields is not None else ["item_name"],
             search_params=search_params,
+            timeout=settings.milvus.timeout_seconds,
         )
         logger.debug(f"Milvus 混合搜索完成，集合[{collection_name}]命中{len(res[0]) if res else 0}条")
         return res

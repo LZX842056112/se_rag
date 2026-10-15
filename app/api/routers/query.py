@@ -24,6 +24,9 @@ from app.shared.utils.task_state import get_done_task_list
 
 router = APIRouter(prefix="/api", tags=["query"])
 
+# 会话历史单次拉取上限：防止 ``?limit=1000000`` 把全量消息拖进内存与响应体
+_HISTORY_MAX_LIMIT = 100
+
 
 @router.post("/query", response_model=QueryStreamResponseSchema | QueryNotStreamResponseSchema)
 def query(background_tasks: BackgroundTasks, query_params: QueryRequestSchema):
@@ -41,6 +44,7 @@ def query(background_tasks: BackgroundTasks, query_params: QueryRequestSchema):
             session_id=session_id,
             original_query=query_params.query,
             is_stream=is_stream,
+            rewrite_hint=query_params.rewrite_hint,
         )
         return QueryStreamResponseSchema(message=f"已开始查询:{query_params.query}", session_id=session_id)
 
@@ -48,6 +52,7 @@ def query(background_tasks: BackgroundTasks, query_params: QueryRequestSchema):
         session_id=session_id,
         original_query=query_params.query,
         is_stream=is_stream,
+        rewrite_hint=query_params.rewrite_hint,
     )
     if state is None:
         raise ApiError("query_failed", "查询流程执行失败", status_code=500)
@@ -73,8 +78,9 @@ def stream(session_id: str, request: Request) -> StreamingResponse:
 
 @router.get("/history/{session_id}", response_model=HistoryListResponseSchema)
 def get_history(session_id: str, limit: int = 10) -> HistoryListResponseSchema:
-    """读取会话历史（新 → 旧，最多 ``limit`` 条）。"""
-    history_list = history_repository.list_recent(session_id=session_id, limit=limit)
+    """读取会话历史（新 → 旧，最多 ``limit`` 条，实际条数钳制在 1~100）。"""
+    safe_limit = max(1, min(limit, _HISTORY_MAX_LIMIT))
+    history_list = history_repository.list_recent(session_id=session_id, limit=safe_limit)
     return HistoryListResponseSchema(
         session_id=session_id,
         items=[

@@ -10,9 +10,13 @@ from app.shared.utils.require import require_state_list
 
 @step_log("_require_retrieval_chunks")
 def _require_retrieval_chunks(state: QueryGraphState) -> tuple[list, list]:
-    """校验两路必备召回结果（向量检索 / HyDE 检索）。"""
-    embedding_chunks = require_state_list(state, "embedding_chunks")
-    hyde_chunks = require_state_list(state, "hyde_embedding_chunks")
+    """取出两路召回结果（向量检索 / HyDE 检索）；空列表是合法输入（降级路径）。
+
+    外部依赖（Milvus / LLM）故障时两路均可能为空：此时按「零命中」继续作答，
+    而不是抛 ValueError 把整笔查询打成 500（联网路一直是这个语义，现对齐）。
+    """
+    embedding_chunks = require_state_list(state, "embedding_chunks", allow_empty=True)
+    hyde_chunks = require_state_list(state, "hyde_embedding_chunks", allow_empty=True)
     return embedding_chunks, hyde_chunks
 
 
@@ -54,6 +58,9 @@ def fuse_by_rrf(state: QueryGraphState) -> QueryGraphState:
         rrf_list.append((settings.evolution.rrf_weight, evolution_chunks))
 
     rrf_chunks = use_by_rrf(rrf_list, top=get_rrf_top(), k=get_rrf_k())
+
+    if not embedding_chunks and not hyde_chunks and not evolution_chunks:
+        logger.warning("本地三路召回均为空，按零命中继续（检索降级）")
 
     # 自进化权威条目防挤出：已召回的演进 FAQ 若未被 RRF top-N 收录则强制并入，交由重排裁决。
     # 否则权威 FAQ 会被主库弱相关分片（设备/电源线等泛化片段）竞争掉，出现「已入库却永远

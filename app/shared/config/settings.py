@@ -52,6 +52,9 @@ class MilvusSettings:
     chunks_collection: str
     item_name_collection: str
     evolution_collection: str
+    # 连接与单次 RPC 超时（秒）。pymilvus 的构造参数只覆盖建连等待，
+    # hybrid_search/query 等业务 RPC 必须各自传 timeout，否则网络挂起时永久阻塞。
+    timeout_seconds: int
 
 
 @dataclass
@@ -224,6 +227,7 @@ def _build_settings() -> Settings:
             chunks_collection=env_str("CHUNKS_COLLECTION"),
             item_name_collection=env_str("ITEM_NAME_COLLECTION"),
             evolution_collection=env_str("EVOLUTION_COLLECTION", "kb_evolution_items"),
+            timeout_seconds=env_int("MILVUS_TIMEOUT_SECONDS", 15),
         ),
         minio=MinioSettings(
             endpoint=env_str("MINIO_ENDPOINT"),
