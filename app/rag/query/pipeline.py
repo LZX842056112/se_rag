@@ -5,6 +5,7 @@ from app.evolution.feedback.collector import flush_session_signals
 from app.process.query.agent.main_graph import query_app
 from app.process.query.agent.state import QueryGraphState, create_query_default_state
 from app.rag.query.citations import citations_from_reranked_docs
+from app.rag.query.errors import classify_query_error
 from app.shared.config import settings
 from app.shared.runtime.logger import logger
 from app.shared.utils.sse_broker import SSEEvent, ensure_channel, publish
@@ -13,12 +14,21 @@ from app.shared.utils.task_state import (
     TASK_STATUS_FAILED,
     TASK_STATUS_PROCESSING,
     clear_task,
+    set_task_error,
     update_task_status,
 )
 
 
-def invoke_query_graph(session_id: str, original_query: str, is_stream: bool) -> QueryGraphState | None:
-    """执行一次查询：清空旧进度 → 跑图 → 推送最终事件 → 写入未解决信号。"""
+def invoke_query_graph(
+    session_id: str,
+    original_query: str,
+    is_stream: bool,
+    rewrite_hint: str | None = None,
+) -> QueryGraphState | None:
+    """执行一次查询：清空旧进度 → 跑图 → 推送最终事件 → 写入未解决信号。
+
+    ``rewrite_hint``：点选主体时前端附带的意图原句（见 ``QueryRequestSchema``）。
+    """
     try:
         clear_task(session_id)
         if is_stream:
@@ -26,7 +36,10 @@ def invoke_query_graph(session_id: str, original_query: str, is_stream: bool) ->
         update_task_status(session_id, TASK_STATUS_PROCESSING, push_queue=is_stream)
 
         query_state = create_query_default_state(
-            session_id=session_id, original_query=original_query, is_stream=is_stream
+            session_id=session_id,
+            original_query=original_query,
+            is_stream=is_stream,
+            rewrite_hint=rewrite_hint or "",
         )
         result_state = query_app.invoke(query_state)
         update_task_status(session_id, TASK_STATUS_COMPLETED, push_queue=is_stream)
@@ -52,11 +65,13 @@ def invoke_query_graph(session_id: str, original_query: str, is_stream: bool) ->
             except Exception as exc:  # noqa: BLE001
                 logger.warning(f"写入会话信号失败（忽略）：{exc}")
         return result_state
-    except Exception as exc:  # noqa: BLE001 - 统一转成失败状态 + SSE 错误事件
+    except Exception as exc:  # noqa: BLE001 - 分类后转失败状态 + SSE 错误事件
+        code, message = classify_query_error(exc)
         update_task_status(session_id, TASK_STATUS_FAILED, push_queue=is_stream)
+        set_task_error(session_id, code, message)
         publish(session_id, SSEEvent.ERROR, {
-            "code": "query_failed",
-            "message": f"{session_id} 业务失败，原因：{exc}",
+            "code": code,
+            "message": f"{session_id} 业务失败，原因：{message}",
         })
-        logger.exception(f"执行查询流程报错：{exc}")
+        logger.exception(f"执行查询流程报错（{code}）：{message}")
         return None

@@ -19,6 +19,12 @@ class QueryRequestSchema(BaseModel):
     query: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4096)]
     session_id: str | None = Field(default=None, max_length=128)
     is_stream: bool = False
+    # 点选主体时的意图原句（用户点选前问过的那句话）。
+    # 前端把「主体名」放在 query、把「意图」放在这里，服务端拼出完整问句，
+    # 避免模型把意图改写成历史对话里的话题。
+    rewrite_hint: Annotated[
+        str | None, StringConstraints(strip_whitespace=True, max_length=4096)
+    ] = None
 
 # 查询模块流式响应结果
 class QueryStreamResponseSchema(BaseModel):

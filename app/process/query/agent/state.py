@@ -10,6 +10,9 @@ class QueryGraphState(TypedDict):
     """
     session_id: str  # 会话唯一标识
     original_query: str  # 用户原始问题
+    # 点选主体时前端附带的意图原句：用户点选前问过的那句话。
+    # 非空时，主体消解直接用它拼出完整问句，不再让模型推断意图（避免被历史对话改写）。
+    rewrite_hint: str
 
     # 检索过程中的中间数据
     embedding_chunks: list  # 普通向量检索回来的切片
@@ -48,6 +51,7 @@ class QueryGraphState(TypedDict):
 query_graph_default_state: QueryGraphState = {
     "session_id": "",
     "original_query": "",
+    "rewrite_hint": "",
     "embedding_chunks": [],
     "hyde_embedding_chunks": [],
     "web_search_docs": [],

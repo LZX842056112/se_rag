@@ -316,11 +316,11 @@
     }
   }
 
-  function submitQuery(text) {
-    return App.fetchJson(App.PATHS.query, {
-      method: 'POST',
-      body: JSON.stringify({ query: text, session_id: sessionId, is_stream: streamToggle.checked })
-    });
+  function submitQuery(text, rewriteHint) {
+    const payload = { query: text, session_id: sessionId, is_stream: streamToggle.checked };
+    // 仅在点选主体时附带：服务端用它拼出完整问句，避免模型把意图替换成历史话题
+    if (rewriteHint) payload.rewrite_hint = rewriteHint;
+    return App.fetchJson(App.PATHS.query, { method: 'POST', body: JSON.stringify(payload) });
   }
 
   function ensureAnswerEl(botMsgEl) {
@@ -333,26 +333,54 @@
     return answerEl;
   }
 
+  /** 问题里去掉空白/标点后只剩主体名本身 → 用户想问的就是这个主体，直接用它提问 */
+  function isSubjectOnly(asked, subject) {
+    const compact = (s) => String(s || '').replace(/[\s\p{P}\p{S}]/gu, '').toLowerCase();
+    const askedKey = compact(asked);
+    const subjectKey = compact(subject);
+    if (!askedKey) return true;
+    if (!subjectKey) return false;
+    return askedKey === subjectKey
+      || subjectKey.includes(askedKey)          // 只输入了型号前缀，如 “hak180”
+      || askedKey.includes(subjectKey);         // 已带主体名，无需再拼
+  }
+
   /**
-   * 点选主体后该问什么：
-   * - 原问题本身就是在指这个主体（如只输入了 “hak180”）→ 直接用主体名提问；
-   * - 否则把主体名与原问题拼起来（如 “HAK 180 烫金机 怎么换膜”）。
+   * 点选主体后该怎么问：优先向服务端带上**结构化意图**，而不是把意图词混进问句。
+   *
+   * 需求：用户问“hak180怎么安装” → 系统反问主体 → 用户点选主体。
+   * 此时前端完全知道「意图 = 怎么安装」，只有主体名缺失。
+   * 拆成两个独立信令传给服务端：
+   *   - query    = 主体名（含型号别名，便于目录对齐）
+   *   - rewrite_hint = 用户点选前的那句原问题（保留意图词，排除历史干扰）
+   * 服务端据此拼出 “Brother HAK 180 烫金机怎么安装”，不必让模型去猜。
+   *
+   * 这样做的原因：只把意图词拼进问句时，模型仍可能被历史对话改写（实测：
+   * 纯主体名 + 历史在聊“蓝牙” → 被改写成蓝牙问题）。把意图放进独立字段后，
+   * 它不参与“指代消解”的推断，模型没有把它替换掉的动机。
+   *
+   * 兜底：旧服务端不认识 rewrite_hint 时会被忽略，此时仍靠拼好的问句生效，
+   * 故问句本身也保留意图词（与 hint 内容一致，只是多带一次主体名）。
    */
   function optionQuestion(name, originalQuery) {
     const subject = String(name || '').trim();
     const asked = String(originalQuery || '').trim();
     if (!asked || !subject) return subject || asked;
-    const compactAsked = asked.replace(/\s+/g, '').toLowerCase();
-    const compactSubject = subject.replace(/\s+/g, '').toLowerCase();
-    if (compactAsked.length <= 12 || compactSubject.includes(compactAsked) || compactAsked.includes(compactSubject)) {
-      return subject;
-    }
+    if (isSubjectOnly(asked, subject)) return subject;
     return subject + ' ' + asked;
+  }
+
+  /** 点选主体时要带给服务端的意图提示；纯主体名（无意图可补）时返回空串。 */
+  function optionIntentHint(name, originalQuery) {
+    const subject = String(name || '').trim();
+    const asked = String(originalQuery || '').trim();
+    if (!asked || !subject) return '';
+    return isSubjectOnly(asked, subject) ? '' : asked;
   }
 
   function askSubject(name, originalQuery) {
     inputEl.value = optionQuestion(name, originalQuery);
-    onSend();
+    onSend(optionIntentHint(name, originalQuery));
   }
 
   /** 渲染「没确认到主体」时的相似主体选项：点一下即以该主体重新提问。 */
@@ -376,7 +404,11 @@
     else msgEl.appendChild(bar);
   }
 
-  async function onSend() {
+  /**
+   * @param {string} [rewriteHint] 点选主体时附带的意图原句（见 optionIntentHint）。
+   *   只有点了主体选项才传；手动输入时为空，行为与从前一致。
+   */
+  async function onSend(rewriteHint) {
     if (sendBtn.disabled) return; // 按钮禁用时拦截重复提交（含 Enter 快捷键）
     const text = (inputEl.value || '').trim();
     if (!text) return;
@@ -387,7 +419,7 @@
 
     try {
       const isStream = streamToggle.checked;
-      const data = await submitQuery(text);
+      const data = await submitQuery(text, rewriteHint);
       renderProgress(botMsgEl, [], [], 'pending');
 
       if (!isStream) {
