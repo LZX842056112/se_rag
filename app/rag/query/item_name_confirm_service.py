@@ -118,6 +118,30 @@ def _drop_first_match(text: str, needle: str, *, fuzzy_case: bool = False) -> st
     return text[: match.start()] + text[match.end():]
 
 
+def _align_subject(query: str) -> str | None:
+    """把展示名/别名对齐到库内标准主体名；对齐不上返回 None。
+
+    两条消解路径都要这步：用户给的是展示名，必须映射到目录标准名才能命中过滤条件。
+    """
+    list_dict = select_item_names(search_by_item_names([query]))
+    confirmed_list = list_dict.get("confirmed_list", [])
+    if not confirmed_list:
+        return None
+    return confirmed_list[0].get("item_name")
+
+
+def _apply_confirmed_subject(state: QueryGraphState, confirmed_name: str, hint: str) -> None:
+    """回写「已确认主体 + 拼装问句」（两条消解路径共用）。
+
+    必须清 options 与 answer：前者否则本轮仍被当作待确认；后者否则路由短路去答反问话术。
+    """
+    state["item_names"] = [confirmed_name]
+    state["rewritten_query"] = compose_query_with_hint(confirmed_name, hint)
+    state["item_name_options"] = []
+    if "answer" in state:
+        state["answer"] = None
+
+
 def resolve_by_hint(state: QueryGraphState) -> bool:
     """点选主体后的确定性消解：直接用主体名 + 意图原句作答，不经过模型改写。
 
@@ -138,21 +162,70 @@ def resolve_by_hint(state: QueryGraphState) -> bool:
         return False
 
     # 前端把主体名放在 query；取回后与意图拼成完整问句
-    item_names = search_by_item_names([original_query])
-    list_dict = select_item_names(item_names)
-    confirmed_list = list_dict.get("confirmed_list", [])
-    if not confirmed_list:
+    confirmed_name = _align_subject(original_query)
+    if not confirmed_name:
         logger.info(f"点选消解：主体未能对齐目录，回退常规流程：query={original_query}")
         return False
 
-    confirmed_name = confirmed_list[0].get("item_name")
-    state["item_names"] = [confirmed_name]
-    state["rewritten_query"] = compose_query_with_hint(confirmed_name, hint)
-    state["item_name_options"] = []
-    if "answer" in state:
-        state["answer"] = None
+    _apply_confirmed_subject(state, confirmed_name, hint)
     logger.info(
         f"点选消解完成：主体={confirmed_name}，意图原句={hint}，"
+        f"拼装问句={state['rewritten_query']}"
+    )
+    return True
+
+
+def find_pending_clarify(session_id: str) -> dict:
+    """最近一条消息若是「带候选的助手反问」，返回其 pending 记录；否则空字典。
+
+    本轮 user 消息在 ``confirm_item_name`` 末尾才落库，故此处 ``limit=1`` 拿到的是
+    上一轮助手消息；首轮无历史返回空字典。只认最近一条，避免更早的反问残留成
+    「上一轮意图」——那正是「答成之前的问题」的成因。
+    """
+    recent = history_repository.list_recent(session_id, limit=1)
+    if not recent:
+        return {}
+    last = recent[0]
+    if last.get("role") != "assistant":
+        return {}
+    pending = last.get("pending_subject_ask") or {}
+    if not (pending.get("intent") and pending.get("options")):
+        return {}
+    return pending
+
+
+def resolve_by_pending_clarify(state: QueryGraphState) -> bool:
+    """手输纯主体名的服务端兜底：用上一轮反问的意图原话复原问句。
+
+    覆盖前端挂起态失效的两类场景：页面刷新后重发、非浏览器客户端。
+    四道闸门任一不过就让路给常规的「历史 + 模型改写」流程：
+
+    ① 上一轮确实是反问（读历史，最便宜，先做）；
+    ② 本轮 query 能对齐到目录标准主体（判「是否纯主体名」要标准名，故须在③之前）；
+    ③ 该主体 ∈ 反问给出的候选（只认候选，避免把「另一台设备」硬拼成垃圾问句）；
+    ④ 本轮去掉主体别名后为空，即用户没带自己的意图。
+    """
+    original_query = require_state_str(state, "original_query")
+
+    # 闸门①：便宜的门——绝大多数轮次上一轮不是反问，直接早退，不白跑向量检索
+    pending = find_pending_clarify(state.get("session_id"))
+    if not pending:
+        return False
+
+    confirmed_name = _align_subject(original_query)
+    if not confirmed_name:
+        return False
+
+    if confirmed_name not in set(pending["options"]):
+        return False
+
+    # 闸门④：本轮自带意图（如「…烫金机怎么保养」）→ 尊重用户，不接管
+    if _strip_subject_alias(original_query, confirmed_name):
+        return False
+
+    _apply_confirmed_subject(state, confirmed_name, pending["intent"])
+    logger.info(
+        f"手输兜底消解完成：主体={confirmed_name}，反问意图原话={pending['intent']}，"
         f"拼装问句={state['rewritten_query']}"
     )
     return True
@@ -230,14 +303,23 @@ def save_history_message(state: QueryGraphState) -> None:
 def confirm_item_name(state: QueryGraphState) -> QueryGraphState:
     """主体确认服务入口：1) 历史上下文 → 2) LLM 提取主体与改写 → 3) 向量对齐 → 4) 回写 state。
 
-    若本轮是「点选主体」（``state["rewrite_hint"]`` 非空），则跳过模型改写，
-    直接按「主体名 + 意图原句」确定性拼装——见 ``resolve_by_hint``。
+    确定性消解优先于模型改写，两条路径：
+    - ``resolve_by_hint``：本轮带 ``rewrite_hint``（前端点选主体，或手输命中反问候选）；
+    - ``resolve_by_pending_clarify``：本轮没带 hint，但上一轮反问过且本轮是候选主体名。
+      前端挂起态存在内存里、刷新即丢，这条兜底覆盖刷新与非浏览器客户端。
+
+    两者都不接管时，才走「历史 + 模型改写 + 相似主体」的常规流程。
     """
     session_id = require_state_str(state, "session_id")
     original_query = require_state_str(state, "original_query")
     logger.info(f"主体确认开始：session_id={session_id}, query={original_query}")
 
     if resolve_by_hint(state):
+        save_history_message(state)
+        return state
+
+    # 前端挂起态失效（刷新/非浏览器）时的手输兜底：上一轮反问过且本轮是候选主体名
+    if resolve_by_pending_clarify(state):
         save_history_message(state)
         return state
 

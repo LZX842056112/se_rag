@@ -135,6 +135,17 @@ def backfill_evolution_outputs(state: QueryGraphState) -> QueryGraphState:
 
 def save_answer_message_history(state: QueryGraphState) -> None:
     """把助手回答写入会话历史（须在回填之后，保证 citations/groundedness 可持久化）。"""
+    # 只有「给出了可点选主体」的反问轮才记 pending（item_name_options 非空 ⟺ 反问轮）；
+    # 正常作答与「没有关联到任何主体」兜底话术都不记。用 .get 兼容缺键的旧 state。
+    options = state.get("item_name_options") or []
+    pending_subject_ask = {
+        "intent": state.get("original_query") or "",
+        "options": [
+            str(item.get("item_name"))
+            for item in options
+            if isinstance(item, dict) and item.get("item_name")
+        ],
+    } if options else {}
     history_repository.save_message(
         session_id=state.get("session_id"),
         role="assistant",
@@ -144,6 +155,7 @@ def save_answer_message_history(state: QueryGraphState) -> None:
         image_urls=state.get("image_urls", []),
         citations=state.get("citations", []),
         groundedness=state.get("groundedness", 0.0),
+        pending_subject_ask=pending_subject_ask,
     )
 
 

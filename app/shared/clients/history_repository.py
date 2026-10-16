@@ -37,6 +37,7 @@ class HistoryRepository:
         image_urls: Optional[list[str]] = None,
         citations: Optional[list[dict]] = None,
         groundedness: float = 0.0,
+        pending_subject_ask: Optional[dict] = None,
         message_id: Optional[str] = None,
     ) -> str:
         """新增（无 ``message_id``）或更新（有 ``message_id``）一条消息。
@@ -55,6 +56,10 @@ class HistoryRepository:
                 "image_urls": image_urls,
                 "citations": citations or [],
                 "groundedness": groundedness or 0.0,
+                # 反问轮（助手给出可点选主体）记下「触发反问的原话 + 候选主体名」：
+                # 用户下一轮手输纯主体名时服务端据此复原意图——前端挂起态刷新即丢。
+                # 空字典表示本轮不是反问。
+                "pending_subject_ask": pending_subject_ask or {},
                 "ts": datetime.now().timestamp(),
             }
             collection = self._collection()

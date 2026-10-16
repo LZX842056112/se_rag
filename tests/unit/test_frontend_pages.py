@@ -172,11 +172,16 @@ def _load_option_question():
     return node, "\n".join(parts)
 
 
-def _run_js_fn(node: str, fn_source: str, fn_name: str, *args: str) -> str:
+def _run_js_fn(node: str, fn_source: str, fn_name: str, *args) -> str:
+    """在 node 里跑抠出来的纯函数。``args`` 按 JSON 序列化，故 bool / list / dict 也可传。
+
+    返回值统一 ``String(...)``：``process.stdout.write`` 不接受布尔值，
+    而这里要验证的函数有的返回 bool。
+    """
     script = (
         fn_source
-        + f"\nprocess.stdout.write({fn_name}("
-        + ", ".join(json.dumps(a) for a in args) + "));"
+        + f"\nprocess.stdout.write(String({fn_name}("
+        + ", ".join(json.dumps(a) for a in args) + ")));"
     )
     result = subprocess.run(
         [node, "-e", script], capture_output=True, text=True, timeout=30, check=True
@@ -367,4 +372,103 @@ def test_init_uses_restore_session_not_bare_load_history():
     assert re.search(r"^\s*restoreSession\(\);", source, flags=re.MULTILINE), (
         "初始化未调用 restoreSession，刷新后无法接管进行中的查询"
     )
+
+
+# ==================== 手输主体名与点选等价 ====================
+# 回归背景：反问给出可点选主体后，用户没点按钮，而是自己手输主体名。
+# 此时前端不带 rewrite_hint，服务端落到「历史 + 模型改写」路径；而反问轮的
+# 用户消息与助手消息 item_names 都是空列表，被 list_valid_history 过滤掉，
+# 模型只看得见更早的话题 → 答成了「之前的问题」（实测答成安装步骤）。
+# 修复：手输文本若正是候选主体，就把触发反问的那句原话作为 rewrite_hint 传下去，
+# 与点选走同一条确定性拼装路径（服务端 resolve_by_hint + compose_query_with_hint）。
+
+_CANDIDATE = "Brother HAK 180 烫金机"
+
+
+def _load_subject_hint_fns():
+    """从 chat.js 中提取 matchesPendingSubject / resolveSendHint 源码并返回。"""
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("未安装 node，跳过前端函数行为验证")
+    source = (JS_DIR / "chat.js").read_text(encoding="utf-8")
+    parts: list[str] = []
+    for fn_name in ("matchesPendingSubject", "resolveSendHint"):
+        match = re.search(
+            rf"^  function {fn_name}\([\s\S]*?^  \}}$", source, flags=re.MULTILINE
+        )
+        assert match, f"chat.js 中未找到 {fn_name}，函数可能被重命名或删除"
+        parts.append(match.group(0))
+    return node, "\n".join(parts)
+
+
+@pytest.mark.parametrize(
+    ("asked", "expected"),
+    [
+        # 手输完整候选名 → 命中
+        ("Brother HAK 180 烫金机", "true"),
+        # 只输型号前缀 / 别名写法 → 命中
+        ("hak180", "true"),
+        ("hak-180", "true"),
+        ("haK 180", "true"),
+        # 自带意图 → 不得命中。否则会用上一轮反问的意图覆盖用户本轮写的「怎么保养」
+        ("Brother HAK 180 烫金机怎么保养", "false"),
+        ("烫金机怎么保养", "false"),
+        # 无关内容 → 不命中
+        ("你好", "false"),
+        ("", "false"),
+    ],
+)
+def test_matches_pending_subject_only_when_text_is_a_candidate(asked: str, expected: str):
+    """守卫：只有手输文本确实对应候选主体，才算「在回答反问」。"""
+    node, fn_source = _load_subject_hint_fns()
+    got = _run_js_fn(node, fn_source, "matchesPendingSubject", asked, [_CANDIDATE])
+    assert got == expected
+
+
+def test_matches_pending_subject_false_without_candidates():
+    """候选为空时一律不命中，不得凭「像主体名」放行。"""
+    node, fn_source = _load_subject_hint_fns()
+    got = _run_js_fn(node, fn_source, "matchesPendingSubject", _CANDIDATE, [])
+    assert got == "false"
+
+
+def test_resolve_send_hint_prefers_click_then_pending():
+    """点选值优先；非点选时命中候选才补来源问句；其余一律为空。"""
+    node, fn_source = _load_subject_hint_fns()
+    pending = {"sourceQuery": "hak180是什么", "names": [_CANDIDATE]}
+
+    def run(is_click, clicked, text, state):
+        return _run_js_fn(node, fn_source, "resolveSendHint", is_click, clicked, text, state)
+
+    # 点选：直接用点选值，不看挂起反问
+    assert run(True, "hak180怎么安装", _CANDIDATE, pending) == "hak180怎么安装"
+    # 点选但点选值为空（用户只是在指主体）→ 仍为空，不得回退到挂起反问
+    assert run(True, "", _CANDIDATE, pending) == ""
+    # 手输命中候选 → 补上触发反问的那句原话
+    assert run(False, "", _CANDIDATE, pending) == "hak180是什么"
+    # 手输未命中 → 不补，交回模型改写
+    assert run(False, "", "你好", pending) == ""
+    # 没有挂起反问 → 不补
+    assert run(False, "", _CANDIDATE, None) == ""
+
+
+def test_on_send_consumes_pending_subject_ask_once():
+    """守卫：挂起反问必须在 onSend 里无条件消费掉，避免残留影响后续提问。"""
+    source = (JS_DIR / "chat.js").read_text(encoding="utf-8")
+    body = re.search(r"async function onSend\(rewriteHint\)[\s\S]*?\n  \}", source)
+    assert body, "未找到 onSend"
+    text = body.group(0)
+    assert "pendingSubjectAsk = null" in text, "onSend 未消费挂起的反问"
+    assert text.index("pendingSubjectAsk = null") < text.index("resolveSendHint("), (
+        "必须先清空挂起的反问，再算本轮 hint"
+    )
+
+
+def test_render_item_name_options_records_pending_subject_ask():
+    """守卫：渲染选项栏时必须记下来源问句，否则手输路径拿不到意图。"""
+    source = (JS_DIR / "chat.js").read_text(encoding="utf-8")
+    body = re.search(r"function renderItemNameOptions\([\s\S]*?\n  \}", source)
+    assert body, "未找到 renderItemNameOptions"
+    assert "pendingSubjectAsk = {" in body.group(0), "渲染选项栏时未记录挂起的反问"
+    assert "sourceQuery" in body.group(0), "挂起的反问缺少来源问句"
 

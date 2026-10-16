@@ -395,10 +395,51 @@
     onSend(optionIntentHint(name, originalQuery));
   }
 
+  /**
+   * 挂起的反问：来源问句 + 候选主体名。
+   *
+   * 用户不点选项按钮、而是自己手输主体名时，用来源问句补 rewrite_hint——
+   * 这样手输与点选走同一条服务端确定性拼装路径，不必让模型从历史里猜意图
+   * （实测：模型会借更早的话题，表现为「答的是之前的问题」）。
+   */
+  let pendingSubjectAsk = null; // { sourceQuery: string, names: string[] }
+
+  /** 手输文本是否就是候选中的某个主体（含型号前缀、`hak-180` 这类别名写法）。 */
+  function matchesPendingSubject(text, names) {
+    const compact = (s) => String(s || '').replace(/[\s\p{P}\p{S}]/gu, '').toLowerCase();
+    const askedKey = compact(text);
+    if (!askedKey) return false;
+    return (Array.isArray(names) ? names : []).some(name => {
+      const nameKey = compact(name);
+      return nameKey && (askedKey === nameKey || nameKey.includes(askedKey));
+    });
+  }
+
+  /**
+   * 本轮该带的 rewrite_hint。
+   *
+   * 注意与 isSubjectOnly 的差别：后者允许「输入包含完整主体名」，
+   * 于是「Brother HAK 180 烫金机怎么保养」也算纯主体名；此处若照抄，
+   * 就会用上一轮反问的意图覆盖用户本轮自己写的「怎么保养」。故只认
+   * 「相等」与「输入 ⊆ 候选」两种情形。
+   */
+  function resolveSendHint(isClick, clickedHint, text, pending) {
+    if (isClick) return String(clickedHint || '').trim();
+    if (pending && matchesPendingSubject(text, pending.names)) {
+      return String(pending.sourceQuery || '').trim();
+    }
+    return '';
+  }
+
   /** 渲染「没确认到主体」时的相似主体选项：点一下即以该主体重新提问。 */
   function renderItemNameOptions(msgEl, options, originalQuery) {
     const list = (Array.isArray(options) ? options : []).filter(o => o && o.item_name);
     if (!msgEl || !list.length || msgEl.querySelector('.option-bar')) return;
+    // 记住本轮反问的来源，供「用户不点按钮、直接手输主体名」时补 rewrite_hint
+    pendingSubjectAsk = {
+      sourceQuery: String(originalQuery || '').trim(),
+      names: list.map(o => String(o.item_name))
+    };
     const bar = App.create('div', 'option-bar');
     bar.appendChild(App.create('span', 'option-hint', '请选择主体：'));
     const seen = new Set();
@@ -471,15 +512,19 @@
 
   /**
    * @param {string} [rewriteHint] 点选主体时附带的意图原句（见 optionIntentHint）。
-   *   只有点了主体选项才传；手动输入时为空，行为与从前一致。
+   *   只有点了主体选项才传；手动输入时为空，但若上一轮有挂起的反问、且本轮输入
+   *   正是候选主体，则补上反问的来源问句（见 resolveSendHint），使手输与点选等价。
    *   非字符串入参（如 click 事件对象）会被丢弃。
    */
   async function onSend(rewriteHint) {
     if (sendBtn.disabled) return; // 按钮禁用时拦截重复提交（含 Enter 快捷键）
-    // 只接受字符串：非字符串（如 click 事件对象）一律丢弃，避免污染请求体
-    const hint = typeof rewriteHint === 'string' ? rewriteHint.trim() : '';
     const text = (inputEl.value || '').trim();
     if (!text) return;
+    // 挂起的反问只服务一次发送：命中与否都作废，避免残留影响后续提问
+    const pending = pendingSubjectAsk;
+    pendingSubjectAsk = null;
+    // 只接受字符串：非字符串（如 click 事件对象）一律丢弃，避免污染请求体
+    const hint = resolveSendHint(typeof rewriteHint === 'string', rewriteHint, text, pending);
     inputEl.value = '';
     addUserMsg(text);
     const botMsgEl = addBotMsgSkeleton();
@@ -574,6 +619,7 @@
     }
     // 清空除首条欢迎消息外的内容
     Array.from(chatEl.querySelectorAll('.msg')).slice(1).forEach(node => node.remove());
+    pendingSubjectAsk = null; // 选项栏已被清掉，挂起的反问随之作废
     scrollToBottom();
   });
 
