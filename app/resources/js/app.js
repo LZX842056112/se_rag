@@ -14,6 +14,8 @@
     health: '/api/health',
     query: '/api/query',
     stream: function (sessionId) { return '/api/stream/' + encodeURIComponent(sessionId); },
+    // 进行中查询的进度快照：页面刷新后用它判断「是否还有查询在跑」并重建阶段进度
+    queryStatus: function (sessionId) { return '/api/query/status/' + encodeURIComponent(sessionId); },
     history: function (sessionId) { return '/api/history/' + encodeURIComponent(sessionId); },
     feedback: '/api/evolution/feedback',
     candidates: '/api/evolution/candidates',

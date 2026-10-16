@@ -289,11 +289,18 @@
   }
   apiPill.addEventListener('click', () => { if (healthFails >= 3) apiHealth(); });
 
+  /**
+   * 回显会话历史。
+   *
+   * @returns {Promise<{lastRole: string, lastUserText: string}>}
+   *   ``lastRole`` 为最后一条消息的角色（无历史时为空串）；``lastUserText`` 为最近一条提问。
+   *   刷新恢复流程据此判断「回答是否已落库」，避免把已完成的一轮重复渲染。
+   */
   async function loadHistory() {
     try {
       const data = await App.fetchJson(App.PATHS.history(sessionId));
       const items = Array.isArray(data.items) ? data.items : [];
-      if (!items.length) return;
+      if (!items.length) return { lastRole: '', lastUserText: '' };
       // 保留首条欢迎消息，其余先清空再按时间正序渲染
       Array.from(chatEl.querySelectorAll('.msg')).slice(1).forEach(node => node.remove());
       items.reverse();
@@ -309,10 +316,15 @@
         }
       });
       scrollToBottom();
+      return {
+        lastRole: String(items[items.length - 1].role || ''),
+        lastUserText: lastUserQuery
+      };
     } catch (err) {
       // 不要静默吞掉异常：历史上「反馈按钮不渲染」正是被静默 catch 掩盖的
       console.error('历史加载失败', err);
       showToast('历史加载失败，请稍后重试');
+      return { lastRole: '', lastUserText: '' };
     }
   }
 
@@ -405,11 +417,67 @@
   }
 
   /**
+   * 订阅会话 SSE 并把事件渲染进回答气泡。
+   *
+   * 提交新问题与「刷新后重新接管」共用同一份逻辑，避免两处事件处理漂移。
+   *
+   * @param {Element} botMsgEl 回答气泡骨架
+   * @param {string} sid 会话 ID（与后端 SSE 通道键一致）
+   * @param {string} queryText 本轮提问原文（反馈回传用）
+   */
+  function attachStream(botMsgEl, sid, queryText) {
+    const answerEl = ensureAnswerEl(botMsgEl);
+    App.openStream(sid, {
+      onProgress(d) {
+        renderProgress(botMsgEl, d.done_list, d.running_list, d.status);
+        // 进度已 completed 时提前结束等待态，避免后端未发 final 时按钮一直禁用
+        if (d && d.status === 'completed') {
+          const typing = botMsgEl.querySelector('.typing');
+          if (typing) typing.remove();
+          sendBtn.disabled = false;
+        }
+      },
+      onDelta(d, rawText) {
+        App.renderAnswerWithImages(answerEl, rawText, []);
+        scrollToBottom();
+      },
+      onFinal(d, rawText) {
+        const typing = botMsgEl.querySelector('.typing');
+        if (typing) typing.remove();
+        const progress = botMsgEl.querySelector('details.progress');
+        if (progress) progress.removeAttribute('open');
+        // 流式 delta 可能不含【图片】标记，最终包的 answer 才是完整答案，优先使用它
+        const hasFinal = d && typeof d.answer === 'string' && d.answer.trim().length > 0;
+        App.renderAnswerWithImages(answerEl,
+                                   hasFinal ? d.answer : (rawText || answerEl.textContent || ''),
+                                   (d && d.image_urls) || []);
+        renderCitationsAndFeedback(botMsgEl, buildBotMeta(
+          d && d.citations, d && d.groundedness, sessionId, queryText, d && d.item_names));
+        renderItemNameOptions(botMsgEl, d && d.item_name_options, queryText);
+        sendBtn.disabled = false;
+      },
+      onClose() { sendBtn.disabled = false; },
+      onError(d, rawText) {
+        const typing = botMsgEl.querySelector('.typing');
+        if (typing) typing.remove();
+        const progress = botMsgEl.querySelector('details.progress');
+        if (progress) progress.removeAttribute('open');
+        const msg = (d && (d.message || d.error)) || 'SSE 连接中断/失败';
+        App.renderAnswerWithImages(answerEl, `${rawText}\n\n（错误：${msg}）`, []);
+        sendBtn.disabled = false;
+      }
+    });
+  }
+
+  /**
    * @param {string} [rewriteHint] 点选主体时附带的意图原句（见 optionIntentHint）。
    *   只有点了主体选项才传；手动输入时为空，行为与从前一致。
+   *   非字符串入参（如 click 事件对象）会被丢弃。
    */
   async function onSend(rewriteHint) {
     if (sendBtn.disabled) return; // 按钮禁用时拦截重复提交（含 Enter 快捷键）
+    // 只接受字符串：非字符串（如 click 事件对象）一律丢弃，避免污染请求体
+    const hint = typeof rewriteHint === 'string' ? rewriteHint.trim() : '';
     const text = (inputEl.value || '').trim();
     if (!text) return;
     inputEl.value = '';
@@ -419,7 +487,7 @@
 
     try {
       const isStream = streamToggle.checked;
-      const data = await submitQuery(text, rewriteHint);
+      const data = await submitQuery(text, hint);
       renderProgress(botMsgEl, [], [], 'pending');
 
       if (!isStream) {
@@ -434,47 +502,7 @@
       }
 
       // 流式：SSE 订阅与事件分发统一由公共库处理
-      const answerEl = ensureAnswerEl(botMsgEl);
-      App.openStream(data.session_id, {
-        onProgress(d) {
-          renderProgress(botMsgEl, d.done_list, d.running_list, d.status);
-          // 进度已 completed 时提前结束等待态，避免后端未发 final 时按钮一直禁用
-          if (d && d.status === 'completed') {
-            const typing = botMsgEl.querySelector('.typing');
-            if (typing) typing.remove();
-            sendBtn.disabled = false;
-          }
-        },
-        onDelta(d, rawText) {
-          App.renderAnswerWithImages(answerEl, rawText, []);
-          scrollToBottom();
-        },
-        onFinal(d, rawText) {
-          const typing = botMsgEl.querySelector('.typing');
-          if (typing) typing.remove();
-          const progress = botMsgEl.querySelector('details.progress');
-          if (progress) progress.removeAttribute('open');
-          // 流式 delta 可能不含【图片】标记，最终包的 answer 才是完整答案，优先使用它
-          const hasFinal = d && typeof d.answer === 'string' && d.answer.trim().length > 0;
-          App.renderAnswerWithImages(answerEl,
-                                     hasFinal ? d.answer : (rawText || answerEl.textContent || ''),
-                                     (d && d.image_urls) || []);
-          renderCitationsAndFeedback(botMsgEl, buildBotMeta(
-            d && d.citations, d && d.groundedness, sessionId, text, d && d.item_names));
-          renderItemNameOptions(botMsgEl, d && d.item_name_options, text);
-          sendBtn.disabled = false;
-        },
-        onClose() { sendBtn.disabled = false; },
-        onError(d, rawText) {
-          const typing = botMsgEl.querySelector('.typing');
-          if (typing) typing.remove();
-          const progress = botMsgEl.querySelector('details.progress');
-          if (progress) progress.removeAttribute('open');
-          const msg = (d && (d.message || d.error)) || 'SSE 连接中断/失败';
-          App.renderAnswerWithImages(answerEl, `${rawText}\n\n（错误：${msg}）`, []);
-          sendBtn.disabled = false;
-        }
-      });
+      attachStream(botMsgEl, data.session_id, text);
     } catch (e) {
       const bubble = botMsgEl.querySelector('.bubble');
       const progress = botMsgEl.querySelector('details.progress');
@@ -485,7 +513,49 @@
     }
   }
 
-  sendBtn.addEventListener('click', onSend);
+  // 需要「重新接管」的任务状态；其余取值（completed / failed / 空串）一律以历史为准
+  const ACTIVE_TASK_STATUS = { pending: true, processing: true };
+
+  /** 读取进行中查询的进度快照；失败时按「无进行中查询」处理，不影响历史回显。 */
+  async function fetchQueryStatus() {
+    try {
+      return await App.fetchJson(App.PATHS.queryStatus(sessionId));
+    } catch (err) {
+      console.warn('读取查询状态失败，按无进行中查询处理', err);
+      return null;
+    }
+  }
+
+  /**
+   * 页面加载时恢复会话。
+   *
+   * 刷新会断开 SSE，但服务端查询仍在后台跑；此时历史里只有提问、没有回答，
+   * 单靠 loadHistory 会让这一轮问答凭空消失。流程：
+   *   1. 先读任务快照，判断是否还有查询在跑；
+   *   2. 再读历史。顺序不可颠倒：反过来会出现「历史已含回答、快照仍说 processing」的窗口，
+   *      于是重复渲染一个等待中的气泡；
+   *   3. 快照说在跑、且历史最后一条不是回答 → 补出提问气泡（提问可能还没落库），
+   *      用快照的 done/running 重建阶段进度，再重新订阅 SSE 等 final 收尾。
+   */
+  async function restoreSession() {
+    const status = await fetchQueryStatus();
+    const { lastRole, lastUserText } = await loadHistory();
+
+    if (!status || !ACTIVE_TASK_STATUS[status.status]) return; // 无进行中查询：历史即全部
+    if (lastRole === 'assistant') return; // 回答已落库：历史已完整，不再重复接管
+
+    // 用户消息由主体确认节点落库，此刻可能还没写进去 → 用快照里的原文补上
+    if (!lastUserText && status.query) addUserMsg(status.query);
+
+    const botMsgEl = addBotMsgSkeleton();
+    renderProgress(botMsgEl, status.done_list, status.running_list, status.status);
+    sendBtn.disabled = true;
+    attachStream(botMsgEl, sessionId, lastUserText || status.query || '');
+  }
+
+  // 不能直接绑 onSend：浏览器会把 MouseEvent 当作第一个实参传进来，
+  // 它会被误当成 rewrite_hint 发给服务端，触发参数校验失败。
+  sendBtn.addEventListener('click', () => onSend());
   inputEl.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -509,6 +579,7 @@
 
   apiHealth();
   setInterval(apiHealth, 5000);
-  loadHistory();
+  // 不能只调 loadHistory：刷新时后台查询可能仍在跑，需先读任务快照再决定是否重新接管
+  restoreSession();
   setTimeout(() => inputEl.focus(), 200);
 })();

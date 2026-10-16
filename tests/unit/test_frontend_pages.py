@@ -264,3 +264,107 @@ def test_submit_query_sends_rewrite_hint_when_present():
     assert ask, "未找到 askSubject"
     assert "optionIntentHint" in ask.group(0), "askSubject 未把意图提示传给 onSend"
 
+
+# ==================== click 事件不得污染 rewrite_hint ====================
+# 回归背景：sendBtn 直接绑 onSend 时，浏览器把 MouseEvent 作为第一个实参传入。
+# 事件对象序列化为 {}，服务端 Pydantic 校验报
+# “rewrite_hint: Input should be a valid string”，表现为「点发送按钮必失败」，
+# 而按 Enter 提交正常（Enter 路径显式调用 onSend()）。
+
+def test_send_button_click_does_not_pass_event_as_hint():
+    """守卫：onSend 不得被直接注册为 click 监听器。"""
+    source = (JS_DIR / "chat.js").read_text(encoding="utf-8")
+    assert not re.search(r"addEventListener\(\s*'click'\s*,\s*onSend\s*\)", source), (
+        "onSend 被直接绑定为 click 监听器，MouseEvent 会被当成 rewrite_hint 发给服务端"
+    )
+
+
+def test_on_send_discards_non_string_hint():
+    """守卫：onSend 必须过滤非字符串入参，非字符串一律按「无 hint」处理。"""
+    source = (JS_DIR / "chat.js").read_text(encoding="utf-8")
+    body = re.search(r"async function onSend\(rewriteHint\)[\s\S]*?\n  \}", source)
+    assert body, "未找到 onSend"
+    assert re.search(r"typeof\s+rewriteHint\s*===\s*'string'", body.group(0)), (
+        "onSend 未做类型过滤，事件对象等非字符串会污染 rewrite_hint"
+    )
+    assert "submitQuery(text, hint)" in body.group(0), (
+        "onSend 未把过滤后的 hint 交给 submitQuery"
+    )
+
+
+# ==================== 刷新后接管进行中的查询 ====================
+# 回归背景：对话进行中刷新页面，这一轮问答凭空消失。
+# 原因：回答只在生成完才落库（历史里只剩提问），且 SSE 通道在断开时被无条件回收，
+# 重连既拿不到 pending 中的 final，也接不上后续进度。
+# 修复：加载时先读 GET /api/query/status/{sid}，在跑就用快照重建进度并重新订阅 SSE。
+
+def _restore_session_body() -> str:
+    """取出 restoreSession 函数源码，供顺序与行为断言。"""
+    source = (JS_DIR / "chat.js").read_text(encoding="utf-8")
+    match = re.search(r"async function restoreSession\(\)[\s\S]*?\n  \}", source)
+    assert match, "未找到 restoreSession，刷新恢复流程可能被删除或重命名"
+    return match.group(0)
+
+
+def test_restore_session_reads_status_before_history():
+    """守卫：必须先读任务快照、再读历史。
+
+    反序会出现竞态：历史已含回答、快照仍说 processing，于是重复渲染一个等待中的气泡。
+    """
+    body = _restore_session_body()
+    assert body.index("fetchQueryStatus()") < body.index("loadHistory()"), (
+        "restoreSession 必须先读任务快照再读历史，否则会重复渲染等待中的回答气泡"
+    )
+
+
+def test_restore_session_reattaches_stream_for_active_task():
+    """守卫：快照说任务在跑时，必须重建进度并重新订阅 SSE。"""
+    body = _restore_session_body()
+    assert "ACTIVE_TASK_STATUS" in body, "未用「进行中状态」判定是否需要接管"
+    assert "addBotMsgSkeleton()" in body, "未补出等待中的回答气泡"
+    assert "renderProgress(" in body, "未用快照的 done/running 重建阶段进度"
+    assert "attachStream(" in body, "未重新订阅 SSE，刷新后这一轮问答仍会消失"
+
+
+def test_restore_session_skips_when_answer_already_saved():
+    """守卫：历史最后一条已是回答时不得再接管，否则会出现两个回答气泡。"""
+    body = _restore_session_body()
+    assert re.search(r"if\s*\(lastRole\s*===\s*'assistant'\)\s*return", body), (
+        "缺少「回答已落库就不再接管」的短路判断"
+    )
+
+
+def test_active_task_status_covers_only_running_states():
+    """守卫：只有 pending/processing 需要接管；completed/failed 一律以历史为准。"""
+    source = (JS_DIR / "chat.js").read_text(encoding="utf-8")
+    match = re.search(r"const ACTIVE_TASK_STATUS = \{([^}]*)\}", source)
+    assert match, "未找到 ACTIVE_TASK_STATUS"
+    keys = set(re.findall(r"(\w+)\s*:", match.group(1)))
+    assert keys == {"pending", "processing"}, f"进行中状态集合不正确：{keys}"
+
+
+def test_load_history_reports_last_message_role():
+    """守卫：loadHistory 必须回报最后一条消息的角色，恢复流程据此判断回答是否已落库。"""
+    source = (JS_DIR / "chat.js").read_text(encoding="utf-8")
+    body = re.search(r"async function loadHistory\(\)[\s\S]*?\n  \}", source)
+    assert body, "未找到 loadHistory"
+    assert "lastRole" in body.group(0), "loadHistory 未回报最后一条消息的角色"
+    assert "lastUserText" in body.group(0), "loadHistory 未回报最近一条提问"
+
+
+def test_query_status_path_registered_in_shared_library():
+    """守卫：接口路径只有一份实现（app.js），页面不得硬编码 URL。"""
+    app_js = (JS_DIR / "app.js").read_text(encoding="utf-8")
+    chat_js = (JS_DIR / "chat.js").read_text(encoding="utf-8")
+    assert "/api/query/status/" in app_js, "公共库未登记查询状态接口"
+    assert "App.PATHS.queryStatus" in chat_js, "chat.js 未使用公共库的查询状态路径"
+    assert "queryStatus" in (JS_DIR / "app.js").read_text(encoding="utf-8")
+
+
+def test_init_uses_restore_session_not_bare_load_history():
+    """守卫：页面初始化必须走恢复流程，不能只回显历史。"""
+    source = (JS_DIR / "chat.js").read_text(encoding="utf-8")
+    assert re.search(r"^\s*restoreSession\(\);", source, flags=re.MULTILINE), (
+        "初始化未调用 restoreSession，刷新后无法接管进行中的查询"
+    )
+

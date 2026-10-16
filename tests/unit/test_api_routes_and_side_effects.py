@@ -21,6 +21,7 @@ def test_query_service_route_contract():
     for expected in (
         "/api/health",
         "/api/query",
+        "/api/query/status/{session_id}",
         "/api/stream/{session_id}",
         "/api/history/{session_id}",
         "/api/evolution/feedback",

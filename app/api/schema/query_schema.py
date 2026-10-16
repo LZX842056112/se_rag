@@ -31,6 +31,19 @@ class QueryStreamResponseSchema(BaseModel):
     message:str
     session_id:str
 
+# 进行中查询的进度快照（页面刷新后据此重建「阶段进度」并重新接管 SSE）
+class QueryTaskStatusResponseSchema(BaseModel):
+    code:int=200
+    session_id:str
+    # pending / processing / completed / failed；空串表示该会话没有在册任务
+    status:str=""
+    done_list:list[str]=Field(default_factory=list)
+    running_list:list[str]=Field(default_factory=list)
+    # 本轮提问原文：刷新后用户消息可能还没落库，前端据此补出提问气泡
+    query:str=""
+    error_code:str | None=None
+    message:str | None=None
+
 class QueryNotStreamResponseSchema(BaseModel):
     message:str
     session_id:str

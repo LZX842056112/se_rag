@@ -80,6 +80,40 @@ def drop_channel(session_id: str) -> None:
         _channels.pop(session_id, None)
 
 
+def reset_channel(session_id: str) -> None:
+    """丢弃上一轮缓冲的事件（新一轮查询开始时调用）。
+
+    只清缓冲、不动订阅关系：调用时机在「后台任务启动」与「前端连流」之间，
+    若连订阅者一起解绑，先连上的客户端会被改投到缓冲而收不到任何事件。
+    清理的必要性：通道被放弃（客户端断开后再未回来）时会残留 final/close，
+    新一轮重连会在那个旧 close 处提前结束，导致本轮回答永远收不到。
+    """
+    if not session_id:
+        return
+    now = time.time()
+    with _lock:
+        _prune_locked(now)
+        channel = _channels.get(session_id)
+        if channel is not None:
+            channel.pending.clear()
+            channel.touched = now
+
+
+def _task_in_flight(session_id: str) -> bool:
+    """会话内是否还有查询在跑。
+
+    局部导入 ``task_state``：该模块在模块级导入本模块的 ``publish``，
+    顶层反向导入会形成循环依赖，故延迟到调用时导入（Python 会缓存模块，开销可忽略）。
+    """
+    from app.shared.utils.task_state import (
+        TASK_STATUS_PENDING,
+        TASK_STATUS_PROCESSING,
+        get_task_status,
+    )
+
+    return get_task_status(session_id) in (TASK_STATUS_PENDING, TASK_STATUS_PROCESSING)
+
+
 def publish(session_id: str, event: str, data: Dict[str, Any]) -> None:
     """推送事件（线程安全，可从同步业务代码调用）。
 
@@ -157,4 +191,15 @@ async def stream_events(session_id: str, request: Request) -> AsyncIterator[str]
     except (asyncio.CancelledError, ConnectionResetError, BrokenPipeError):
         return
     finally:
-        drop_channel(session_id)
+        # 先解绑订阅者：断开后事件必须改走 pending 缓冲，重连时回放。
+        # 若保留旧的 queue/loop 引用，publish 会把事件投递到无人读取的队列而静默丢失。
+        with _lock:
+            channel = _channels.get(session_id)
+            if channel is not None:
+                channel.queue = None
+                channel.loop = None
+        # 任务仍在跑时不得回收通道：页面刷新会断开 SSE，而查询还在后台继续。
+        # 通道一旦被删，重连既拿不到 pending 里缓冲的 final/close，也接不上后续进度，
+        # 表现为「刷新后这次问答凭空消失」。任务结束后照旧回收，避免通道堆积。
+        if not _task_in_flight(session_id):
+            drop_channel(session_id)

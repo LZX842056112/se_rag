@@ -14,13 +14,14 @@ from app.api.schema.query_schema import (
     QueryNotStreamResponseSchema,
     QueryRequestSchema,
     QueryStreamResponseSchema,
+    QueryTaskStatusResponseSchema,
 )
 from app.rag.query.citations import citations_from_reranked_docs
 from app.rag.query.pipeline import invoke_query_graph
 from app.shared.clients.history_repository import history_repository
 from app.shared.runtime.logger import logger
 from app.shared.utils.sse_broker import stream_events
-from app.shared.utils.task_state import get_done_task_list
+from app.shared.utils.task_state import get_done_task_list, snapshot as task_snapshot
 
 router = APIRouter(prefix="/api", tags=["query"])
 
@@ -67,6 +68,29 @@ def query(background_tasks: BackgroundTasks, query_params: QueryRequestSchema):
         groundedness=state.get("groundedness"),
         retrieval_signals=state.get("retrieval_signals", {}),
         item_name_options=state.get("item_name_options", []),
+    )
+
+
+@router.get("/query/status/{session_id}", response_model=QueryTaskStatusResponseSchema)
+def query_status(session_id: str) -> QueryTaskStatusResponseSchema:
+    """读取会话内查询的进度快照。
+
+    页面刷新会断开 SSE，但后台查询仍在继续。前端先读本接口：
+    ``status`` 为 pending/processing 时，用快照里的 done/running 立刻重建阶段进度，
+    再重新订阅 ``/api/stream`` 收尾；否则只回显历史即可。
+    没有在册任务时返回 ``status=""``（前端据此判定「无进行中查询」）。
+    """
+    record = task_snapshot(session_id)
+    if not record:
+        return QueryTaskStatusResponseSchema(session_id=session_id)
+    return QueryTaskStatusResponseSchema(
+        session_id=session_id,
+        status=record.get("status", ""),
+        done_list=record.get("done_list", []),
+        running_list=record.get("running_list", []),
+        query=record.get("query", ""),
+        error_code=record.get("error_code") or None,
+        message=record.get("message") or None,
     )
 
 

@@ -55,6 +55,8 @@ class _TaskRecord:
     # 失败分类：机器码 + 中文提示（成功任务留空）
     error_code: str = ""
     message: str = ""
+    # 本轮提问原文：页面刷新后用户消息可能还没落库，前端用快照补出提问气泡
+    query: str = ""
     updated_at: float = field(default_factory=time.time)
 
 
@@ -124,6 +126,18 @@ def get_task_status(task_id: str) -> str:
         return record.status if record else ""
 
 
+def set_task_query(task_id: str, query: str) -> None:
+    """登记本轮提问原文（查询开始时调用）。
+
+    用途：页面刷新后，用户消息可能还没写进会话历史（它由主体确认节点落库），
+    前端据快照里的原文补出提问气泡，避免「只剩等待中的回答气泡」。
+    """
+    with _lock:
+        _prune_locked(time.time())
+        record = _get_locked(task_id)
+        record.query = query or ""
+
+
 def update_task_status(task_id: str, status_name: str, push_queue: bool = False) -> None:
     """更新任务整体状态，可选推送一次进度事件。"""
     with _lock:
@@ -173,8 +187,13 @@ def get_task_error(task_id: str) -> tuple[str, str]:
 
 
 def snapshot(task_id: str) -> dict:
-    """返回任务状态的只读快照（用于落盘，避免在锁内做 IO）。"""
+    """返回任务状态的只读快照（用于落盘与「刷新后重建进度」，避免在锁内做 IO）。
+
+    读取前先回收超期记录：否则服务重启前遗留的 processing 记录会被当成
+    「仍在跑」，前端会一直显示等待中。
+    """
     with _lock:
+        _prune_locked(time.time())
         record = _tasks.get(task_id)
         if record is None:
             return {}
@@ -185,6 +204,7 @@ def snapshot(task_id: str) -> dict:
             "running_list": [_to_cn(n) for n in record.running],
             "error_code": record.error_code,
             "message": record.message,
+            "query": record.query,
         }
 
 
