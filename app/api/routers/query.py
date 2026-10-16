@@ -68,6 +68,7 @@ def query(background_tasks: BackgroundTasks, query_params: QueryRequestSchema):
         groundedness=state.get("groundedness"),
         retrieval_signals=state.get("retrieval_signals", {}),
         item_name_options=state.get("item_name_options", []),
+        intent=state.get("intent") or "rag",
     )
 
 
@@ -118,6 +119,7 @@ def get_history(session_id: str, limit: int = 10) -> HistoryListResponseSchema:
                 image_urls=item.get("image_urls", []),
                 citations=item.get("citations", []),
                 groundedness=item.get("groundedness"),
+                intent=item.get("intent") or "",
                 ts=item.get("ts"),
             )
             for item in history_list

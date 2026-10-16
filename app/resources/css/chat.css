@@ -270,3 +270,14 @@ body{
   background:#f7f9fc;
   color:#3b4a5a;
 }
+/* 闲聊徽标：意图识别为闲聊的回答，与知识库作答区分 */
+.chat-badge{
+  display:inline-block;
+  font-size:11px;
+  line-height:1;
+  padding:3px 6px;
+  margin-bottom:6px;
+  border-radius:6px;
+  color:#fff;
+  background:#7c8b9c;
+}

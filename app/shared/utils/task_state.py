@@ -35,6 +35,8 @@ _NODE_NAME_TO_CN: Dict[str, str] = {
     "__end__": "处理完成",
     "END": "处理完成",
     "node_item_name_confirm": "确认问题产品",
+    "node_intent_route": "意图识别",
+    "node_chitchat_answer": "闲聊作答",
     "node_answer_output": "生成答案",
     "node_rerank": "重排序",
     "node_parent_expand": "父块回溯",

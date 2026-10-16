@@ -32,6 +32,7 @@
 | 混合检索 | 稠密 + 稀疏（BGE-M3）混合检索；并行 HyDE 假设性检索与 MCP 联网补充 | 客服页内部 |
 | 主体识别与对齐 | 从提问中识别商品主体并对齐库内标准名；无法确认时**列出相似主体供点选** | 客服页 |
 | 流式回答 | SSE 逐字输出，附引用来源（知识库 / 自进化 / 联网）与回答置信度 | 客服页 |
+| 闲聊分流 | 入口意图识别（LLM 二分类）判定闲聊 / 知识库问答；闲聊用人设直接作答，不进检索链路，回答带「闲聊」徽标 | 客服页 |
 | 会话历史 | 按会话读取 / 清空；支持跨轮次主体指代消解 | 客服页 |
 | 刷新续传 | 对话进行中刷新页面，进度与答案自动接回 | 客服页 |
 | 用户反馈 | 每条回答可 👍/👎，反馈落库并参与自进化 | 客服页 |
@@ -69,7 +70,7 @@ flowchart LR
         IS["导入服务 :8000"]
     end
     subgraph PROC["app/process（LangGraph）"]
-        QG["查询图 8 节点"]
+        QG["查询图 10 节点"]
         IG["导入图 7 节点"]
     end
     subgraph RAG["app/rag（业务）"]
@@ -128,7 +129,7 @@ flowchart LR
 
 | 集合 | 内容 | 唯一写入者 |
 | --- | --- | --- |
-| `chat_message` | 会话历史（含 `citations` / `groundedness` / `pending_subject_ask`） | `history_repository.save_message` |
+| `chat_message` | 会话历史（含 `citations` / `groundedness` / `pending_subject_ask` / `intent`） | `history_repository.save_message` |
 | `fb_events` | 反馈事件（`adopt` / `thumbs` / `cited_chunk_ids` / `item_names` / `source`） | `app/evolution/feedback/collector.py` |
 | `k_gaps` | 知识缺口（`confidence` / `signals` / `status`） | `app/evolution/gap/detector.py` |
 | `k_candidates` | 候选知识（`draft` / `need_info` / `active` / `rejected` / `deprecated`） | 生成器 + 审批状态机 |
@@ -172,19 +173,29 @@ POST /api/import/upload   鉴权 + 校验扩展名（仅 md/pdf）+ 大小上限
 不支持的文档类型会显式标记任务 `FAILED`（图内会静默走到 END，靠业务层兜底），不会出现「已完成但未入库」。
 进度记录不立即清理，由 `TASK_STATE_TTL_SECONDS`（默认 6h）回收，保证前端仍能轮询到终态。
 
-### 3.2 查询流程（:8001，8 节点 + 1 条条件短路）
+### 3.2 查询流程（:8001，10 节点 + 2 条条件短路）
 
 ```
 POST /api/query    流式：先建 SSE 通道再后台执行，立即返回 session_id；非流式：同步等待
-  → node_item_name_confirm   历史上下文 → 确定性消解（见 3.3）或 LLM 抽主体 + 改写 → 向量对齐 → 四态判定
+  → node_intent_route          LLM 二分类（rag / chitchat）；开关关闭 / rewrite_hint / 识别失败 → 恒 rag
+  → 条件边                    闲聊 → node_chitchat_answer → END；知识库问答 → 主体确认
+     闲聊分支 node_chitchat_answer   人设提示词作答 → 流式 delta → 落库 user+assistant 两条（intent=chitchat）
+     知识库分支 node_item_name_confirm   历史上下文 → 确定性消解（见 3.3）或 LLM 抽主体 + 改写 → 向量对齐 → 四态判定
   → 条件边                   主体已确认 → 继续；未确认（answer 已就绪）→ 直接作答 END
   → 并行三路召回             ① 知识库混合检索（含自进化条目）② HyDE 假设性检索 ③ MCP 联网（失败降级空）
   → node_rrf                 多路 RRF 融合，强制并入自进化权威条目
   → node_rerank              本地优先排序 → 限联网条数 → BGE-Reranker 打分 → 累计断崖截断 → 权威条目保底
   → node_parent_expand       命中子块 → 按 parent_id 批量取章节级父块 → 按预算注入章节背景
   → node_answer_output       有现成答案则跳过 LLM；否则作答 → 抽图 → 回填引用/信号/接地性 → 落库
-  → SSE final + close        返回 answer / citations / groundedness / item_name_options
+  → SSE final + close        返回 answer / citations / groundedness / item_name_options / intent
 ```
+
+**闲聊分流**（`app/rag/query/intent_route_service.py` + `chitchat_service.py`）：判定边界保守——
+出现产品名/型号/品类词、知识诉求、问候与知识混合输入、历史在讨论产品的跟进追问，一律判 rag；
+拿不准或识别失败也判 rag（误判闲聊会让用户得不到答案，误判 rag 只是多走一次检索）。
+`CHITCHAT_ENABLED=false` 时意图节点零外部调用、纯透传，RAG 链路逐字节等价。
+闲聊消息 `item_names` 为空，被 `list_valid_history` 过滤，不污染下一轮主体消解；
+闲聊轮显式排除自进化未解决信号（无检索过程不代表知识缺口）。
 
 **父块回溯（Small-to-Big）**：重排仍以**子块**文本打分（子块短、主题集中，打分精度高），父块只作为
 最终上下文的补充——若把长父块一并喂给重排，会稀释相关性分数、把精确命中的子块压下去。父块按分数
@@ -255,7 +266,7 @@ POST /api/query    流式：先建 SSE 通道再后台执行，立即返回 sess
 | `ready` | 连接建立（服务端先回放订阅前缓冲，避免 POST 与 GET 竞态） |
 | `progress` | `status` / `done_list` / `running_list`（节点进度） |
 | `delta` | `delta`（LLM 增量文本） |
-| `final` | `answer` / `image_urls` / `item_names` / `citations` / `groundedness` / `item_name_options` |
+| `final` | `answer` / `image_urls` / `item_names` / `citations` / `groundedness` / `item_name_options` / `intent`（rag / chitchat，前端据此渲染「闲聊」徽标） |
 | `error` | `code` / `message` |
 | `close` | 服务端关闭（前端停止等待） |
 
@@ -298,7 +309,7 @@ uv sync                 # 依据 pyproject.toml + uv.lock 创建 .venv 并安装
 | 服务 | `APP_HOST`（`0.0.0.0`）、`IMPORT_APP_PORT`（8000）、`QUERY_APP_PORT`（8001）、`CORS_ORIGINS`、`APP_ENV`（`dev`）、`IMPORT_APP_NAME`、`QUERY_APP_NAME` |
 | 导入链路 | `IMPORT_ADMIN_TOKEN`（带开发默认值，生产必须覆盖）、`IMPORT_MAX_UPLOAD_MB`（50）、`IMPORT_MAX_CONCURRENT_TASKS`（2）、`IMPORT_ACQUIRE_TIMEOUT_SECONDS`（600）、`IMPORT_MAX_RETRY_ATTEMPTS`（3）、`IMPORT_RETRY_BACKOFF_SECONDS`（1.0）、`IMPORT_RECONCILE_ENABLED`（true）、`IMPORT_CHECKPOINT_ENABLED`（true） |
 | 日志 | `LOG_CONSOLE_ENABLE` / `LOG_CONSOLE_LEVEL` / `LOG_FILE_ENABLE` / `LOG_FILE_LEVEL`（默认 INFO）/ `LOG_FILE_RETENTION`（`7 days`） |
-| 运行期 | `TASK_STATE_TTL_SECONDS`（21600）、`WEB_MAX_IN_CONTEXT`（2）、`CHUNK_DENSE_METRIC` / `ITEM_NAME_DENSE_METRIC`（COSINE） |
+| 运行期 | `TASK_STATE_TTL_SECONDS`（21600）、`WEB_MAX_IN_CONTEXT`（2）、`CHUNK_DENSE_METRIC` / `ITEM_NAME_DENSE_METRIC`（COSINE）、`CHITCHAT_ENABLED`（true，闲聊功能开关；关闭后意图节点零调用纯透传） |
 | 主体判定 | `ITEM_NAME_CONFIRM_MIN_SCORE`（0.65）、`ITEM_NAME_CONFIRM_MARGIN`（0.02）、`ITEM_NAME_OPTION_MIN_SCORE`（0.60）、`ITEM_NAME_CATALOG_TTL_SECONDS`（60）、`ITEM_NAME_SEARCH_LIMIT`（10） |
 | 切分 | `CHUNK_MAX_SIZE`（1000）、`CHUNK_SIZE`（600）、`CHUNK_OVERLAP`（50）、`CHUNK_MIN`（400）、`CHUNKS_SPLIT_TOP_NUMBER`（10）、`EMBEDDING_BATCH_SIZE`（6） |
 | MinerU | `MINERU_POLL_TIMEOUT_SECONDS`（600）、`MINERU_POLL_INTERVAL_SECONDS`（3）、`MINERU_DOWNLOAD_TIMEOUT_SECONDS`（60）、`MINERU_REQUEST_TIMEOUT_SECONDS`（30）、`MINERU_UPLOAD_TIMEOUT_SECONDS`（120） |
@@ -332,7 +343,7 @@ uvicorn app.api.http.import_server:app --host 0.0.0.0 --port 8000
 | 方法与路径 | 说明 |
 | --- | --- |
 | `GET /api/health` | 健康检查（含 `asset_version` 静态资源指纹） |
-| `POST /api/query` | 提交问题（`is_stream=true` 时异步执行并返回 `session_id`） |
+| `POST /api/query` | 提交问题（`is_stream=true` 时异步执行并返回 `session_id`；响应与 SSE `final` 均含 `intent`：rag / chitchat） |
 | `GET /api/query/status/{session_id}` | 进行中查询的进度快照（刷新后据此重建阶段进度） |
 | `GET /api/stream/{session_id}` | SSE 事件流（`ready → progress → delta → final → close`） |
 | `GET /api/history/{session_id}` | 读取会话历史 |
@@ -363,7 +374,9 @@ pytest -q                             # 离线单测（默认 -m 'not e2e'，不
 E2E_ENABLED=1 pytest -m e2e tests/e2e -s   # 真机端到端（会产生模型调用与真实写库）
 ```
 
-当前状态：**57 个测试文件，离线 425 passed / 1 deselected**。
+当前状态：**58 个测试文件，离线 458 passed / 1 deselected**。
+`test_query_degradation.py::test_milvus_down_query_no_longer_500` 依赖本地 BGE-M3 模型文件，
+缺模型文件的环境（模型下载被网络策略拦截）会失败，属既有环境约束，与业务代码无关。
 真机 E2E 覆盖：小 md 导入 → Milvus 落库校验 → 一次查询的完整 SSE 事件序列 → 反馈与缺口扫描 →
 候选审批回流；测试数据带 `e2e_` 前缀并在用例结束后「删除 → 等待 → 复核」。
 
@@ -402,6 +415,7 @@ E2E_ENABLED=1 pytest -m e2e tests/e2e -s   # 真机端到端（会产生模型�
 | `WEB_MAX_IN_CONTEXT` | 2 | 本地有命中时联网结果条数上限 |
 | `PARENT_MAX_CHARS` / `PARENT_TOTAL_BUDGET_CHARS` | 1200 / 4000 | 单个父块的背景注入上限与全部父块的合计预算 |
 | `HYDE_GATE_ENABLED` / `HYDE_GATE_SHORT_CHARS` | false / 24 | 短事实型查询是否跳过 HyDE（默认关闭，保持三路无条件扇出） |
+| `CHITCHAT_ENABLED` | true | 闲聊功能开关；关闭后 `node_intent_route` 零外部调用纯透传，RAG 链路逐字节等价 |
 | `EVOLUTION_GAP_STRONG_THRESHOLD` / `_WEAK_THRESHOLD` | 0.65 / 0.45 | 缺口分级门槛 |
 | `EVOLUTION_OBSERVE_WINDOW_DAYS` / `EVOLUTION_SCAN_BATCH` | 7 / 50 | 缺口扫描窗口与每轮批量 |
 | `EVOLUTION_METRIC_INTERVAL_MINUTES` / `_BACKTEST_INTERVAL_HOURS` / `_BACKTEST_MIN_HITS` | 60 / 24 / 3 | 指标、回测、回测下架门槛 |

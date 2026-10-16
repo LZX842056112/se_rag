@@ -59,6 +59,8 @@ class QueryNotStreamResponseSchema(BaseModel):
     retrieval_signals:dict = Field(default_factory=dict)
     # 没确认到主体时的相似主体选项（前端渲染成可点选按钮）
     item_name_options:list[dict] = Field(default_factory=list)
+    # 本轮意图："rag"=知识库问答 / "chitchat"=闲聊（前端据此渲染「闲聊」徽标）
+    intent:str = "rag"
 
 # 会话记录
 class HistoryClearResponseSchema(BaseModel):
@@ -75,6 +77,8 @@ class HistoryItemResponseSchema(BaseModel):
     image_urls:list[str]=Field(description="关联的图片地址", default_factory=list)
     citations:list[CitationModel]=Field(description="引用来源", default_factory=list)
     groundedness:float | None=None
+    # 本轮意图标记："chitchat"=闲聊（前端渲染「闲聊」徽标）；空串为闲聊功能上线前的历史消息
+    intent:str = ""
     ts:Any
 
 class HistoryListResponseSchema(BaseModel):

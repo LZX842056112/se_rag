@@ -14,6 +14,10 @@ class QueryGraphState(TypedDict):
     # 非空时，主体消解直接用它拼出完整问句，不再让模型推断意图（避免被历史对话改写）。
     rewrite_hint: str
 
+    # 意图识别结果："rag"=知识库问答（默认）/"chitchat"=闲聊；
+    # 由图入口 node_intent_route 回填，决定走检索链路还是闲聊作答分支。
+    intent: str
+
     # 检索过程中的中间数据
     embedding_chunks: list  # 普通向量检索回来的切片
     hyde_embedding_chunks: list  # HyDE 检索回来的切片
@@ -52,6 +56,7 @@ query_graph_default_state: QueryGraphState = {
     "session_id": "",
     "original_query": "",
     "rewrite_hint": "",
+    "intent": "rag",
     "embedding_chunks": [],
     "hyde_embedding_chunks": [],
     "web_search_docs": [],

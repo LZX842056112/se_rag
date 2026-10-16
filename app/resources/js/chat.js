@@ -68,7 +68,7 @@
     scrollToBottom();
   }
 
-  function addBotMsgWithTime(text, ts, imageUrls, citations, groundedness, query, itemNames) {
+  function addBotMsgWithTime(text, ts, imageUrls, citations, groundedness, query, itemNames, intent) {
     const id = 'bot-his-' + Math.random().toString(36).slice(2);
     chatEl.insertAdjacentHTML('beforeend', `
       <div class="msg bot" id="${id}">
@@ -84,6 +84,8 @@
     App.renderAnswerWithImages(el.querySelector('.answer'), text || '', imageUrls || []);
     // 历史消息同样渲染引用来源 / 置信度 / 反馈，保证刷新后不丢失
     renderCitationsAndFeedback(el, buildBotMeta(citations, groundedness, sessionId, query, itemNames));
+    // 闲聊轮（intent=chitchat）渲染「闲聊」徽标，与知识库作答区分
+    if (intent === 'chitchat') renderChitchatBadge(el);
     scrollToBottom();
   }
 
@@ -312,7 +314,7 @@
         } else {
           addBotMsgWithTime(item.text || '', item.ts, item.image_urls || [],
                             item.citations || [], item.groundedness, lastUserQuery,
-                            item.item_names || []);
+                            item.item_names || [], item.intent);
         }
       });
       scrollToBottom();
@@ -458,6 +460,20 @@
   }
 
   /**
+   * 渲染「闲聊」徽标：意图识别为 chitchat 的回答与知识库作答在界面上区分。
+   * 防抖：同一消息只渲染一次（final 与历史回显可能重复触发）。
+   */
+  function renderChitchatBadge(msgEl) {
+    if (!msgEl || msgEl.querySelector('.chat-badge')) return;
+    const bubble = msgEl.querySelector('.bubble');
+    if (!bubble) return;
+    const badge = App.create('span', 'chat-badge', '闲聊');
+    const answerEl = bubble.querySelector('.answer');
+    if (answerEl) bubble.insertBefore(badge, answerEl); // 答案上方
+    else bubble.appendChild(badge);
+  }
+
+  /**
    * 订阅会话 SSE 并把事件渲染进回答气泡。
    *
    * 提交新问题与「刷新后重新接管」共用同一份逻辑，避免两处事件处理漂移。
@@ -495,6 +511,7 @@
         renderCitationsAndFeedback(botMsgEl, buildBotMeta(
           d && d.citations, d && d.groundedness, sessionId, queryText, d && d.item_names));
         renderItemNameOptions(botMsgEl, d && d.item_name_options, queryText);
+        if (d && d.intent === 'chitchat') renderChitchatBadge(botMsgEl);
         sendBtn.disabled = false;
       },
       onClose() { sendBtn.disabled = false; },
@@ -542,6 +559,7 @@
                           buildBotMeta(data.citations, data.groundedness, data.session_id, text,
                                        data.item_names));
         renderItemNameOptions(botMsgEl, data.item_name_options, text);
+        if (data.intent === 'chitchat') renderChitchatBadge(botMsgEl);
         sendBtn.disabled = false;
         return;
       }

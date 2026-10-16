@@ -39,12 +39,16 @@ class HistoryRepository:
         groundedness: float = 0.0,
         pending_subject_ask: Optional[dict] = None,
         message_id: Optional[str] = None,
+        intent: str = "",
     ) -> str:
         """新增（无 ``message_id``）或更新（有 ``message_id``）一条消息。
 
         与其它方法一致：Mongo 故障时降级为空串并记录日志，不抛给主链路。
         答案已生成并推给用户后，落库失败不应再把整笔查询打成 500；
         下一轮读不到该条属可接受损失（不影响当轮已交付的答案）。
+
+        ``intent``：本轮意图标记（"rag" / "chitchat" / 空串）。闲聊链路两条消息
+        均记 "chitchat"，供历史回显渲染「闲聊」徽标；旧文档缺键按空串处理。
         """
         try:
             document = {
@@ -60,6 +64,7 @@ class HistoryRepository:
                 # 用户下一轮手输纯主体名时服务端据此复原意图——前端挂起态刷新即丢。
                 # 空字典表示本轮不是反问。
                 "pending_subject_ask": pending_subject_ask or {},
+                "intent": intent or "",
                 "ts": datetime.now().timestamp(),
             }
             collection = self._collection()

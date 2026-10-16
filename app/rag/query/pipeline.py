@@ -62,11 +62,17 @@ def invoke_query_graph(
             or citations_from_reranked_docs(result_state.get("reranked_docs")),
             "groundedness": result_state.get("groundedness"),
             "item_name_options": result_state.get("item_name_options", []),
+            # 本轮意图（rag / chitchat）：前端据此给闲聊回答渲染「闲聊」徽标；
+            # 缺键的旧 state 按 rag 处理
+            "intent": result_state.get("intent") or "rag",
         })
         publish(session_id, SSEEvent.CLOSE, {})
 
         # 自进化：会话未解决信号异步落库（开启时；异常不影响主链路）
-        if settings.evolution.enabled:
+        # 闲聊轮显式排除：闲聊无检索过程，其回答不代表知识缺口；
+        # 双保险是 chitchat_answer.prompt 已禁输出「无法作答」类兜底话术，
+        # 防止 is_no_answer 误命中把闲聊记进 fb_events。
+        if settings.evolution.enabled and (result_state or {}).get("intent") != "chitchat":
             try:
                 flush_session_signals(result_state)
             except Exception as exc:  # noqa: BLE001

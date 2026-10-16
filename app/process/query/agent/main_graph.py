@@ -1,7 +1,9 @@
-"""查询流程图：主体确认 → 三路召回（向量 / HyDE / 联网）→ RRF 融合 → 重排 → 父块回溯 → 作答。"""
+"""查询流程图：意图识别 → 闲聊分流 / 主体确认 → 三路召回（向量 / HyDE / 联网）→ RRF 融合 → 重排 → 父块回溯 → 作答。"""
 from langgraph.graph import END, StateGraph
 
 from app.process.query.agent.nodes.node_answer_output import node_answer_output
+from app.process.query.agent.nodes.node_chitchat_answer import node_chitchat_answer
+from app.process.query.agent.nodes.node_intent_route import node_intent_route
 from app.process.query.agent.nodes.node_item_name_confirm import node_item_name_confirm
 from app.process.query.agent.nodes.node_parent_expand import node_parent_expand
 from app.process.query.agent.nodes.node_rerank import node_rerank
@@ -14,7 +16,9 @@ from app.shared.runtime.logger import logger
 
 query_graph_builder = StateGraph(QueryGraphState)
 
-# 1. 注册节点
+# 1. 注册节点（意图路由与闲聊作答为本功能新增，其余为原有检索/作答链路）
+query_graph_builder.add_node(node_intent_route)
+query_graph_builder.add_node(node_chitchat_answer)
 query_graph_builder.add_node(node_item_name_confirm)
 query_graph_builder.add_node(node_search_embedding)
 query_graph_builder.add_node(node_search_embedding_hyde)
@@ -24,8 +28,23 @@ query_graph_builder.add_node(node_rerank)
 query_graph_builder.add_node(node_parent_expand)
 query_graph_builder.add_node(node_answer_output)
 
-# 2. 入口节点
-query_graph_builder.set_entry_point("node_item_name_confirm")
+# 2. 入口节点：意图识别
+query_graph_builder.set_entry_point("node_intent_route")
+
+
+def after_node_intent_route(state: QueryGraphState):
+    """路由：闲聊 → 闲聊作答；其余（rag / 开关关闭 / 识别失败兜底）→ 主体确认。"""
+    if state.get("intent") == "chitchat":
+        logger.info("意图识别为闲聊，进入闲聊作答节点")
+        return "node_chitchat_answer"
+    logger.info("意图识别为知识库问答（或闲聊开关关闭/兜底），进入主体确认")
+    return "node_item_name_confirm"
+
+
+query_graph_builder.add_conditional_edges("node_intent_route", after_node_intent_route, {
+    "node_chitchat_answer": "node_chitchat_answer",
+    "node_item_name_confirm": "node_item_name_confirm",
+})
 
 
 def after_node_item_name_confirm(state: QueryGraphState):
@@ -51,6 +70,8 @@ query_graph_builder.add_edge("node_web_search_mcp", "node_rrf")
 query_graph_builder.add_edge("node_rrf", "node_rerank")
 query_graph_builder.add_edge("node_rerank", "node_parent_expand")
 query_graph_builder.add_edge("node_parent_expand", "node_answer_output")
+# 闲聊分支：作答后直接结束，不经过检索链路任何节点
+query_graph_builder.add_edge("node_chitchat_answer", END)
 query_graph_builder.add_edge("node_answer_output", END)
 
 query_app = query_graph_builder.compile()

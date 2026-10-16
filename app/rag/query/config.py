@@ -30,6 +30,10 @@ HYDE_GATE_ENABLED: bool = env_bool("HYDE_GATE_ENABLED", False)
 # 短查询阈值（字符）：不超过该长度且命中事实型标记词，才判定为「短事实型查询」
 HYDE_GATE_SHORT_CHARS: int = env_int("HYDE_GATE_SHORT_CHARS", 24)
 
+# 闲聊功能开关：默认开启。关闭后 node_intent_route 零外部调用、纯透传回填 intent="rag"，
+# 检索与作答链路逐字节等价（见 app/process/query/agent/main_graph.py）。
+CHITCHAT_ENABLED: bool = env_bool("CHITCHAT_ENABLED", True)
+
 # kb_chunks 集合 dense 向量检索的 metric_type。
 # 该集合由导入端以 metric_type="COSINE" 创建（sparse 用 IP），而混合检索请求的默认值是
 # IP；不一致会让 Milvus 报 "metric type not match" 并静默返回 None，表现为「召回 0 条 →

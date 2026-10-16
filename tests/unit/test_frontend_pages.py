@@ -472,3 +472,23 @@ def test_render_item_name_options_records_pending_subject_ask():
     assert "pendingSubjectAsk = {" in body.group(0), "渲染选项栏时未记录挂起的反问"
     assert "sourceQuery" in body.group(0), "挂起的反问缺少来源问句"
 
+
+
+def test_chat_renders_chitchat_badge():
+    """闲聊徽标：chat.js 必须含渲染函数与「闲聊」文案，chat.css 必须含 .chat-badge。"""
+    js = (JS_DIR / "chat.js").read_text(encoding="utf-8")
+    css = (CSS_DIR / "chat.css").read_text(encoding="utf-8")
+    assert "renderChitchatBadge" in js, "chat.js 缺少闲聊徽标渲染函数"
+    assert "chat-badge" in js and "闲聊" in js
+    assert ".chat-badge" in css, "chat.css 缺少 .chat-badge 样式（禁内联 style，必须走样式表）"
+
+
+def test_final_and_history_carry_intent():
+    """intent 必须贯通三条渲染路径：流式 final / 非流式响应 / 历史回显。"""
+    js = (JS_DIR / "chat.js").read_text(encoding="utf-8")
+    assert "d.intent === 'chitchat'" in js, "流式 final 未按 intent 渲染徽标"
+    assert "data.intent === 'chitchat'" in js, "非流式响应未按 intent 渲染徽标"
+    assert re.search(r"function addBotMsgWithTime\([^)]*intent", js), (
+        "addBotMsgWithTime 缺少 intent 形参，历史回显无法带出徽标"
+    )
+    assert "item.intent" in js, "loadHistory 未把 item.intent 传给历史渲染"
