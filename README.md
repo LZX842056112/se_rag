@@ -1,455 +1,339 @@
-# se_rag · 企业化 RAG 知识库客服系统
+# se_rag · RAG 知识库客服系统
 
-把企业文档导入向量库，在网页上用自然语言提问，并让知识库**自己长大**——自动发现客服答不出的问题、
-生成知识候选、经人工审批后回流知识库。
+将产品手册整理成可检索知识，在网页上依据资料回答问题，并把未解决的问题转成待人工审核的知识候选。
 
-> **三个页面**：客服对话 `/`、自进化审批 `/approval`、文件导入 `/import`。
-> **两个服务**：导入服务 `:8000`、查询服务 `:8001`（共用同一份 `app/`，只挂不同路由）。
-> **技术栈**：Python ≥3.11 · FastAPI · LangGraph · Milvus · MongoDB · MinIO · BGE-M3 / BGE-Reranker · DashScope Qwen。
+项目包含三个页面和两个 FastAPI 服务：导入服务处理文件，查询服务提供客服对话、反馈和知识审批，两者共用模型与底层存储。
 
-> 想直接看代码怎么走，读 **[技术讲解文档](docs/se_rag-技术讲解文档.md)**
-> （`docs/se_rag-技术讲解文档.html` 是可离线打开的单页版，含流程图与侧边目录）。
-> 本文档偏重「怎么用、怎么配、出问题看哪里」。
+想理解代码如何运作，阅读 **[技术讲解文档](docs/se_rag-技术讲解文档.md)**。本文侧重安装、配置、使用与排障。
 
 ## 目录
 
-- [一、功能与定位](#一功能与定位)
-- [二、架构与技术栈](#二架构与技术栈)
-- [三、核心流程](#三核心流程)
-- [四、快速开始](#四快速开始)
-- [五、开发与测试](#五开发与测试)
-- [六、注意事项与排障](#六注意事项与排障)
+- [功能与边界](#功能与边界)
+- [架构概览](#架构概览)
+- [环境与依赖](#环境与依赖)
+- [快速开始](#快速开始)
+- [配置说明](#配置说明)
+- [页面与使用流程](#页面与使用流程)
+- [API 速查](#api-速查)
+- [开发与测试](#开发与测试)
+- [部署约束与已知问题](#部署约束与已知问题)
+- [排障与源码导航](#排障与源码导航)
 
-## 一、功能与定位
+## 功能与边界
 
-通用大模型不懂企业内部专有知识，而企业知识更新快、人工维护贵。本项目用
-「导入 → 检索增强生成 → 反馈 → 缺口发现 → 候选生成 → 人工审批 → 回流」的闭环，
-让知识库跟着真实客服数据持续自我完善。
+- **文档导入**：Markdown 直接读取；PDF 经 MinerU 转成 Markdown，再做图片说明、结构化切分、主体识别和向量化。
+- **检索问答**：先确认产品主体，再并行进行普通向量检索、HyDE 检索与 MCP 联网搜索，经融合、重排和章节背景补充生成答案。
+- **对话交互**：支持普通响应与 SSE 流式回答、历史读取与清空、引用、图片、主体候选点选和常见刷新续接路径。
+- **知识自进化**：反馈 → 缺口识别 → 候选提炼 → 人工审批 → 索引回流，并提供指标、自调参数和基于反馈的回测。
+- **分层评估**：复用真实切分和检索节点，检查召回、融合及重排效果。
 
-| 能力 | 说明 | 入口 |
-| --- | --- | --- |
-| 文档导入 | Markdown 直接处理；PDF 经 MinerU 云解析转 Markdown；图片自动生成说明并上传 MinIO | 导入页 `:8000/import` |
-| 混合检索 | 稠密 + 稀疏（BGE-M3）混合检索；并行 HyDE 假设性检索与 MCP 联网补充 | 客服页内部 |
-| 主体识别与对齐 | 从提问中识别商品主体并对齐库内标准名；无法确认时**列出相似主体供点选** | 客服页 |
-| 流式回答 | SSE 逐字输出，附引用来源（知识库 / 自进化 / 联网）与回答置信度 | 客服页 |
-| 会话历史 | 按会话读取 / 清空；支持跨轮次主体指代消解 | 客服页 |
-| 刷新续传 | 对话进行中刷新页面，进度与答案自动接回 | 客服页 |
-| 用户反馈 | 每条回答可 👍/👎，反馈落库并参与自进化 | 客服页 |
-| 知识自进化 | 缺口扫描 → 候选生成（质量闸门 / PII 拦截）→ 人工审批 → 回流向量库 → 参与后续召回 | 审批页 `:8001/approval` |
-| 自动调度 | 内置调度器：每轮扫描生成；指标快照与参数自调、回测止损按周期运行 | 查询服务 lifespan |
-| 在线评估 | LLM 判定答案接地性；统计采纳率 / 缺口率并落库 | `GET /api/evolution/status` |
+“自进化”更新的是 FAQ 知识和有限的检索参数，**不训练大模型权重**。引用表示回答上下文中的参考材料；重排分和模型评估的接地性都不等于答案正确率。自进化默认关闭，未开启时反馈接口接受请求但不落库。
 
-**边界**：只支持 `.md` / `.pdf`；其他类型在入口即被拒绝（422）。知识库与自进化共用同一套 Milvus / MongoDB。
+上传 API 每次只接受一个 `.md` 或 `.pdf`，默认上限 50 MB；网页可以把多个文件分别提交。当前应使用小写后缀和 UTF-8 Markdown，大小写及文件头编码边界问题见[已知问题](#部署约束与已知问题)。
 
-## 二、架构与技术栈
-
-### 2.1 分层与依赖方向
-
-依赖严格单向：`api → process → rag → evolution → shared → 外部系统`。`shared` 不反向依赖任何业务层。
-
-| 分层 | 规模 | 职责 | 改什么时来这里 |
-| --- | --- | --- | --- |
-| `app/api` | 14 文件 / 886 行 | 服务组装、路由、Pydantic 契约、统一错误体、页面与静态资源 | 加接口、改路由 |
-| `app/process` | 26 文件 / 480 行 | LangGraph 图与节点（薄编排，平均约 18 行/文件） | 调流程分支 / 并行 |
-| `app/rag` | 40 文件 / 4366 行 | 业务实现：解析、切分、主体识别、召回、融合、重排、作答 | 改检索 / 生成行为 |
-| `app/evolution` | 26 文件 / 1501 行 | 反馈 → 缺口 → 候选 → 审批 → 回流；指标 / 自调 / 回测 | 改自进化规则 |
-| `app/shared` | 28 文件 / 2191 行 | 唯一底座：配置单点、外部客户端、模型门面、日志、工具 | 换模型 / 换存储 |
-| `app/rag_eval` | 7 文件 / 1402 行 | 离线评估子系统（独立包边界） | 改评估指标 |
-| `app/resources` | 3 HTML + 4 CSS + 4 JS + 7 提示词 | 三页前端与提示词模板 | 改前端交互 / 改提示词 |
+## 架构概览
 
 ```mermaid
-flowchart LR
-    subgraph FE["前端（原生 JS，无构建链）"]
-        UI1["客服页 /"]
-        UI2["审批页 /approval"]
-        UI3["导入页 /import"]
-    end
-    subgraph API["app/api"]
-        QS["查询服务 :8001"]
-        IS["导入服务 :8000"]
-    end
-    subgraph PROC["app/process（LangGraph）"]
-        QG["查询图 8 节点"]
-        IG["导入图 7 节点"]
-    end
-    subgraph RAG["app/rag（业务）"]
-        RQ["query：主体确认 / 召回 / RRF / 重排 / 父块回溯 / 作答"]
-        RI["import_：解析 / 切分 / 主体 / 向量化 / 入库 / 对账"]
-    end
-    subgraph EVO["app/evolution"]
-        LOOP["反馈 → 缺口 → 候选 → 审批 → 回流"]
-    end
-    SH["app/shared（config / clients / models / runtime / utils）"]
-    EXT[("Milvus · MongoDB · MinIO · 模型服务 · MCP · MinerU")]
-    UI1 --> QS
-    UI2 --> QS
-    UI3 --> IS
-    QS --> QG --> RQ --> LOOP
-    IS --> IG --> RI
-    RQ --> SH
-    RI --> SH
-    LOOP --> SH
-    SH --> EXT
+flowchart TB
+    UI["浏览器：导入／对话／审批"] --> IMP["导入 FastAPI :8000"]
+    UI --> QUERY["查询 FastAPI :8001"]
+    IMP --> IG["导入 LangGraph"]
+    QUERY --> QG["查询 LangGraph"]
+    QUERY --> EVO["反馈／审批／进化调度器"]
+    IG --> V["Milvus：子块、主体名、进化 FAQ"]
+    QG --> V
+    EVO --> V
+    IG --> M["MongoDB：父块、历史与进化记录"]
+    QG --> M
+    EVO --> M
+    IG --> O["MinIO：手册图片"]
+    IG --> MODEL["本地 BGE＋对话／视觉模型 API"]
+    QG --> MODEL
+    EVO --> MODEL
+    IG --> PDF["MinerU：PDF 解析"]
+    QG --> WEB["MCP：联网搜索"]
 ```
 
-### 2.2 技术栈
+关键分工：
 
-| 类别 | 技术 | 用途 | 位置 |
+- **Milvus** 保存检索子块、产品主体名和审核通过的 FAQ，使用稠密＋稀疏向量。
+- **MongoDB** 保存章节父块、对话历史、反馈、缺口、候选、指标和参数。
+- **MinIO** 保存图片，正文和答案通过 URL 引用。
+- **LangGraph** 编排固定业务图；后台任务、进度和 SSE 主要依赖当前进程内状态。
+
+主体名是检索过滤条件；子块用于精确命中，父块用于命中后补充背景。Milvus 内的 dense/sparse 混合与后续 RRF 是两层不同的融合，联网结果在重排阶段加入。
+
+目录按 `api / process / rag / evolution / shared / rag_eval` 划分职责，但实际存在跨模块双向依赖，并非严格单向分层。完整关系见[模块讲解](docs/se_rag-技术讲解文档.md#3-模块分层与相互关系)。
+
+## 环境与依赖
+
+- Python ≥ 3.11；仓库的 `.python-version` 指定 3.12。
+- 已安装 `uv`；依赖声明在 [pyproject.toml](pyproject.toml)，解析版本在 [uv.lock](uv.lock)。
+- 可访问的 Milvus、MongoDB、MinIO，以及相应权限与存储空间。
+- 本地 BGE-M3 与 BGE-Reranker 模型文件；支持配置 CPU/GPU 与 FP16。
+- 可用的对话模型 API；图片说明还需要视觉模型。客户端走 OpenAI 兼容协议，并固定透传 `enable_thinking=false`，更换模型服务时需检查参数兼容性。
+- PDF 导入需要 MinerU 服务与令牌；联网补充需要可用的百炼 MCP 搜索地址。
+
+模型首次调用时按需加载。导入和查询是不同进程，可能各加载一份模型；源码未给出经过验证的最低显存或吞吐指标，应依据实际模型、硬件与文档量测量。
+
+仓库没有提供 Docker/Compose 或 CI 工作流，外部服务需自行准备。
+
+## 快速开始
+
+以下命令从项目根目录执行。它们是操作说明，不代表文档更新时已经安装、启动或测试成功。
+
+### 1. 安装依赖
+
+```powershell
+uv sync --group dev
+```
+
+仓库默认依赖索引配置在 `pyproject.toml`。安装前确认该索引、模型来源及各外部服务在你的环境中可达。
+
+### 2. 创建或核对 `.env`
+
+已有 `.env` 时按需补充，不要用示例覆盖真实配置。下面的尖括号字段必须替换为自己的值；令牌与路径均为占位内容，不是可直接使用的凭据。
+
+```dotenv
+# 对话与视觉模型
+OPENAI_API_KEY=<your-api-key>
+OPENAI_BASE_URL=https://<your-llm-host>/v1
+LLM_DEFAULT_MODEL=<your-chat-model>
+VL_MODEL=<your-vision-model>
+LLM_DEFAULT_TEMPERATURE=0.1
+LLM_TIMEOUT_SECONDS=60
+LLM_MAX_RETRIES=2
+
+# 本地模型；路径统一使用正斜杠
+BGE_M3_PATH=<absolute-path-to-bge-m3>
+BGE_DEVICE=cpu
+BGE_FP16=false
+BGE_RERANKER_LARGE=<absolute-path-to-bge-reranker>
+BGE_RERANKER_DEVICE=cpu
+BGE_RERANKER_FP16=false
+
+# Milvus：示例集合名，新环境可采用；已有环境应保持现有数据契约
+MILVUS_URL=http://<milvus-host>:19530
+CHUNKS_COLLECTION=kb_chunks
+ITEM_NAME_COLLECTION=kb_item_names
+EVOLUTION_COLLECTION=kb_evolution_items
+MILVUS_TIMEOUT_SECONDS=15
+
+# MongoDB
+MONGO_URL=mongodb://<mongo-host>:27017
+MONGO_DB_NAME=<your-database-name>
+
+# MinIO：ENDPOINT 不含 http:// 或 https://
+MINIO_ENDPOINT=<minio-host>:9000
+MINIO_ACCESS_KEY=<your-minio-access-key>
+MINIO_SECRET_KEY=<your-minio-secret-key>
+MINIO_BUCKET_NAME=<your-image-bucket>
+MINIO_IMG_DIR=upload-images
+MINIO_SECURE=false
+
+# 管理凭据：分别配置，使用自行生成的随机值
+IMPORT_ADMIN_TOKEN=<your-random-import-token>
+EVOLUTION_ADMIN_TOKEN=<your-random-evolution-token>
+
+# PDF 解析；只导入 Markdown 时不使用此能力
+MINERU_BASE_URL=https://<your-mineru-host>/<api-prefix>
+MINERU_API_TOKEN=<your-mineru-token>
+
+# 联网补充；不可用时该路降级为空，不建议保留占位地址
+MCP_DASHSCOPE_BASE_URL=https://<your-mcp-host>/<search-path>
+
+# 服务与自进化
+APP_HOST=127.0.0.1
+IMPORT_APP_PORT=8000
+QUERY_APP_PORT=8001
+CORS_ORIGINS=http://127.0.0.1:8000,http://127.0.0.1:8001
+EVOLUTION_ENABLED=false
+```
+
+`MINIO_SECURE`、模型设备和地址应匹配实际环境。代码会把 PDF、图片或检索文本发送给相应解析/模型/搜索服务，使用内部资料前需确认这些服务的数据处理边界。
+
+### 3. 在两个终端启动
+
+终端一：
+
+```powershell
+uv run python -m app.api.http.import_server
+```
+
+终端二：
+
+```powershell
+uv run python -m app.api.http.query_server
+```
+
+模块入口读取 `.env` 中的主机与端口。也可以显式指定 Uvicorn 参数；以下命令的地址和端口由命令行决定：
+
+```powershell
+uv run uvicorn app.api.http.import_server:app --host 127.0.0.1 --port 8000 --workers 1
+uv run uvicorn app.api.http.query_server:app --host 127.0.0.1 --port 8001 --workers 1
+```
+
+这两条仍需在不同终端运行。查询服务必须保持单 worker；多个查询实例连接同一进化库还可能重复执行调度。
+
+### 4. 打开页面并导入资料
+
+| 页面 | 默认本机地址 | 操作 |
+| --- | --- | --- |
+| 文件导入 | `http://127.0.0.1:8000/import` | 输入导入令牌并保存，上传文件，等待任务结束 |
+| 客服对话 | `http://127.0.0.1:8001/` | 说明产品主体后提问；必要时点选候选主体 |
+| 知识审批 | `http://127.0.0.1:8001/approval` | 开启自进化后查看候选，输入审批令牌执行写操作 |
+
+端口改变时使用实际地址。网页令牌保存在当前标签页会话的 `sessionStorage`，不会自动从服务端配置中获取。上传成功只表示文件已接收；`completed` 也不保证父块和图片等增强数据全部一致落地，需结合对账日志判断。
+
+## 配置说明
+
+配置主要在 [settings.py](app/shared/config/settings.py)，查询、切分、主体匹配等参数还分布在各领域 `config.py`。日志、根路径、Mongo 和进化鉴权也有独立读取入口。
+
+- `.env` 通过 `load_dotenv(override=True)` 加载，**会覆盖已有的同名进程环境变量**。修改后通常需要重启进程使配置与缓存重新建立。
+- `PROJECT_ROOT` 可显式指定根目录，否则代码向上查找 `.env`；没有 `.env` 且未指定根目录时，路径初始化可能失败。
+- 导入端默认令牌是源码中的固定非空值；必须显式设置自己的随机令牌。未设置变量并不会触发“缺少令牌”的 503；明确置空才会。
+- 进化写鉴权直接读取 `EVOLUTION_ADMIN_TOKEN`；未配置或置空时写操作返回 503，错误令牌返回 401。
+- 只想使用已有知识问答时可保持 `EVOLUTION_ENABLED=false`；开启后，查询服务还会按调度开关驱动候选生成、指标与回测。
+
+常用参数均为**源码默认值**，不是当前 `.env` 的实际值：
+
+| 参数组 | 默认值 | 作用 |
+| --- | --- | --- |
+| `ITEM_NAME_CONFIRM_MIN_SCORE` / `ITEM_NAME_CONFIRM_MARGIN` | 0.65 / 0.02 | 主体确认门槛与不同主体间距 |
+| `CHUNK_SIZE` / `CHUNK_MAX_SIZE` / `CHUNK_MIN` / `CHUNK_OVERLAP` | 600 / 1000 / 400 / 50 | 按正文字符数切分与合并；不等于 token 数 |
+| `EMBEDDING_BATCH_SIZE` | 6 | 子块向量化批量 |
+| `IMPORT_MAX_UPLOAD_MB` / `IMPORT_MAX_CONCURRENT_TASKS` | 50 / 2 | 单文件大小与当前进程同时执行任务数 |
+| `IMPORT_ACQUIRE_TIMEOUT_SECONDS` / `IMPORT_MAX_RETRY_ATTEMPTS` | 600 / 3 | 等待执行槽与导入尝试次数 |
+| `HYDE_GATE_ENABLED` | false | 开启后短事实型问题可跳过 HyDE |
+| `WEB_MAX_IN_CONTEXT` | 2 | 有本地命中时联网结果条数上限 |
+| `PARENT_MAX_CHARS` / `PARENT_TOTAL_BUDGET_CHARS` | 1200 / 4000 | 父块背景字符预算 |
+| `EVOLUTION_SCHEDULE_ENABLED` / `EVOLUTION_SCHEDULE_INTERVAL_MINUTES` | true / 30 | 总开关开启后的扫描周期 |
+| `EVOLUTION_METRIC_INTERVAL_MINUTES` / `EVOLUTION_BACKTEST_INTERVAL_HOURS` | 60 / 24 | 指标自调与反馈回测周期 |
+| `EVOLUTION_BACKTEST_MIN_HITS` | 3 | 回测自动下架的最低反馈命中数量 |
+
+RRF 默认 K=60、Top=5，重排默认上限 6；开启进化后参数注册表可覆盖部分值，FAQ 保底逻辑还可能突破最终条数上限。`EVOLUTION_GRAY_ENABLED` 和 `EVOLUTION_GROUNDEDNESS_MIN` 目前仅有配置定义，不能依赖它们形成上线灰度或质量闸门。
+
+## 页面与使用流程
+
+**导入**：鉴权 → 落盘 → PDF/Markdown 分派 → 图片说明 → 结构切分 → 主体识别 → 向量化 → 写入与旧数据清理。文档身份目前与文件标题绑定，不要用同名文件代表两份无关手册，也应避免同文档并发重导入。
+
+**问答**：主体确认 → 普通混合召回、HyDE 与联网 → RRF → 重排 → 父块回填 → 生成 → 引用与历史。主体不明确时先反问；点选后通过独立 `rewrite_hint` 保留原问题的意图。
+
+**自进化**：将 `EVOLUTION_ENABLED` 改为 true 并重启查询服务；未解决信号与负反馈进入扫描。无证据的候选成为 `need_info`，须人工补充事实后再审批；`draft` 通过后进入进化索引。调度实际触发时间受扫描循环与执行耗时影响，不是精确整点任务。
+
+具体数据字段、失败降级、SSE 恢复和流程图见[技术讲解](docs/se_rag-技术讲解文档.md)。
+
+## API 速查
+
+完整路径及请求模型以[查询路由](app/api/routers/query.py)、[导入路由](app/api/routers/import_.py)、[进化路由](app/api/routers/evolution.py)为准。以下鉴权描述仅针对应用源码，不包括部署方可能设置的网关保护。
+
+| 服务 | 方法与路径 | 用途 | 应用层鉴权 |
 | --- | --- | --- | --- |
-| 语言 / 依赖 | Python ≥3.11 + `uv` | 后端全部逻辑；`pyproject.toml` + `uv.lock` 锁版本 | `pyproject.toml` |
-| Web | FastAPI + Uvicorn + SSE | 两个服务、Pydantic 契约、流式回答 | `app/api/http/*_server.py` |
-| 编排 | LangGraph（`StateGraph`） | 导入图 / 查询图，条件边 + 并行召回 | `app/process/*/agent/main_graph.py` |
-| 向量库 | Milvus（`pymilvus[model]`） | 三集合稠密 + 稀疏混合检索 | `app/shared/clients/milvus_gateway.py` |
-| 文档库 | MongoDB（`pymongo`） | 会话、反馈、缺口、候选、指标、参数、父块 | `app/shared/clients/mongo.py` |
-| 对象存储 | MinIO | Markdown 图片外链（公开只读桶） | `app/shared/clients/minio_gateway.py` |
-| 模型 | BGE-M3（本地，稠密+稀疏）、BGE-Reranker-Large（本地）、DashScope Qwen（云端） | 向量化、重排、生成 / 视觉 / 接地性评估 | `app/shared/models/` |
-| 联网检索 | 百炼 MCP（`openai-agents` + `requests`） | 补充实时信息，失败降级为空 | `app/rag/query/web_search_service.py` |
-| PDF 解析 | MinerU 云服务（`vlm` 版本） | PDF → Markdown | `app/rag/import_/pdf_parse_service.py` |
-| 前端 | 原生 HTML / CSS / JS | 三页 UI，无构建链 | `app/resources/` |
-| 日志 | loguru | 控制台 + 文件双通道；`sys._getframe` 定位真实调用点 | `app/shared/runtime/logger.py` |
-| 测试 | pytest（+ `mongomock`） | 离线单测 + 可选真机 e2e | `tests/` |
+| 两者 | `GET /api/health` | 存活与静态资源指纹，不检查模型和存储就绪 | 无 |
+| 查询 | `POST /api/query` | 提交问题，普通结果或返回流式会话 ID | 无用户身份要求 |
+| 查询 | `GET /api/query/status/{session_id}` | 查询状态与阶段快照 | 未校验会话所有者 |
+| 查询 | `GET /api/stream/{session_id}` | SSE 事件 | 未校验会话所有者 |
+| 查询 | `GET /api/history/{session_id}` | 最近消息，limit 限 1～100 | 未校验会话所有者 |
+| 查询 | `DELETE /api/history/{session_id}` | 清空会话 | 未校验会话所有者 |
+| 查询 | `POST /api/evolution/feedback` | 点赞/点踩等反馈 | 无归属校验 |
+| 查询 | `GET /api/evolution/candidates` | 候选列表，可按 status 筛选 | 未要求管理令牌 |
+| 查询 | `GET /api/evolution/status` | 闭环运行统计 | 未要求管理令牌 |
+| 查询 | `POST /api/evolution/candidates/{id}/approve` | 审批通过 | EVOLUTION_ADMIN_TOKEN |
+| 查询 | `POST /api/evolution/candidates/{id}/reject` | 驳回 | EVOLUTION_ADMIN_TOKEN |
+| 查询 | `POST /api/evolution/candidates/{id}/edit` | 编辑问题/答案 | EVOLUTION_ADMIN_TOKEN |
+| 查询 | `DELETE /api/evolution/candidates/{id}` | 下架并删除候选 | EVOLUTION_ADMIN_TOKEN |
+| 导入 | `POST /api/import/upload` | multipart `files`，每次一个 | IMPORT_ADMIN_TOKEN |
+| 导入 | `GET /api/import/status/{task_id}` | 导入状态，内存未命中可读磁盘快照 | IMPORT_ADMIN_TOKEN |
 
-### 2.3 数据契约
+两类管理令牌均通过请求头 `X-Internal-Token` 传递。
 
-集合名与字段名属数据契约。改名这类操作必须绕开它们。
+查询请求示例：
 
-**Milvus 三个集合**
-
-| 集合 | 主键 | 关键字段 | 向量 / 口径 |
-| --- | --- | --- | --- |
-| `kb_chunks` | `chunk_id` VARCHAR(40)，**确定性哈希** | `doc_id` / `parent_id` / `file_title` / `item_name` / `title` / `parent_title` / `heading_path` / `part`(INT16) / `seq` / `page` / `content` / `content_hash` | dense **COSINE** + sparse IP |
-| `kb_item_names` | `pk` INT64（显式） | `file_title` / `item_name` | dense **COSINE** + sparse IP |
-| `kb_evolution_items` | `evo_doc_id` VARCHAR(128)（`evo_<12hex>`） | `faq_question` / `faq_answer` / `source_refs` / `item_name` / `status` / `file_title` | dense **IP**（BGE-M3 已 L2 归一化） |
-
-`chunk_id = sha1(doc_id#heading_path#occurrence#part)`：只编码结构、不编码内容，因此**重复导入后 id 稳定**，
-标注与引用不再失效；内容变更由 `content_hash` 感知。`occurrence` 用于消歧重名标题。
-
-**MongoDB 七个集合**（库名见 `MONGO_DB_NAME`）
-
-| 集合 | 内容 | 唯一写入者 |
-| --- | --- | --- |
-| `chat_message` | 会话历史（含 `citations` / `groundedness` / `pending_subject_ask`） | `history_repository.save_message` |
-| `fb_events` | 反馈事件（`adopt` / `thumbs` / `cited_chunk_ids` / `item_names` / `source`） | `app/evolution/feedback/collector.py` |
-| `k_gaps` | 知识缺口（`confidence` / `signals` / `status`） | `app/evolution/gap/detector.py` |
-| `k_candidates` | 候选知识（`draft` / `need_info` / `active` / `rejected` / `deprecated`） | 生成器 + 审批状态机 |
-| `k_metrics` | 指标快照（`adopt_rate` / `gap_rate` / `params_snapshot`） | `app/evolution/online_eval/metrics.py` |
-| `param_registry` | 参数注册表（`RRF_K` / `RRF_TOP` / `RERANK_TOP_K` + `rev`） | `app/evolution/tuning/param_registry.py` |
-| `kb_parent_chunks` | 章节级父块（`parent_id` / `doc_id` / `title` / `heading_path` / `page` / `content` / `child_count`） | `app/rag/import_/parent_index_service.py` |
-
-父块只按 `parent_id` 批量取回、从不参与向量检索，故存 Mongo 而非 Milvus：避开 `VARCHAR(65535)`
-字节上限，长章节可完整存储，也无需为父块额外生成向量。
-
-**三条不变式**
-
-1. 集合名与字段名属数据契约；LangGraph `state` 键名、SSE 事件名同理。
-2. `kb_chunks` 按 `file_title` 先写新后清旧（幂等覆盖），`kb_parent_chunks` 按 `doc_id` 同理；
-   `chunk_id` 为确定性哈希，**重复导入不会重新分配**。
-3. `EVOLUTION_*` 开关语义、`app/rag_eval` 包边界保持不变。
-
-## 三、核心流程
-
-### 3.1 导入流程（:8000，7 节点）
-
-```
-POST /api/import/upload   鉴权 + 校验扩展名（仅 md/pdf）+ 大小上限 → 落盘 → 后台任务 → 立即返回 task_ids
-  → node_entry                     按后缀分派 md / pdf，写 file_title
-  → node_pdf_to_md                 仅 PDF：MinerU 解析（轮询 600s 上限 / 3s 间隔）→ 下载解压
-  → node_md_img                    图片 → 视觉模型生成说明 → 上传 MinIO → 链接替换
-  → node_document_split            结构感知解析 → 章节识别 → 两级切片（父块 + 子块）
-  → node_item_name_recognition     LLM 读前 10 片识别主体 → 归并库内标准名 → 回填 chunks 与 parent_chunks
-  → node_bge_embedding             分批（6 条/批）生成稠密 + 稀疏向量
-  → node_import_milvus             按 file_title 先写新后清旧；父块写 Mongo
-  → 对账                           Milvus / Mongo 做集合比对，MinIO 只输出计数；只记日志不阻断
+```json
+{
+  "query": "示例设备如何清洁？",
+  "session_id": "<your-session-id>",
+  "is_stream": true
+}
 ```
 
-编排层（`app/rag/import_/pipeline.py`）另有四项加固，**不引入消息队列**、保持单进程形态：
+`session_id` 可省略，由服务端生成。普通模式返回 answer、引用、主体、图片等；流式模式先返回 session_id，再订阅 SSE：`ready → progress/delta → final → close`。业务失败可能通过 error 事件报告，不应只看流连接的 HTTP 200。
 
-- **并发闸门**：进程内信号量限制同时执行的导入任务数（默认 2），避免线程池被打满；
-- **有界重试**：只对可重试错误码退避重试（默认 3 次）；配合 MinerU 产物复用，重试不重复付云端解析的代价；
-- **错误分类**：失败原因落成稳定机器码（`app/rag/import_/errors.py`）；
-- **磁盘快照**：状态迁移时落盘，进程重启后状态接口仍能回读终态。
+HTTP 错误体统一为：
 
-不支持的文档类型会显式标记任务 `FAILED`（图内会静默走到 END，靠业务层兜底），不会出现「已完成但未入库」。
-进度记录不立即清理，由 `TASK_STATE_TTL_SECONDS`（默认 6h）回收，保证前端仍能轮询到终态。
-
-### 3.2 查询流程（:8001，8 节点 + 1 条条件短路）
-
-```
-POST /api/query    流式：先建 SSE 通道再后台执行，立即返回 session_id；非流式：同步等待
-  → node_item_name_confirm   历史上下文 → 确定性消解（见 3.3）或 LLM 抽主体 + 改写 → 向量对齐 → 四态判定
-  → 条件边                   主体已确认 → 继续；未确认（answer 已就绪）→ 直接作答 END
-  → 并行三路召回             ① 知识库混合检索（含自进化条目）② HyDE 假设性检索 ③ MCP 联网（失败降级空）
-  → node_rrf                 多路 RRF 融合，强制并入自进化权威条目
-  → node_rerank              本地优先排序 → 限联网条数 → BGE-Reranker 打分 → 累计断崖截断 → 权威条目保底
-  → node_parent_expand       命中子块 → 按 parent_id 批量取章节级父块 → 按预算注入章节背景
-  → node_answer_output       有现成答案则跳过 LLM；否则作答 → 抽图 → 回填引用/信号/接地性 → 落库
-  → SSE final + close        返回 answer / citations / groundedness / item_name_options
+```json
+{"code": "<machine-code>", "message": "<human-readable-message>"}
 ```
 
-**父块回溯（Small-to-Big）**：重排仍以**子块**文本打分（子块短、主题集中，打分精度高），父块只作为
-最终上下文的补充——若把长父块一并喂给重排，会稀释相关性分数、把精确命中的子块压下去。父块按分数
-降序分配预算（`PARENT_MAX_CHARS` 单块 / `PARENT_TOTAL_BUDGET_CHARS` 合计），同一父块被多个子块命中
-只注入一次；联网结果与自进化条目没有父块，自动跳过。
+## 开发与测试
 
-一次提问只对 `rewritten_query` 编码一次向量，知识库与自进化两路复用。
+### 离线单元测试
 
-### 3.3 主体确认与意图保真
+下面使用 PowerShell，先明确关闭真实 E2E 开关：
 
-主体判定分四态（`app/rag/query/item_name_confirm_service.py`）：
-
-| 判定 | 触发条件 | 行为 |
-| --- | --- | --- |
-| 确认 | 完整命中库内标准名，或 top1 达下限且与次优主体间距达标 | 正常多路召回 |
-| 可选 | 向量分落在 `0.60 ~ 0.65` 区间 | 列出候选主体，请用户点选 |
-| 相似 | 目录子串 / token 前缀 / 问句里出现库内关键词 | 列相似主体供点选 |
-| 无主体 | 以上都不成立 | 提示补充产品名称 |
-
-`confirm_item_name` 有**三条消解路径**，优先级从高到低：
-
-1. `resolve_by_hint`——本轮带 `rewrite_hint`（前端点选主体，或手输命中反问候选）。
-   直接用「主体名 + 意图原句」确定性拼装，**不经过模型**。
-2. `resolve_by_pending_clarify`——本轮没带 hint，但上一轮反问过、且本轮是反问候选里的主体名。
-   覆盖「刷新后手输」与非浏览器客户端。
-3. 常规流程——历史上下文 + LLM 抽主体与改写 + 相似主体兜底。
-
-**为什么确定性消解优先于模型改写。** 当问句里只有主体名、没有任何动作或疑问词时，
-模型缺少可依据的意图，只能从历史话题里找一个续上——历史在聊什么，答案就偏向什么。
-把「主体名」与「意图原句」拆成两个独立字段后，模型没有推断的余地。
-**信息结构化直传比提示词劝说可靠**，这是三条路径排序的依据。
-
-配套的两个机制：
-
-- **反问信息落库**：反问轮（给出了可点选主体）把 `{"intent": 触发反问的原话, "options": [候选主体名]}`
-  写进助手消息的 `pending_subject_ask`。下一轮读「最近一条助手消息」取回意图——只认最近一条，
-  更早的反问不得残留成「上一轮意图」。
-- **前端补 hint**：反问的选项栏出现后，手输文本若命中候选主体，前端把触发反问的原话作为
-  `rewrite_hint` 传下去，与点选等价。
-
-### 3.4 自进化闭环
-
-```
-点踩 / 零命中 / 命中却答不出
-  → fb_events（30s 幂等窗口）
-  → 缺口扫描（ts 升序 + 游标；加权置信度分级 strong / weak / none）
-  → 候选生成（LLM 提炼 FAQ；无证据或疑似「无信息」→ need_info；命中 PII / 重复 → rejected）
-  → 人工审批（通过 / 驳回 / 编辑，写操作需 X-Internal-Token）
-  → 索引回流（kb_evolution_items，status=active；源缺口回写 resolved / rejected）
-  → 后续查询经 RRF 并入、重排置顶，引用标签显示「自进化」
+```powershell
+$env:E2E_ENABLED = "0"
+uv run pytest -q
 ```
 
-| 闸门 | 规则 | 目的 |
-| --- | --- | --- |
-| 缺口分级 | `strong ≥ 0.65`、`weak ≥ 0.45`（权重 user/retrieval/generation = 0.4/0.3/0.3） | 只有 strong 才生成候选 |
-| 缺口去重 | **按问题**（不是按会话）+ 1 小时窗口 | 同一会话的后续新问题仍能被扫到 |
-| 候选质量 | 无证据 → `need_info`；答案像「未提及…建议联系官方」→ 拒绝通过 | 不让伪知识入库 |
-| 回测止损 | 观察窗内命中 ≥ `EVOLUTION_BACKTEST_MIN_HITS`（默认 3）且拒绝率超限才下架 | 防单条差评误杀已审批知识 |
+pytest 默认 marker 排除 E2E；共享夹具阻断 Mongo/Milvus/MinIO 真实客户端并清理部分缓存，具体模型和 HTTP 行为仍以各用例的替身为准。测试覆盖切分、主体消解、重排、引用、上传防护、任务状态、SSE 与进化等；文档不维护固定的通过数。
 
-调度节拍（`app/evolution/scheduler.py`）：每轮扫描生成；指标快照 + 参数自调按
-`EVOLUTION_METRIC_INTERVAL_MINUTES`（默认 60 分钟）；回测止损按
-`EVOLUTION_BACKTEST_INTERVAL_HOURS`（默认 24 小时）。参数自调基线取**历史**快照，避免与本轮快照自比自。
+### 真实端到端测试
 
-### 3.5 SSE 协议与前端
+仅在已准备好外部依赖的隔离环境中执行：会调用模型、产生费用、真实写库并清理测试数据。
 
-| 事件 | 载荷要点 |
+```powershell
+$env:E2E_ENABLED = "1"
+try {
+    uv run pytest -m e2e tests/e2e -s
+} finally {
+    $env:E2E_ENABLED = "0"
+}
+```
+
+### RAG 效果评估
+
+入口为 `app.rag_eval.RagEvalTester`，参见[评估模块说明](app/rag_eval/README.md)。`run_insert_test_data()` 会向已配置存储写评测知识并生成题库；`run_eval()` 执行检索评估并生成报告。使用前隔离数据库/集合，不能把它们当作无副作用的只读操作。
+
+现有评估固定主体名和 HyDE 输出、使用联网占位结果，适合分层检索回归；它不代表真实主体识别、完整答案、多轮交互或浏览器端到端效果。
+
+文档核对日期为 2026-10-18；此次只更新说明，未运行安装、服务、项目测试或评估。
+
+## 部署约束与已知问题
+
+当前实现尚不能仅凭随机会话 ID 和管理写令牌提供完整多用户权限边界。对不可信客户端开放前，需处理用户身份、会话所有权、候选读取权限和反馈归属，或在部署层提供相应隔离。
+
+最值得关注的限制：
+
+1. **单 worker、单调度器**：SSE、任务状态、信号量和缓存为进程内对象；多 worker 可造成丢流、找不到状态、并发限制失效和重复扫描。
+2. **后台任务不持久化**：导入磁盘快照保存状态，不自动恢复进程中断的执行；旧 processing 快照可能残留。
+3. **跨库没有共同事务**：先写后清和审批回滚降低风险，但不能保证 Milvus/MongoDB/MinIO 一致提交。
+4. **知识撤回存在缺口**：向量下架失败仍可能删除候选记录；编辑和驳回 API 的状态约束也不完整。页面成功提示不能代替向量库核验。
+5. **恢复并非所有时序可靠**：同会话并行请求、多标签页和某些刷新窗口仍有问题。
+6. **几项确定性不一致**：PDF 检查点路径与实际解压布局不同；大写后缀先接受后失败；UTF-8 文件头可能截断字符；历史落库把未评估变为 0；参数快照默认值覆盖自调缓存。
+7. **数据与索引契约**：普通子块/主体 dense 默认 COSINE，进化 dense 为 IP；维度固定为 1024。改模型、维度或 schema 需规划迁移，集合存在时不会自动升级。`migrate_chunk_schema(force=True)` 会清空重建子块集合，不可直接对线上数据试跑。
+8. **数据处理边界**：新建 MinIO 桶的默认策略为公开只读；问题文本和异常局部变量可能进入日志。内部资料需核查实际桶策略、模型外发与日志权限。
+
+完整的 21 项发现、触发条件、已有防护、建议及待验证场景，见[风险与改进建议](docs/se_rag-技术讲解文档.md#9-风险问题与改进建议)。这些说明记录当前行为，并不表示相关问题已经修复。
+
+## 排障与源码导航
+
+| 现象 | 优先检查 |
 | --- | --- |
-| `ready` | 连接建立（服务端先回放订阅前缓冲，避免 POST 与 GET 竞态） |
-| `progress` | `status` / `done_list` / `running_list`（节点进度） |
-| `delta` | `delta`（LLM 增量文本） |
-| `final` | `answer` / `image_urls` / `item_names` / `citations` / `groundedness` / `item_name_options` |
-| `error` | `code` / `message` |
-| `close` | 服务端关闭（前端停止等待） |
+| 上传或审批返回 401/503 | 页面令牌与对应环境变量；503 为缺少/空令牌，导入还需注意固定默认值 |
+| 总是要求明确产品 | 主体提取、目录标准名、别名和确认间距，先看 `item_name_confirm_service` 与 `item_name/match` |
+| 主体正确却检索为空 | 集合名、metric、维度、主体过滤、Milvus 网关日志；区分没知识与依赖故障降级 |
+| 上传成功但长时间未完成 | 任务状态、MinerU 轮询、执行槽、模型首次加载和存储写入；重启后还需核查旧快照 |
+| 导入完成却缺章节背景或图片 | 父块/图片写入警告和对账日志；增强项可能失败而不阻断主链路 |
+| 流式卡住或刷新丢回答 | 单 worker、同会话并发、多标签页、SSE 通道及历史持久化 |
+| 回答刷新后接地性变为 0% | 历史仓储对 None 的转换，当前已知问题 |
+| 审批通过却检索不到／下架后仍能命中 | 同时核对候选 Mongo 状态、evo_doc_id 和 Milvus 条目，勿只依赖页面状态 |
+| health 正常但业务失败 | health 只报告存活和资源指纹，需要分别检查数据库与模型 |
+| 页面交互像旧版本 | 对照 `/api/health` 的 asset_version，刷新页面资源 |
 
-前端三页共用 `/static/app.js`（`fetchJson` / `openStream` / `formatDateTime` / `checkFreshness` 等），
-页面自身只管业务交互；资源以 `?v=<内容指纹>` 引用，`/api/health` 回传同一指纹，发现页面过期会提示刷新。
+源码入口：
 
-**刷新续传**：页面刷新会同时丢掉 POST 响应与 SSE 连接，但后台查询仍在跑。前端加载时先读
-`GET /api/query/status/{session_id}`：状态为 `pending` / `processing` 时，用快照的
-`done_list` / `running_list` 重建阶段进度，再重新订阅 SSE 收尾；否则只回显历史。
-服务端侧，断开连接时**只解绑订阅者、不销毁通道**（任务仍在跑时），并保留缓冲事件供重连回放。
-
-## 四、快速开始
-
-### 4.1 环境要求
-
-- Python ≥ 3.11（推荐用 `uv` 管理依赖）
-- 可访问的 Milvus / MongoDB / MinIO
-- DashScope（Qwen）API Key；本地 BGE-M3 与 BGE-Reranker-Large 模型文件
-- 可选：MinerU API Token（仅导入 PDF 需要）、百炼 MCP 地址（联网检索）
-
-### 4.2 安装
-
-```bash
-uv sync                 # 依据 pyproject.toml + uv.lock 创建 .venv 并安装依赖
-```
-
-### 4.3 配置（项目根目录 `.env`）
-
-> `app/shared/config/common.py:14` 使用 `load_dotenv(override=True)`：**`.env` 会覆盖同名系统环境变量**，
-> 想用环境变量临时改配置会失效。不要提交真实密钥。
-
-| 分组 | 变量 |
-| --- | --- |
-| LLM | `OPENAI_API_KEY`、`OPENAI_BASE_URL`、`LLM_DEFAULT_MODEL`、`VL_MODEL`、`LLM_DEFAULT_TEMPERATURE`、`LLM_TIMEOUT_SECONDS`（60）、`LLM_MAX_RETRIES`（2） |
-| 嵌入 / 重排 | `BGE_M3`、`BGE_M3_PATH`、`BGE_DEVICE`、`BGE_FP16`、`BGE_RERANKER_LARGE`、`BGE_RERANKER_DEVICE`、`BGE_RERANKER_FP16` |
-| Milvus | `MILVUS_URL`、`CHUNKS_COLLECTION`、`ITEM_NAME_COLLECTION`、`EVOLUTION_COLLECTION`（`kb_evolution_items`）、`MILVUS_TIMEOUT_SECONDS`（15）、`MILVUS_INSERT_BATCH_SIZE`（500） |
-| MongoDB | `MONGO_URL`、`MONGO_DB_NAME`、`MONGO_CHAT_COLLECTION`（`chat_message`）、`PARENT_CHUNKS_COLLECTION`（`kb_parent_chunks`）、`EVOLUTION_FB_EVENTS_COLLECTION`（`fb_events`）、`EVOLUTION_K_GAPS_COLLECTION`（`k_gaps`）、`EVOLUTION_K_CANDIDATES_COLLECTION`（`k_candidates`）、`EVOLUTION_K_METRICS_COLLECTION`（`k_metrics`）、`EVOLUTION_PARAM_REGISTRY_COLLECTION`（`param_registry`） |
-| MinIO | `MINIO_ENDPOINT`、`MINIO_ACCESS_KEY`、`MINIO_SECRET_KEY`、`MINIO_BUCKET_NAME`、`MINIO_IMG_DIR`、`MINIO_SECURE` |
-| 外部服务 | `MINERU_BASE_URL`、`MINERU_API_TOKEN`、`MCP_DASHSCOPE_BASE_URL`、`MCP_TIMEOUT_SECONDS`（30）、`IMAGE_SUMMARY_MAX_WORKERS`（4） |
-| 服务 | `APP_HOST`（`0.0.0.0`）、`IMPORT_APP_PORT`（8000）、`QUERY_APP_PORT`（8001）、`CORS_ORIGINS`、`APP_ENV`（`dev`）、`IMPORT_APP_NAME`、`QUERY_APP_NAME` |
-| 导入链路 | `IMPORT_ADMIN_TOKEN`（带开发默认值，生产必须覆盖）、`IMPORT_MAX_UPLOAD_MB`（50）、`IMPORT_MAX_CONCURRENT_TASKS`（2）、`IMPORT_ACQUIRE_TIMEOUT_SECONDS`（600）、`IMPORT_MAX_RETRY_ATTEMPTS`（3）、`IMPORT_RETRY_BACKOFF_SECONDS`（1.0）、`IMPORT_RECONCILE_ENABLED`（true）、`IMPORT_CHECKPOINT_ENABLED`（true） |
-| 日志 | `LOG_CONSOLE_ENABLE` / `LOG_CONSOLE_LEVEL` / `LOG_FILE_ENABLE` / `LOG_FILE_LEVEL`（默认 INFO）/ `LOG_FILE_RETENTION`（`7 days`） |
-| 运行期 | `TASK_STATE_TTL_SECONDS`（21600）、`WEB_MAX_IN_CONTEXT`（2）、`CHUNK_DENSE_METRIC` / `ITEM_NAME_DENSE_METRIC`（COSINE） |
-| 主体判定 | `ITEM_NAME_CONFIRM_MIN_SCORE`（0.65）、`ITEM_NAME_CONFIRM_MARGIN`（0.02）、`ITEM_NAME_OPTION_MIN_SCORE`（0.60）、`ITEM_NAME_CATALOG_TTL_SECONDS`（60）、`ITEM_NAME_SEARCH_LIMIT`（10） |
-| 切分 | `CHUNK_MAX_SIZE`（1000）、`CHUNK_SIZE`（600）、`CHUNK_OVERLAP`（50）、`CHUNK_MIN`（400）、`CHUNKS_SPLIT_TOP_NUMBER`（10）、`EMBEDDING_BATCH_SIZE`（6） |
-| MinerU | `MINERU_POLL_TIMEOUT_SECONDS`（600）、`MINERU_POLL_INTERVAL_SECONDS`（3）、`MINERU_DOWNLOAD_TIMEOUT_SECONDS`（60）、`MINERU_REQUEST_TIMEOUT_SECONDS`（30）、`MINERU_UPLOAD_TIMEOUT_SECONDS`（120） |
-| 自进化 | `EVOLUTION_ENABLED`（false）、`EVOLUTION_ADMIN_TOKEN`（直读环境变量，不走 `settings`）、`EVOLUTION_SCHEDULE_ENABLED` / `EVOLUTION_SCHEDULE_INTERVAL_MINUTES`（30）、`EVOLUTION_METRIC_INTERVAL_MINUTES`（60）、`EVOLUTION_BACKTEST_ENABLED` / `EVOLUTION_BACKTEST_INTERVAL_HOURS`（24）/ `EVOLUTION_BACKTEST_MIN_HITS`（3）、`EVOLUTION_OBSERVE_WINDOW_DAYS`（7）、`EVOLUTION_SCAN_BATCH`（50）、`EVOLUTION_GEN_CONTEXT_ENABLED`、`EVOLUTION_GAP_WEIGHT_USER` / `_RETRIEVAL` / `_GENERATION`、`EVOLUTION_GAP_STRONG_THRESHOLD` / `_WEAK_THRESHOLD`、`EVOLUTION_ATTAIN_RATE_MIN`、`EVOLUTION_REJECT_RATE_MAX`、`EVOLUTION_ALARM_ADOPT_DROP`、`EVOLUTION_RECALL_LIMIT`、`EVOLUTION_RRF_WEIGHT`、`EVOLUTION_GROUNDEDNESS_MIN`、`EVOLUTION_GRAY_ENABLED` |
-
-### 4.4 启动
-
-```bash
-# 查询服务（客服对话 + 审批后台 + 自进化接口 + 调度器）
-uvicorn app.api.http.query_server:app --host 0.0.0.0 --port 8001
-
-# 导入服务（文件上传与导入）
-uvicorn app.api.http.import_server:app --host 0.0.0.0 --port 8000
-```
-
-也可用模块入口（端口取 `.env`）：`python -m app.api.http.query_server` / `python -m app.api.http.import_server`。
-
-| 页面 | 地址 |
-| --- | --- |
-| 客服对话 | `http://127.0.0.1:8001/` |
-| 自进化审批 | `http://127.0.0.1:8001/approval` |
-| 文件导入 | `http://127.0.0.1:8000/import` |
-
-> 首次启动较慢（BGE-M3 / BGE-Reranker 需要加载模型），属正常现象。
-> **调度器只随查询服务启动**，因此不要为同一个库同时跑多个查询服务实例（无分布式锁，会重复扫描）。
-
-### 4.5 接口速查
-
-查询服务（:8001）：
-
-| 方法与路径 | 说明 |
-| --- | --- |
-| `GET /api/health` | 健康检查（含 `asset_version` 静态资源指纹） |
-| `POST /api/query` | 提交问题（`is_stream=true` 时异步执行并返回 `session_id`） |
-| `GET /api/query/status/{session_id}` | 进行中查询的进度快照（刷新后据此重建阶段进度） |
-| `GET /api/stream/{session_id}` | SSE 事件流（`ready → progress → delta → final → close`） |
-| `GET /api/history/{session_id}` | 读取会话历史 |
-| `DELETE /api/history/{session_id}` | 清空会话历史 |
-| `POST /api/evolution/feedback` | 提交反馈（`thumbs` = 1 / -1） |
-| `GET /api/evolution/candidates` | 候选列表（可按 `status` 筛选） |
-| `GET /api/evolution/status` | 闭环状态（缺口 / 候选计数、调度进度、最近指标快照） |
-| `POST /api/evolution/candidates/{id}/approve` `/reject` `/edit` | 审批写操作（需 `X-Internal-Token`） |
-| `DELETE /api/evolution/candidates/{id}` | 下架候选（已入库条目同时移出向量库，需 Token） |
-
-导入服务（:8000）：
-
-| 方法与路径 | 说明 |
-| --- | --- |
-| `POST /api/import/upload` | 上传文件（仅 md / pdf，其余入口直接 422；需 `X-Internal-Token`） |
-| `GET /api/import/status/{task_id}` | 任务状态与节点进度（需 `X-Internal-Token`） |
-
-错误响应统一为 `{"code": "<机器码>", "message": "<中文提示>"}`。
-
-## 五、开发与测试
-
-### 5.1 门禁命令
-
-```bash
-python -m pyflakes app tests          # 静态检查（期望 0 输出）
-python -m compileall -q app tests     # 字节码编译
-pytest -q                             # 离线单测（默认 -m 'not e2e'，不访问外部服务）
-E2E_ENABLED=1 pytest -m e2e tests/e2e -s   # 真机端到端（会产生模型调用与真实写库）
-```
-
-当前状态：**57 个测试文件，离线 425 passed / 1 deselected**。
-真机 E2E 覆盖：小 md 导入 → Milvus 落库校验 → 一次查询的完整 SSE 事件序列 → 反馈与缺口扫描 →
-候选审批回流；测试数据带 `e2e_` 前缀并在用例结束后「删除 → 等待 → 复核」。
-
-### 5.2 目录速查
-
-| 路径 | 职责 |
-| --- | --- |
-| `app/api/http/*_server.py` | 服务组装（FastAPI 实例、CORS、lifespan、路由挂载） |
-| `app/api/routers/` | 路由层（query / evolution / import_ / pages / health） |
-| `app/api/errors.py` | 统一错误模型与异常处理器 |
-| `app/process/*/agent/` | LangGraph 状态、节点与图定义 |
-| `app/rag/query/` | 主体确认、检索、RRF、重排、父块回溯、作答、引用、历史上下文 |
-| `app/rag/import_/` | 入口分派、PDF 解析、图片增强、结构感知切分（两级切片）、主体识别、向量化、入库、对账、schema 迁移 |
-| `app/rag/item_name/` | 主体名目录缓存、检索判定与相似兜底 |
-| `app/evolution/` | feedback / gap / candidate / approval / index / online_eval / tuning / backtest / scheduler |
-| `app/shared/config/` | 唯一配置出口 `settings`（`common.py` 是唯一读环境变量的地方） |
-| `app/shared/clients/` | Milvus / MongoDB / MinIO 客户端、会话历史仓储、章节父块仓储 |
-| `app/shared/models/` | LLM / 向量 / 重排模型入口（`llm_providers`） |
-| `app/shared/runtime/` | 日志与提示词加载 |
-| `app/shared/utils/` | 校验、文本归一、JSON 解析、SSE 通道、任务状态与快照、重试 |
-| `app/rag_eval/` | 离线检索评估（真实切分器产出样本 → 分层评测 + 切分质量 → 报告） |
-| `tests/unit`、`tests/e2e` | 离线单测与真机端到端 |
-| `doc/` | 样本手册（85 份 PDF + 1 份表格），供导入联调使用 |
-| `docs/` | 技术讲解文档：`se_rag-技术讲解文档.md` / `.html`（流程图 / 逐节点源码走读 / 架构补充） |
-| `logs/`、`output/` | 运行日志（`app_YYYYMMDD.log`）与导入中间产物；`output/` 与 `*.log` 均在 `.gitignore` 中 |
-
-### 5.3 常调参数（改这些会直接改变行为）
-
-| 参数 | 默认 | 作用 |
-| --- | --- | --- |
-| `ITEM_NAME_CONFIRM_MIN_SCORE` / `_MARGIN` | 0.65 / 0.02 | 主体自动确认下限与 top1–top2 间距 |
-| `ITEM_NAME_OPTION_MIN_SCORE` | 0.60 | 低于它就进入「相似主体点选」兜底 |
-| `RRF_K` / `RRF_TOP`（`param_registry` 可覆盖，默认 60 / 5） | 60 / 5 | RRF 平滑常数与融合后保留条数 |
-| `RERANK_MAX_TOPK` / `RERANK_MIN_TOPK` / `GAP_RATIO` / `GAP_ABS` | 6 / 2 / 0.2 / 0.2 | 重排保留上限、无条件保留数、累计断崖截断 |
-| `RERANK_MAX_INPUT_TOKENS` / `RERANK_SUMMARY_MAX_WORKERS` | 512 / 4 | 重排输入预算（超长先 LLM 压缩再按 token 硬截断）与压缩并发 |
-| `WEB_MAX_IN_CONTEXT` | 2 | 本地有命中时联网结果条数上限 |
-| `PARENT_MAX_CHARS` / `PARENT_TOTAL_BUDGET_CHARS` | 1200 / 4000 | 单个父块的背景注入上限与全部父块的合计预算 |
-| `HYDE_GATE_ENABLED` / `HYDE_GATE_SHORT_CHARS` | false / 24 | 短事实型查询是否跳过 HyDE（默认关闭，保持三路无条件扇出） |
-| `EVOLUTION_GAP_STRONG_THRESHOLD` / `_WEAK_THRESHOLD` | 0.65 / 0.45 | 缺口分级门槛 |
-| `EVOLUTION_OBSERVE_WINDOW_DAYS` / `EVOLUTION_SCAN_BATCH` | 7 / 50 | 缺口扫描窗口与每轮批量 |
-| `EVOLUTION_METRIC_INTERVAL_MINUTES` / `_BACKTEST_INTERVAL_HOURS` / `_BACKTEST_MIN_HITS` | 60 / 24 / 3 | 指标、回测、回测下架门槛 |
-| `TASK_STATE_TTL_SECONDS` | 21600 | 任务进度内存回收 |
-
-切分策略（`app/rag/import_/config.py`）：`CHUNK_MAX_SIZE` 1000（硬上限：仅单个原子块超过它才从中间切开）
-/ `CHUNK_SIZE` 600（软目标：决定多个原子块如何打包）/ `CHUNK_OVERLAP` 50（仅在单个原子块必须切开时生效）
-/ `CHUNK_MIN` 400（同章节内过短分块向后合并的门槛）/ 向量化批大小 6。
-三个长度阈值一律按**正文口径**比较（不含切片前置标题）。
-
-## 六、注意事项与排障
-
-### 6.1 必须知道的约束
-
-- **单进程部署**：SSE 通道、任务进度、主体目录缓存、参数注册表缓存都在进程内存里，调度器也没有分布式锁。
-  多 worker 会丢流、进度错乱、重复扫描；要水平扩展先引入 Redis。
-- **一个端口只能有一个进程**：Windows 允许两个进程绑定同一端口，连接会被随机分发；如果 `POST /api/query` 与
-  `GET /api/stream` 落到不同进程，流式回答就会卡住。用
-  `Get-NetTCPConnection -State Listen | Where-Object LocalPort -eq 8001` 确认只有一行。
-- **长开的旧页面不会自动换脚本**：后端已部署新版但页面仍是旧 JS 时，会出现「按钮不渲染 / 置信度 0%」这类
-  看似没修好的现象。刷新页面即可；系统检测到资源版本变化会主动提示「请按 Ctrl+F5 刷新」。
-- **`.env` 覆盖系统环境变量**（`load_dotenv(override=True)`）；密钥请勿提交。
-- **Milvus metric 口径必须与建表一致**：`kb_chunks` / `kb_item_names` dense 用 COSINE、`kb_evolution_items` 用 IP；
-  不一致会让 Milvus 报 `metric type not match` 并静默返回 None。
-- **Milvus RPC 必须各自传超时**：`pymilvus` 的构造参数只覆盖建连等待，`hybrid_search` / `query` 等业务 RPC
-  要显式传 `MILVUS_TIMEOUT_SECONDS`，否则网络挂起时会永久阻塞。
-- **`kb_chunks` 主键是确定性哈希**：`chunk_id = sha1(doc_id#heading_path#occurrence#part)`，只编码结构不编码
-  内容，因此重导入后 id 稳定，绑在它上面的标注与引用不会失效。但 schema 变更无法自动生效（集合「存在即跳过」），
-  需显式调用 `app/rag/import_/schema_migration.py:migrate_chunk_schema(force=True)` 重建集合（**会清空数据**）。
-- **父块存 MongoDB**：`kb_parent_chunks` 只按 `parent_id` 批量取回，不参与向量检索；父块写入失败只告警不阻断导入。
-- **导入需鉴权**：上传与状态查询都要求请求头 `X-Internal-Token` 等于 `IMPORT_ADMIN_TOKEN`。
-  该值在 `app/shared/config/settings.py` 里带一个**硬编码的开发默认令牌**，生产部署务必在 `.env` 覆盖；
-  置空时接口 fail-closed（503）。
-- **审批写操作需鉴权**：请求头 `X-Internal-Token` 需等于 `EVOLUTION_ADMIN_TOKEN`。该变量由
-  `app/api/routers/evolution.py` **直接读环境变量**（不走 `settings`），未配置时写操作一律 503、令牌不符 401。
-- **自进化需显式开启**：`EVOLUTION_ENABLED=false` 时反馈接口仅幂等接受不落库，进化条目不参与召回。
-- **`app/rag_eval` 会写共享 Milvus**：执行离线评估前确认不影响线上库，或改用独立集合。
-
-### 6.2 常见现象 → 排查路径
-
-| 现象 | 先看这里 | 说明 |
-| --- | --- | --- |
-| 提问答不出 / 没有引用 | 客服页「引用来源 / 回答置信度」→ `GET /api/evolution/status` → `logs/app_*.log` | 置信度显示「未评估」表示证据为空或评估失败（不是 0 分） |
-| 一直回「请补充产品名称」 | 日志中 `模型识别item_name` / `相似主体` 两条 | 主体识别失败：确认库内主体名目录是否有该型号，必要时看 `ITEM_NAME_*` 阈值 |
-| 点选主体后答的是上一个问题 | 日志中 `点选消解完成` / `手输兜底消解完成` | 确定性消解未命中，回退到了模型改写。检查请求是否带 `rewrite_hint`，以及反问轮助手消息是否落了 `pending_subject_ask` |
-| 刷新页面后这一轮问答消失 | `GET /api/query/status/{session_id}` | 状态为 `processing` 表示后台仍在跑，前端应重连 SSE；若通道已被回收则只回显历史 |
-| 审批页没有候选 | `GET /api/evolution/status` 的 gaps / candidates 计数 | 缺口扫描只处理观察窗内未解决信号；同问题在 1 小时窗口内会去重 |
-| 点了「通过」但状态没变 | 审批页 toast 文案 | `need_info` 或疑似「无信息」答案会被拒绝通过，需先「编辑」补充事实 |
-| 上传后一直「处理中」 | `GET /api/import/status/{task_id}` + 终端日志 | PDF 走 MinerU 轮询（600s 上限）；不支持的扩展名会在入口 422 |
-| 上传报 503 / 401 | `.env` 的 `IMPORT_ADMIN_TOKEN` 与请求头 `X-Internal-Token` | 503 = 令牌被置空（fail-closed）；401 = 请求头与配置不一致。注意该配置带开发默认值 |
-| 页面样式 / 交互异常 | `/api/health` 的 `asset_version` 与页面脚本 `?v=` | 版本不一致即页面过期，刷新即可 |
+- [服务装配](app/api/http/query_server.py)、[查询图](app/process/query/agent/main_graph.py)、[导入图](app/process/import_/agent/main_graph.py)。
+- [导入业务](app/rag/import_)、[查询业务](app/rag/query)、[主体目录与匹配](app/rag/item_name)。
+- [自进化闭环](app/evolution)、[模型与存储底座](app/shared)、[前端与提示词](app/resources)。
+- [单元测试](tests/unit)、[E2E](tests/e2e)、[逐层阅读路线](docs/se_rag-技术讲解文档.md#11-附录阅读路线文件索引与掌握检验)。
