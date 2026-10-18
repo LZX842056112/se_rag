@@ -114,9 +114,11 @@ def test_adjust_step_baseline_excludes_current_snapshot(fake_mongo, evolution_on
     """基线取「历史」快照：与本轮快照自比自会让 diff 恒接近 0，自调永不触发。"""
     now = time.time()
     monkeypatch.setattr(settings.evolution, "alarm_adopt_rate_drop", 0.10)
+    monkeypatch.setattr(settings.evolution, "auto_tune_enabled", True)
+    fake_mongo[settings.mongo.fb_events_collection].insert_many([{ "ts": now - 1, "thumbs": -1 } for _ in range(100)])
     for offset in (300, 200, 100):
         fake_mongo[settings.mongo.k_metrics_collection].insert_one(
-            {"ts": now - offset, "adopt_rate": 0.90, "gap_rate": 0.0, "params_snapshot": {}}
+            {"ts": now - offset, "adopt_rate": 0.90, "gap_rate": 0.0, "params_snapshot": {"RRF_K": 60, "RRF_TOP": 5, "RERANK_TOP_K": 6}}
         )
 
     class _Snapshot:
@@ -127,9 +129,9 @@ def test_adjust_step_baseline_excludes_current_snapshot(fake_mongo, evolution_on
     changed = controller.adjust_step(_Snapshot())
 
     assert changed is True, "采纳率骤降必须触发止损回退"
-    assert param_registry.get_param("RRF_K") == controller._MIN["RRF_K"]
+    assert param_registry.get_param("RRF_K") == 60
     record = fake_mongo[settings.mongo.param_registry_collection].find_one({"key": "RRF_K"})
-    assert record["updated_by"] == "metric"
+    assert record["updated_by"] == "metric_rollback"
 
 
 def test_adjust_step_does_nothing_without_baseline(fake_mongo, evolution_on):

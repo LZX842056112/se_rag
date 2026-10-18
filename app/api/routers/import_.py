@@ -15,7 +15,10 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, UploadFile
+from typing import Annotated, Literal
+import time
+
+from fastapi import Form, APIRouter, BackgroundTasks, Depends, Header, UploadFile
 
 from app.api.errors import ApiError
 from app.api.schema.import_schema import StatusResponseSchema, UploadResponseSchema
@@ -134,11 +137,13 @@ def validate_upload_files(files: list[UploadFile]) -> UploadFile:
     response_model=UploadResponseSchema,
     dependencies=[Depends(require_import_admin_token)],
 )
-def upload(background_tasks: BackgroundTasks, files: list[UploadFile]) -> UploadResponseSchema:
+def upload(background_tasks: BackgroundTasks, files: list[UploadFile], document_kind: Annotated[Literal["manual", "policy"], Form()] = "manual", document_version: Annotated[str, Form(max_length=128)] = "", valid_until: Annotated[float, Form(allow_inf_nan=False)] = 0.0) -> UploadResponseSchema:
     """上传单个文件并异步执行导入流程。
 
     入口即校验鉴权、文件数、扩展名、大小与文件头，避免「已完成但未入库」的静默成功。
     """
+    if document_kind == "policy" and (not document_version.strip() or valid_until <= time.time()):
+        raise ApiError("policy_metadata_required", "业务政策必须填写版本和未来的失效时间", 422)
     upload_file = validate_upload_files(files)
     safe_name = Path(upload_file.filename or "").name
 
@@ -161,6 +166,9 @@ def upload(background_tasks: BackgroundTasks, files: list[UploadFile]) -> Upload
         task_id=task_id,
         local_file_path=str(local_file_path),
         local_dir=str(local_dir),
+        document_kind=document_kind,
+        document_version=document_version,
+        valid_until=valid_until,
     )
     return UploadResponseSchema(code=200, message=f"{upload_file.filename} 文件上传成功", task_ids=[task_id])
 

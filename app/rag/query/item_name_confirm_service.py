@@ -296,6 +296,8 @@ def save_history_message(state: QueryGraphState) -> None:
         rewritten_query=state.get("rewritten_query", ""),
         item_names=state.get("item_names", []),
         image_urls=[],
+        intent="rag",
+        turn_id=state.get("turn_id", ""),
     )
 
 

@@ -121,6 +121,11 @@ def publish(session_id: str, event: str, data: Dict[str, Any]) -> None:
     """
     if not session_id:
         return
+    if event == SSEEvent.DELTA and data.get("delta"):
+        from app.shared.runtime.query_metrics import current_metrics
+        metrics = current_metrics.get()
+        if metrics:
+            metrics.first_text()
     ensure_channel(session_id)
     message = {"event": event, "data": data}
     with _lock:

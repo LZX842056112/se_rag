@@ -64,6 +64,8 @@ def build_citations(
         citations.append(CitationModel(
             faq_id=key,
             source="evolution" if key in evolution_set else "kb",
+            title=str(meta.get("file_title") or meta.get("title") or ""),
+            version=str(meta.get("document_version") or ""),
             page=page if isinstance(page, int) and page > 0 else None,
             heading=heading,
         ).model_dump())

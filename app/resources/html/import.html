@@ -27,6 +27,10 @@
     </div>
 
     <div class="panel">
+      <label>资料类型 <select id="documentKind"><option value="manual">产品手册</option><option value="policy">业务政策</option></select></label>
+      <label>资料版本 <input id="documentVersion" maxlength="128" placeholder="例如 2026-10"></label>
+      <label>政策失效时间 <input id="policyUntil" type="datetime-local"></label>
+      <p>业务政策必须填写版本和失效时间。请只上传已确认的政策。</p>
       <div class="upload-area" id="dropZone">
         <div class="upload-icon">☁️</div>
         <p class="upload-hint">点击或拖拽文件到此处（PDF / MD）</p>

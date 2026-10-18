@@ -37,7 +37,7 @@ def make_row(**overrides) -> dict:
 def test_align_keeps_every_schema_field():
     aligned = _align_to_schema([make_row()])[0]
     assert set(aligned) == set(CHUNK_VARCHAR_LIMITS) | set(CHUNK_SCALAR_DEFAULTS) | {
-        "dense_vector", "sparse_vector",
+        "dense_vector", "sparse_vector", "valid_until",
     }
 
 

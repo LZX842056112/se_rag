@@ -19,6 +19,10 @@ class EvolutionRepository:
     """自进化各集合的访问入口（懒加载，不在导入期建立连接）。"""
 
     @property
+    def query_feedback(self):
+        return get_collection(settings.mongo.query_feedback_collection)
+
+    @property
     def fb_events(self):
         """反馈事件集合（用户显式反馈 + 读链路未解决信号）。"""
         return get_collection(settings.mongo.fb_events_collection)

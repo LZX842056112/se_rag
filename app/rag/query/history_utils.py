@@ -17,7 +17,7 @@ def list_valid_history(session_id: str, limit: int) -> list[dict]:
 
     只保留与具体商品相关的历史，才能为后续主体消解提供可靠上下文。
     """
-    message_list = history_repository.list_recent(session_id=session_id, limit=limit)
+    message_list = history_repository.list_valid_recent(session_id=session_id, limit=limit)
     return [item for item in message_list if len(item.get("item_names") or []) > 0]
 
 

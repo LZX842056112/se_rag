@@ -16,6 +16,7 @@ from app.evolution.feedback.collector import flush_session_signals, record_feedb
 from app.evolution.models import FeedbackEvent
 from app.rag.query.answer_service import backfill_evolution_outputs
 from app.shared.config import settings
+from app.shared.clients import history_repository as history_module
 
 NO_ANSWER = "现有参考内容与历史对话中未查询到该问题相关信息，无法作答"
 
@@ -26,6 +27,7 @@ def fake_mongo(monkeypatch):
     client = mongomock.MongoClient()
     db = client["test_db"]
     monkeypatch.setattr(repositories_module, "get_collection", lambda name: db[name])
+    monkeypatch.setattr(history_module, "get_collection", lambda name: db[name])
     return db
 
 
@@ -102,8 +104,9 @@ def test_flush_session_signals_skips_answered_queries(fake_mongo, monkeypatch):
 def test_record_feedback_persists_item_names(fake_mongo, monkeypatch):
     """D14 回归：显式反馈携带的 item_names 必须落库，供缺口/候选透传。"""
     monkeypatch.setattr(settings.evolution, "enabled", True)
+    answer_id = history_module.history_repository.save_message(session_id="s-d14", role="assistant", text="a", query="某机型保修期？", item_names=["某机型"], intent="rag")
     record_feedback(FeedbackEvent(
-        session_id="s-d14", query="某机型保修期？", thumbs=-1, item_names=["某机型"],
+        session_id="s-d14", answer_id=answer_id, query="某机型保修期？", thumbs=-1, item_names=["某机型"],
     ))
     docs = _fb_docs(fake_mongo)
     assert len(docs) == 1

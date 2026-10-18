@@ -13,6 +13,8 @@ from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
 
 from app.api.errors import install_error_handlers
+from app.api.session_access import install_session_cookie
+from app.shared.runtime.single_worker import SingleWorkerLease
 from app.api.routers import evolution as evolution_router
 from app.api.routers import health as health_router
 from app.api.routers import pages as pages_router
@@ -26,25 +28,31 @@ from app.shared.runtime.logger import logger
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     """服务生命周期：确保 Mongo 索引就绪，并按开关启停自进化调度器。"""
-    ensure_indexes()
-    scheduler_task = None
-    if settings.evolution.enabled and settings.evolution.scheduler_enabled:
-        scheduler_task = asyncio.create_task(
-            evolution_scheduler_loop(settings.evolution.schedule_interval_minutes * 60.0)
-        )
-        logger.info(
-            f"自进化调度器已启动：interval={settings.evolution.schedule_interval_minutes}min, "
-            f"batch={settings.evolution.scan_batch}"
-        )
+    lease = SingleWorkerLease()
+    lease.acquire()
     try:
-        yield
+        ensure_indexes()
+        scheduler_task = None
+        if settings.evolution.enabled and settings.evolution.scheduler_enabled:
+            scheduler_task = asyncio.create_task(
+                evolution_scheduler_loop(settings.evolution.schedule_interval_minutes * 60.0)
+            )
+            logger.info(
+                f"自进化调度器已启动：interval={settings.evolution.schedule_interval_minutes}min, "
+                f"batch={settings.evolution.scan_batch}"
+            )
+        try:
+            yield
+        finally:
+            if scheduler_task is not None:
+                scheduler_task.cancel()
+                try:
+                    await scheduler_task
+                except asyncio.CancelledError:
+                    pass
     finally:
-        if scheduler_task is not None:
-            scheduler_task.cancel()
-            try:
-                await scheduler_task
-            except asyncio.CancelledError:
-                pass
+        lease.release()
+
 
 
 app = FastAPI(
@@ -61,6 +69,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 install_error_handlers(app)
+install_session_cookie(app)
 
 app.include_router(query_router.router)
 app.include_router(evolution_router.router)

@@ -10,7 +10,6 @@
 """
 from __future__ import annotations
 
-import pytest
 
 from app.rag.import_ import reconcile as rec
 

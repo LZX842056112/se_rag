@@ -59,6 +59,7 @@ class _TaskRecord:
     message: str = ""
     # 本轮提问原文：页面刷新后用户消息可能还没落库，前端用快照补出提问气泡
     query: str = ""
+    turn_id: str = ""
     updated_at: float = field(default_factory=time.time)
 
 
@@ -140,6 +141,11 @@ def set_task_query(task_id: str, query: str) -> None:
         record.query = query or ""
 
 
+def set_task_turn(task_id: str, turn_id: str) -> None:
+    with _lock:
+        _get_locked(task_id).turn_id = turn_id
+
+
 def update_task_status(task_id: str, status_name: str, push_queue: bool = False) -> None:
     """更新任务整体状态，可选推送一次进度事件。"""
     with _lock:
@@ -207,6 +213,7 @@ def snapshot(task_id: str) -> dict:
             "error_code": record.error_code,
             "message": record.message,
             "query": record.query,
+            "turn_id": record.turn_id,
         }
 
 

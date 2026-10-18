@@ -61,7 +61,7 @@ def _run_graph_once(state: ImportGraphState) -> None:
         raise ValueError("不支持的文档类型（仅支持 md / pdf）")
 
 
-def invoke_import_graph(task_id: str, local_file_path: str, local_dir: str) -> None:
+def invoke_import_graph(task_id: str, local_file_path: str, local_dir: str, document_kind: str = "manual", document_version: str = "", valid_until: float = 0.0) -> None:
     """执行一次导入：抢并发名额 → 跑图（可重试）→ 落状态与快照。"""
     slots = _import_slots()
     if not slots.acquire(timeout=max(1, settings.import_.acquire_timeout_seconds)):
@@ -76,7 +76,8 @@ def invoke_import_graph(task_id: str, local_file_path: str, local_dir: str) -> N
         _persist(task_id)
 
         state: ImportGraphState = create_default_state(
-            task_id=task_id, local_file_path=local_file_path, local_dir=local_dir
+            task_id=task_id, local_file_path=local_file_path, local_dir=local_dir,
+            document_kind=document_kind, document_version=document_version, valid_until=valid_until
         )
 
         attempts = max(1, settings.import_.max_retry_attempts)

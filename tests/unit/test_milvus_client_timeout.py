@@ -31,6 +31,7 @@ class _CapturingMilvusClient:
 
 def test_client_is_constructed_with_timeout(monkeypatch):
     """客户端单例必须带 timeout，覆盖建连等待。"""
+    monkeypatch.setattr(settings.milvus, "url", "http://127.0.0.1:19530")
     created: list[_CapturingMilvusClient] = []
 
     def _factory(**kwargs):

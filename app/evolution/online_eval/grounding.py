@@ -12,6 +12,7 @@ from langchain_core.messages import HumanMessage
 
 from app.shared.models import llm_providers
 from app.shared.runtime.logger import logger
+from app.shared.runtime.query_metrics import mark_degraded
 from app.shared.utils.json_utils import parse_json_object
 
 _PROMPT = (
@@ -35,5 +36,6 @@ def compute_groundedness(answer: str, evidence_texts: list[str]) -> float | None
         parsed = parse_json_object(response.content)
         return max(0.0, min(1.0, float(parsed.get("groundedness", 0.0))))
     except Exception as exc:  # noqa: BLE001 - 评估失败不影响主链路
+        mark_degraded("grounding_error")
         logger.warning(f"groundedness 评估失败，标记为未评估：{exc}")
         return None

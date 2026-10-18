@@ -60,7 +60,7 @@ def test_build_history_context_numbers_oldest_first(monkeypatch):
         {"role": "assistant", "text": "最新回答", "item_names": ["A"], "rewritten_query": "", "ts": 2.5},
         {"role": "user", "rewritten_query": "最早问题", "item_names": ["A"], "text": "", "ts": 1.0},
     ]
-    monkeypatch.setattr(history_utils.history_repository, "list_recent", lambda **kw: list(rows))
+    monkeypatch.setattr(history_utils.history_repository, "list_valid_recent", lambda **kw: list(rows))
 
     text = build_history_context("s1", limit=10)
     lines = [line for line in text.splitlines() if line.strip()]
@@ -77,4 +77,4 @@ def test_list_recent_keeps_newest_first_order(monkeypatch):
     from app.shared.clients import history_repository as repo_module
 
     source = inspect.getsource(repo_module.HistoryRepository.list_recent)
-    assert 'sort("ts", -1)' in source, "list_recent 的排序方向不得被改动"
+    assert '("ts", -1)' in source and '("_id", -1)' in source, "list_recent 的排序方向不得被改动"

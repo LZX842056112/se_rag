@@ -92,6 +92,10 @@ def _patch_llm(monkeypatch):
     monkeypatch.setattr(
         llm_providers, "embed_text", lambda text: {"dense": [[0.1, 0.2]], "sparse": [{1: 0.5}]}
     )
+    monkeypatch.setattr(
+        llm_providers, "generate_embeddings",
+        lambda texts: {"dense": [[0.1, 0.2] for _ in texts], "sparse": [{1: 0.5} for _ in texts]},
+    )
     return fake_chat
 
 

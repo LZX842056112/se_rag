@@ -1,7 +1,10 @@
 """BGE-M3 稠密 + 稀疏向量模型（单例加载，原生 L2 归一化）。"""
 from __future__ import annotations
 
-from pymilvus.model.hybrid import BGEM3EmbeddingFunction
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pymilvus.model.hybrid import BGEM3EmbeddingFunction
 
 from app.shared.config import settings
 from app.shared.runtime.logger import logger
@@ -13,6 +16,8 @@ _bge_m3_ef: BGEM3EmbeddingFunction | None = None
 
 def get_bge_m3_ef() -> BGEM3EmbeddingFunction:
     """获取 BGE-M3 单例（首次调用加载模型，可能较慢）。"""
+    from pymilvus.model.hybrid import BGEM3EmbeddingFunction
+
     global _bge_m3_ef
     if _bge_m3_ef is not None:
         return _bge_m3_ef

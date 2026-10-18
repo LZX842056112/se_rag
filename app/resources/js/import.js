@@ -179,6 +179,11 @@
 
     const formData = new FormData();
     formData.append('files', file);
+    const kind = document.getElementById('documentKind').value;
+    formData.append('document_kind', kind);
+    formData.append('document_version', document.getElementById('documentVersion').value.trim());
+    const until = document.getElementById('policyUntil').value;
+    if (until) formData.append('valid_until', String(new Date(until).getTime() / 1000));
 
     try {
       progressContainer.style.display = 'block';

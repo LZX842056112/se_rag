@@ -68,6 +68,10 @@ def ensure_indexes() -> None:
     try:
         db = get_mongo_db()
         mongo = settings.mongo
+        db[mongo.query_runs_collection].create_index([("turn_id", 1)], unique=True)
+        db[mongo.query_runs_collection].create_index([("ts", -1)])
+        db[mongo.query_feedback_collection].create_index([("answer_id", 1)], unique=True)
+        db[mongo.query_issues_collection].create_index([("status", 1), ("created_at", -1)])
         db[mongo.chat_message_collection].create_index([("session_id", 1), ("ts", -1)])
         db[mongo.fb_events_collection].create_index([("session_id", 1), ("ts", -1)])
         db[mongo.fb_events_collection].create_index([("ts", -1)])

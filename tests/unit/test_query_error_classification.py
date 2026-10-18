@@ -7,7 +7,6 @@ HTTP 契约不变（非流式仍返回 ``query_failed`` / 500）。
 from __future__ import annotations
 
 import grpc
-import pytest
 from pymongo.errors import ServerSelectionTimeoutError
 
 from app.rag.query import pipeline

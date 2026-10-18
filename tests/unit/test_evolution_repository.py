@@ -8,6 +8,7 @@ from app.evolution import repositories as repositories_module
 from app.evolution.feedback.collector import record_feedback
 from app.evolution.models import FeedbackEvent
 from app.shared.config import settings
+from app.shared.clients import history_repository as history_module
 
 
 @pytest.fixture
@@ -16,6 +17,7 @@ def fake_mongo(monkeypatch):
     client = mongomock.MongoClient()
     db = client["test_db"]
     monkeypatch.setattr(repositories_module, "get_collection", lambda name: db[name])
+    monkeypatch.setattr(history_module, "get_collection", lambda name: db[name])
     return db
 
 
@@ -38,7 +40,8 @@ def test_param_registry_roundtrip(fake_mongo):
 
 def test_feedback_is_idempotent_within_window(fake_mongo, monkeypatch):
     monkeypatch.setattr(settings.evolution, "enabled", True)
-    event = FeedbackEvent(session_id="s1", query="q1", thumbs=-1, source="kb")
+    answer_id = history_module.history_repository.save_message(session_id="s1", role="assistant", text="a", query="q1", intent="rag")
+    event = FeedbackEvent(session_id="s1", answer_id=answer_id, query="q1", thumbs=-1, source="kb")
     record_feedback(event)
     record_feedback(event)  # 30 秒窗口内重复提交不应重复落库
     assert fake_mongo[settings.mongo.fb_events_collection].count_documents({}) == 1

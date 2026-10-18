@@ -7,9 +7,10 @@ from __future__ import annotations
 
 import os
 
-from fastapi import APIRouter, Depends, Header
+from fastapi import APIRouter, Depends, Header, Request
 
 from app.api.errors import ApiError
+from app.api.session_access import authorize_session
 from app.evolution.approval import service as approval_service
 from app.evolution.feedback.collector import record_feedback
 from app.evolution.models import FeedbackEvent
@@ -21,6 +22,7 @@ from app.evolution.schema import (
     CandidateListResponse,
     EvolutionStatusResponse,
     OkResponse,
+    IssueUpdateRequest,
 )
 from app.evolution.scheduler import loop_status
 from app.evolution.online_eval.metrics import latest_metrics
@@ -53,16 +55,17 @@ def _to_item(doc: dict) -> CandidateItem:
 
 
 @router.post("/feedback", response_model=OkResponse)
-def post_feedback(req: FeedbackEvent) -> OkResponse:
+def post_feedback(req: FeedbackEvent, request: Request = None) -> OkResponse:
     """提交用户反馈（👍 / 👎）；未开启自进化时仅幂等接受。"""
+    authorize_session(request, req.session_id)
     record_feedback(req)
     return OkResponse(code=200, message="feedback accepted")
 
 
-@router.get("/candidates", response_model=CandidateListResponse)
+@router.get("/candidates", response_model=CandidateListResponse, dependencies=[Depends(require_admin_token)])
 def list_candidates(status: str | None = None, limit: int = 100) -> CandidateListResponse:
     """候选列表（可按 ``status`` 筛选）。"""
-    docs = approval_service.list_candidates(status=status, limit=limit)
+    docs = approval_service.list_candidates(status=status, limit=max(1, min(limit, 100)))
     return CandidateListResponse(items=[_to_item(doc) for doc in docs])
 
 
@@ -76,7 +79,7 @@ def _count_by(collection, field: str = "status") -> dict[str, int]:
         return {}
 
 
-@router.get("/status", response_model=EvolutionStatusResponse)
+@router.get("/status", response_model=EvolutionStatusResponse, dependencies=[Depends(require_admin_token)])
 def get_status() -> EvolutionStatusResponse:
     """闭环运行状态：缺口/候选计数、调度进度与最近一次指标快照。
 
@@ -142,3 +145,24 @@ def remove_candidate(candidate_id: str) -> OkResponse:
     if not approval_service.remove_candidate(candidate_id):
         raise ApiError("candidate_not_found", "候选不存在或下架失败", status_code=404)
     return OkResponse(code=200, message="removed")
+
+
+@router.get("/issues", dependencies=[Depends(require_admin_token)])
+def get_issues(status: str | None = None, limit: int = 100):
+    from app.evolution.issues import list_issues
+    return {"items": list_issues(status, limit)}
+
+
+@router.post("/issues/{issue_id}", response_model=OkResponse, dependencies=[Depends(require_admin_token)])
+def edit_issue(issue_id: str, req: IssueUpdateRequest):
+    from app.evolution.issues import update_issue
+    ok, message = update_issue(issue_id, **req.model_dump())
+    if not ok:
+        raise ApiError("issue_update_failed", message, 400)
+    return OkResponse(message="updated")
+
+
+@router.get("/trial-metrics", dependencies=[Depends(require_admin_token)])
+def get_trial_metrics():
+    from app.evolution.trial_metrics import report
+    return report()

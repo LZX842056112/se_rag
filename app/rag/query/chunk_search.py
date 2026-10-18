@@ -13,6 +13,7 @@ from app.rag.item_name.config import GLOBAL_ITEM_NAME
 from app.rag.query.config import CHUNK_DENSE_METRIC
 from app.shared.clients.milvus_gateway import eq_expr, in_expr, milvus_gateway
 from app.shared.models import llm_providers
+from app.shared.runtime.query_metrics import mark_degraded
 from app.shared.runtime.logger import logger
 from app.shared.utils.require import require_state_list, require_state_str
 
@@ -30,6 +31,9 @@ CHUNK_OUTPUT_FIELDS = [
     "page",
     "item_name",
     "content",
+    "document_kind",
+    "document_version",
+    "valid_until",
 ]
 
 # 每路召回候选数与最终返回条数
@@ -92,6 +96,8 @@ def search_chunks(
         limit=limit,
         output_fields=output_fields or CHUNK_OUTPUT_FIELDS,
     )
+    if milvus_result is None:
+        mark_degraded("milvus_unavailable")
     return milvus_result[0] if milvus_result else []
 
 
@@ -105,6 +111,9 @@ def to_chunks(milvus_list) -> list[dict]:
             "score": item.get("distance", 0.0),
             "title": entity.get("title"),
             "file_title": entity.get("file_title"),
+            "document_kind": entity.get("document_kind", "manual"),
+            "document_version": entity.get("document_version", ""),
+            "valid_until": entity.get("valid_until", 0.0),
             "parent_title": entity.get("parent_title"),
             "part": entity.get("part"),
             "item_name": entity.get("item_name"),

@@ -39,6 +39,8 @@ CHUNK_VARCHAR_LIMITS: dict[str, int] = {
     "heading_path": 1024,
     "content": 65535,
     "content_hash": 40,
+    "document_kind": 16,
+    "document_version": 128,
 }
 
 # 标量字段与缺省值
@@ -73,6 +75,7 @@ def prepare_chunks_collection() -> None:
         datatype = DataType.INT16 if field_name == "part" else DataType.INT32
         schema.add_field(field_name=field_name, datatype=datatype)
 
+    schema.add_field(field_name="valid_until", datatype=DataType.DOUBLE)
     index_params = client.prepare_index_params()
     register_vector_fields_and_indexes(schema, index_params, dense_metric="COSINE")
     client.create_collection(collection_name=collection_name, schema=schema, index_params=index_params)
@@ -92,6 +95,7 @@ def _align_to_schema(rows: list[dict]) -> list[dict]:
         for field_name, default in CHUNK_SCALAR_DEFAULTS.items():
             value = row.get(field_name)
             item[field_name] = int(value) if isinstance(value, (int, float)) else default
+        item["valid_until"] = float(row.get("valid_until") or 0.0)
         for field_name in CHUNK_VECTOR_FIELDS:
             vector = row.get(field_name)
             if not vector:
@@ -166,7 +170,10 @@ def index_chunks(state: dict) -> dict:
     client = milvus_gateway.milvus_client
     collection_name = milvus_gateway.chunk_collection_name
 
-    rows = _align_to_schema(embeddings_content)
+    metadata = {"document_kind": state.get("document_kind", "manual"),
+                "document_version": state.get("document_version", ""),
+                "valid_until": state.get("valid_until", 0.0)}
+    rows = _align_to_schema([{**row, **metadata} for row in embeddings_content])
     new_ids = {str(row["chunk_id"]) for row in rows}
 
     # 1) 先写：分批 upsert

@@ -5,7 +5,6 @@
 """
 from __future__ import annotations
 
-import pytest
 
 from app.rag.import_ import enrich_markdown_images as em
 from app.rag.import_ import pdf_parse_service as svc

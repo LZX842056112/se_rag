@@ -184,7 +184,7 @@ def _run_js_fn(node: str, fn_source: str, fn_name: str, *args) -> str:
         + ", ".join(json.dumps(a) for a in args) + ")));"
     )
     result = subprocess.run(
-        [node, "-e", script], capture_output=True, text=True, timeout=30, check=True
+        [node, "-e", script], capture_output=True, text=True, encoding="utf-8", timeout=30, check=True
     )
     return result.stdout
 
@@ -334,7 +334,7 @@ def test_restore_session_reattaches_stream_for_active_task():
 def test_restore_session_skips_when_answer_already_saved():
     """守卫：历史最后一条已是回答时不得再接管，否则会出现两个回答气泡。"""
     body = _restore_session_body()
-    assert re.search(r"if\s*\(lastRole\s*===\s*'assistant'\)\s*return", body), (
+    assert re.search(r"if\s*\(lastRole\s*===\s*'assistant'\s*&&[^\n]*lastTurnId\s*===\s*status\.turn_id\)\s*return", body), (
         "缺少「回答已落库就不再接管」的短路判断"
     )
 

@@ -28,6 +28,10 @@ class ImportGraphState(TypedDict):
 
     item_name: str  # 主体 file_title兜底
 
+    document_kind: str
+    document_version: str
+    valid_until: float
+
     embeddings_content: list # 带有向量的切块
 
 
@@ -45,6 +49,9 @@ default_state:ImportGraphState ={
     "chunks": [],
     "parent_chunks": [],
     "item_name": "",
+    "document_kind": "manual",
+    "document_version": "",
+    "valid_until": 0.0,
     "embeddings_content": []
 }
 

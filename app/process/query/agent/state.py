@@ -1,5 +1,6 @@
 from typing_extensions import TypedDict
 from typing import List
+from app.rag.query.contracts import Intent
 import copy
 
 class QueryGraphState(TypedDict):
@@ -16,7 +17,14 @@ class QueryGraphState(TypedDict):
 
     # 意图识别结果："rag"=知识库问答（默认）/"chitchat"=闲聊；
     # 由图入口 node_intent_route 回填，决定走检索链路还是闲聊作答分支。
-    intent: str
+    intent: Intent
+    turn_id: str
+    answer_id: str
+    business_tag: str
+    handoff_required: bool
+    issue_type: str
+    issue_id: str
+    metrics: dict
 
     # 检索过程中的中间数据
     embedding_chunks: list  # 普通向量检索回来的切片
@@ -36,7 +44,7 @@ class QueryGraphState(TypedDict):
 
     # 自进化辅助输出
     cited_chunk_ids: list  # 被采纳的引用 id（chunk_id / evo_doc_id）
-    groundedness: float  # 答案接地性 0~1
+    groundedness: float | None  # 答案接地性 0~1
     retrieval_signals: dict  # 零命中 / 无检索直达 / 进化命中 等信号
     faq_evo_ids: list  # 命中的自进化条目 id 列表
     citations: list  # 对外引用列表 [{faq_id, source}]，供落库与历史回显
@@ -57,6 +65,12 @@ query_graph_default_state: QueryGraphState = {
     "original_query": "",
     "rewrite_hint": "",
     "intent": "rag",
+    "turn_id": "",
+    "answer_id": "",
+    "business_tag": "",
+    "handoff_required": False,
+    "issue_type": "",
+    "issue_id": "",
     "embedding_chunks": [],
     "hyde_embedding_chunks": [],
     "web_search_docs": [],
@@ -66,7 +80,7 @@ query_graph_default_state: QueryGraphState = {
     "prompt": "",
     "answer": "",
     "cited_chunk_ids": [],
-    "groundedness": 0.0,
+    "groundedness": None,
     "retrieval_signals": {},
     "faq_evo_ids": [],
     "citations": [],

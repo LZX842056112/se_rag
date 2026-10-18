@@ -9,17 +9,19 @@ from app.shared.runtime.logger import logger
 
 _DEFAULT_LLM_MODEL = "qwen3-32b"
 _DEFAULT_TEMPERATURE = 0.1
-_llm_client_cache: dict[tuple[str, bool], ChatOpenAI] = {}
+_llm_client_cache: dict[tuple, ChatOpenAI] = {}
 
 
-def get_llm_client(model: str | None = None, json_mode: bool = False) -> ChatOpenAI:
+def get_llm_client(model: str | None = None, json_mode: bool = False, *, timeout_seconds: float | None = None, max_retries: int | None = None) -> ChatOpenAI:
     """获取 ChatOpenAI 客户端（带进程内缓存）。
 
     :param model: 模型名，优先级：入参 > ``settings.llm.llm_model`` > 内置默认值
     :param json_mode: 是否开启 JSON 输出模式（``response_format=json_object``）
     """
     target_model = model or settings.llm.llm_model or _DEFAULT_LLM_MODEL
-    cache_key = (target_model, json_mode)
+    timeout_seconds = settings.import_.llm_timeout_seconds if timeout_seconds is None else timeout_seconds
+    max_retries = settings.import_.llm_max_retries if max_retries is None else max_retries
+    cache_key = (target_model, json_mode, timeout_seconds, max_retries)
     if cache_key in _llm_client_cache:
         return _llm_client_cache[cache_key]
 
@@ -37,14 +39,15 @@ def get_llm_client(model: str | None = None, json_mode: bool = False) -> ChatOpe
     try:
         client = ChatOpenAI(
             model=target_model,
+            stream_usage=True,
             temperature=settings.llm.temperature or _DEFAULT_TEMPERATURE,
             api_key=settings.llm.api_key,
             base_url=settings.llm.base_url,
             extra_body=extra_body,
             model_kwargs=model_kwargs,
             # 单次调用超时与 SDK 内建重试：模型服务挂起时不再无限等待
-            timeout=settings.import_.llm_timeout_seconds,
-            max_retries=settings.import_.llm_max_retries,
+            timeout=timeout_seconds,
+            max_retries=max_retries,
         )
     except LangChainException as exc:
         raise RuntimeError(f"模型【{target_model}】初始化失败（LangChain 层）：{exc}") from exc

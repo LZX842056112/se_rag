@@ -6,15 +6,21 @@ from langchain_openai import ChatOpenAI
 from app.shared.config import settings
 from app.shared.models.embedding import embed_text, generate_embeddings
 from app.shared.models.llm import get_llm_client
+from app.shared.runtime.query_metrics import instrument_client
 from app.shared.models.reranker import get_reranker_model
 
 
 class LLMProvider:
     """模型能力门面（薄封装，便于业务层替换与测试打桩）。"""
 
-    def chat(self, model_name: str | None = None, json_mode: bool = False) -> ChatOpenAI:
+    def chat(self, model_name: str | None = None, json_mode: bool = False, *, timeout_seconds: float | None = None, max_retries: int | None = None) -> ChatOpenAI:
         """获取对话模型；``model_name`` 为空时使用配置中的默认模型。"""
-        return get_llm_client(model=model_name, json_mode=json_mode)
+        options = {}
+        if timeout_seconds is not None:
+            options["timeout_seconds"] = timeout_seconds
+        if max_retries is not None:
+            options["max_retries"] = max_retries
+        return instrument_client(get_llm_client(model=model_name, json_mode=json_mode, **options), model_name)
 
     def vision_chat(self, vision_model_name: str | None = None) -> ChatOpenAI:
         """获取视觉语言模型（用于 Markdown 图片理解）。"""

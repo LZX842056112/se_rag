@@ -20,11 +20,40 @@ class HistoryRepository:
     def list_recent(self, session_id: str, limit: int = 10) -> list[dict[str, Any]]:
         """按时间倒序取最近 ``limit`` 条消息（新 → 旧）。"""
         try:
-            cursor = self._collection().find({"session_id": session_id}).sort("ts", -1).limit(limit)
+            cursor = self._collection().find({"session_id": session_id}).sort([("ts", -1), ("_id", -1)]).limit(limit)
             return list(cursor)
         except Exception as exc:  # noqa: BLE001
             logger.error(f"读取会话历史失败：{exc}")
             return []
+
+    def list_valid_recent(self, session_id: str, limit: int = 10) -> list[dict[str, Any]]:
+        """先筛选知识历史，再取条数。闲聊不占用知识上下文预算。"""
+        try:
+            return list(self._collection().find({
+                "session_id": session_id, "item_names.0": {"$exists": True},
+                "intent": {"$ne": "chitchat"},
+            }).sort([("ts", -1), ("_id", -1)]).limit(limit))
+        except Exception as exc:
+            logger.warning(f"读取知识历史失败：{exc}")
+            return []
+
+    def get_answer(self, session_id: str, answer_id: str) -> dict | None:
+        """只读取指定会话中的助手回答。无效 ID 或故障按不可核验处理。"""
+        try:
+            return self._collection().find_one({
+                "_id": ObjectId(answer_id), "session_id": session_id, "role": "assistant",
+            })
+        except Exception:
+            return None
+
+    def attach_issue(self, session_id: str, answer_id: str, issue_id: str, handoff_required: bool):
+        try:
+            self._collection().update_one(
+                {"_id": ObjectId(answer_id), "session_id": session_id, "role": "assistant"},
+                {"$set": {"issue_id": issue_id, "handoff_required": handoff_required}},
+            )
+        except Exception as exc:
+            logger.warning(f"保存回答待办信息失败：{exc}")
 
     def save_message(
         self,
@@ -36,10 +65,13 @@ class HistoryRepository:
         item_names: Optional[list[str]] = None,
         image_urls: Optional[list[str]] = None,
         citations: Optional[list[dict]] = None,
-        groundedness: float = 0.0,
+        groundedness: float | None = None,
         pending_subject_ask: Optional[dict] = None,
         message_id: Optional[str] = None,
         intent: str = "",
+        turn_id: str = "",
+        query: str = "",
+        business_tag: str = "",
     ) -> str:
         """新增（无 ``message_id``）或更新（有 ``message_id``）一条消息。
 
@@ -56,15 +88,18 @@ class HistoryRepository:
                 "role": role,
                 "text": text,
                 "rewritten_query": rewritten_query or "",
-                "item_names": item_names,
-                "image_urls": image_urls,
+                "item_names": item_names or [],
+                "image_urls": image_urls or [],
                 "citations": citations or [],
-                "groundedness": groundedness or 0.0,
+                "groundedness": groundedness,
                 # 反问轮（助手给出可点选主体）记下「触发反问的原话 + 候选主体名」：
                 # 用户下一轮手输纯主体名时服务端据此复原意图——前端挂起态刷新即丢。
                 # 空字典表示本轮不是反问。
                 "pending_subject_ask": pending_subject_ask or {},
                 "intent": intent or "",
+                "turn_id": turn_id,
+                "query": query,
+                "business_tag": business_tag,
                 "ts": datetime.now().timestamp(),
             }
             collection = self._collection()

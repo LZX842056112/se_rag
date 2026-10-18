@@ -15,6 +15,7 @@ from app.shared.runtime.logger import logger
 _STEP = {"RRF_K": 10, "RRF_TOP": 1, "RERANK_TOP_K": 1}
 _MIN = {"RRF_K": 20, "RRF_TOP": 2, "RERANK_TOP_K": 2}
 _MAX = {"RRF_K": 200, "RRF_TOP": 20, "RERANK_TOP_K": 6}
+_DEFAULT = {"RRF_K": 60, "RRF_TOP": 5, "RERANK_TOP_K": 6}
 
 
 def _baseline_adopt_rate(before_ts: float | None = None) -> float | None:
@@ -40,13 +41,19 @@ def adjust_step(snapshot: MetricSnapshot | None = None) -> bool:
 
     ``snapshot`` 由调度器传入（与写库的是同一份）；不传时自行计算，保持函数可独立调用。
     """
-    if not settings.evolution.enabled:
+    if not settings.evolution.enabled or not settings.evolution.auto_tune_enabled:
         return False
     snapshot = snapshot or compute_snapshot()
     baseline = _baseline_adopt_rate(snapshot.ts)
     if baseline is None or baseline <= 0.0:
         return False  # 基线数据不足，不做动作
 
+    samples = evolution_repo.fb_events.count_documents({
+        "ts": {"$gte": snapshot.ts - 86400},
+        "$or": [{"adopt": {"$in": [True, False]}}, {"thumbs": {"$in": [-1, 1]}}],
+    })
+    if samples < 100:
+        return False
     diff = snapshot.adopt_rate - baseline
     drop_line = settings.evolution.alarm_adopt_rate_drop
     small = drop_line / 2.0
@@ -54,20 +61,28 @@ def adjust_step(snapshot: MetricSnapshot | None = None) -> bool:
 
     if diff <= -drop_line:
         logger.warning(f"[自进化止损] 采纳率 {snapshot.adopt_rate:.2f} 较基线 {baseline:.2f} 骤降，回退参数")
-        for key, low in _MIN.items():
-            param_registry.set_param(key, low, updated_by="metric")
-        return True
+        candidates = evolution_repo.k_metrics.find({
+            "ts": {"$lt": snapshot.ts}, "adopt_rate": {"$gte": baseline},
+        }).sort("ts", -1).limit(3)
+        for record in candidates:
+            stable = record.get("params_snapshot") or {}
+            if all(isinstance(stable.get(key), int) and _MIN[key] <= stable[key] <= _MAX[key] for key in _MIN):
+                for key in _MIN:
+                    param_registry.set_param(key, stable[key], updated_by="metric_rollback")
+                return True
+        logger.warning("未找到可核验的稳定参数快照，保留当前参数")
+        return False
 
     if diff >= small:
         for key, step in _STEP.items():
-            nxt = int(param_registry.get_param(key) or 0) + step
-            if nxt <= _MAX[key]:
+            nxt = int(param_registry.get_param(key) or _DEFAULT[key]) + step
+            if _MIN[key] <= nxt <= _MAX[key]:
                 param_registry.set_param(key, nxt, updated_by="metric")
                 changed = True
     elif diff <= -small:
         for key, step in _STEP.items():
-            nxt = int(param_registry.get_param(key) or 0) - step
-            if nxt >= _MIN[key]:
+            nxt = int(param_registry.get_param(key) or _DEFAULT[key]) - step
+            if _MIN[key] <= nxt <= _MAX[key]:
                 param_registry.set_param(key, nxt, updated_by="metric")
                 changed = True
     return changed

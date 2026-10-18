@@ -4,7 +4,7 @@
 """
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Optional, Literal
 
 from pydantic import BaseModel, Field
 
@@ -44,6 +44,7 @@ class CitationModel(BaseModel):
     # 页码与章节面包屑：来自切分阶段的结构化元数据，供引用溯源
     page: int | None = None
     heading: str = ""
+    version: str = ""
 
 
 class OkResponse(BaseModel):
@@ -61,3 +62,9 @@ class EvolutionStatusResponse(BaseModel):
     candidates: dict[str, int] = Field(default_factory=dict)
     feedback_events: int = 0
     latest_metric: dict[str, Any] | None = None
+
+
+class IssueUpdateRequest(BaseModel):
+    owner: str = Field(default="", max_length=128)
+    status: Literal["open", "in_progress", "resolved"]
+    resolution: str = Field(default="", max_length=2000)

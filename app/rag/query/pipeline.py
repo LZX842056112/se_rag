@@ -2,20 +2,22 @@
 from __future__ import annotations
 
 from app.evolution.feedback.collector import flush_session_signals
+from app.evolution.issues import register_unresolved
 from app.process.query.agent.main_graph import query_app
 from app.process.query.agent.state import QueryGraphState, create_query_default_state
 from app.rag.query.citations import citations_from_reranked_docs
 from app.rag.query.errors import classify_query_error
+from app.rag.query.lifecycle import reserve_query, release_query
 from app.shared.config import settings
+from app.shared.clients.history_repository import history_repository
 from app.shared.runtime.logger import logger
-from app.shared.utils.sse_broker import SSEEvent, ensure_channel, publish, reset_channel
+from app.shared.runtime.query_metrics import QueryMetrics, current_metrics, record_query
+from app.shared.utils.sse_broker import SSEEvent, publish
 from app.shared.utils.task_state import (
     TASK_STATUS_COMPLETED,
     TASK_STATUS_FAILED,
     TASK_STATUS_PROCESSING,
-    clear_task,
     set_task_error,
-    set_task_query,
     update_task_status,
 )
 
@@ -25,6 +27,7 @@ def invoke_query_graph(
     original_query: str,
     is_stream: bool,
     rewrite_hint: str | None = None,
+    turn_id: str | None = None,
 ) -> QueryGraphState | None:
     """执行一次查询：清空旧进度 → 跑图 → 推送最终事件 → 写入未解决信号。
 
@@ -33,27 +36,39 @@ def invoke_query_graph(
     通道与收尾事件对非流式同样推送：页面刷新会同时丢掉 POST 响应与 SSE 连接，
     只有通道里留有本轮事件，前端才能在刷新后重新接管这一轮问答。
     """
+    turn_id = turn_id or reserve_query(session_id, original_query)
+    metrics = QueryMetrics(session_id, turn_id)
+    metrics_token = current_metrics.set(metrics)
+    final_state = {}
+    final_status = "failed"
     try:
-        clear_task(session_id)
-        # 记录本轮提问：页面刷新后用户消息可能还没落库，前端用快照补出提问气泡
-        set_task_query(session_id, original_query)
-        # 先清掉上一轮残留的缓冲事件，再确保通道存在
-        reset_channel(session_id)
-        ensure_channel(session_id)
         update_task_status(session_id, TASK_STATUS_PROCESSING, push_queue=is_stream)
 
         query_state = create_query_default_state(
             session_id=session_id,
+            turn_id=turn_id,
             original_query=original_query,
             is_stream=is_stream,
             rewrite_hint=rewrite_hint or "",
         )
         result_state = query_app.invoke(query_state)
+        result_state["issue_id"] = register_unresolved(result_state)
+        if result_state["issue_id"] and result_state.get("answer_id"):
+            history_repository.attach_issue(session_id, result_state["answer_id"], result_state["issue_id"], bool(result_state.get("handoff_required")))
+        final_state = result_state
+        final_status = "completed"
+        result_state["metrics"] = metrics.document(result_state.get("intent", "rag"), "completed")
         update_task_status(session_id, TASK_STATUS_COMPLETED, push_queue=is_stream)
 
         # 收尾事件不分流式与否：非流式页面刷新后同样靠通道里的 final 续上答案
         publish(session_id, SSEEvent.FINAL, {
             "answer": result_state.get("answer"),
+            "answer_id": result_state.get("answer_id", ""),
+            "turn_id": turn_id,
+            "business_tag": result_state.get("business_tag", ""),
+            "handoff_required": result_state.get("handoff_required", False),
+            "issue_id": result_state.get("issue_id", ""),
+            "metrics": result_state.get("metrics", {}),
             "status": "completed",
             "image_urls": result_state.get("image_urls", []),
             # 回传已识别主体：前端点踩时原样回传，保证 反馈→缺口→候选 的 item_names 贯通
@@ -88,3 +103,10 @@ def invoke_query_graph(
         })
         logger.exception(f"执行查询流程报错（{code}）：{message}")
         return None
+
+    finally:
+        try:
+            record_query(metrics, final_state or {}, final_status, original_query)
+        finally:
+            current_metrics.reset(metrics_token)
+            release_query(session_id, turn_id)

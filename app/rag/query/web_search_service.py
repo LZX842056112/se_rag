@@ -9,6 +9,7 @@ from agents.mcp import MCPServerStreamableHttp
 from app.process.query.agent.state import QueryGraphState
 from app.shared.config import settings
 from app.shared.runtime.logger import logger
+from app.shared.runtime.query_metrics import mark_degraded
 from app.shared.utils.require import require_state_str
 
 # MCP 客户端自身超时之外的兜底裕量：连接与协议握手慢于该值时整体放弃
@@ -57,8 +58,11 @@ def search_by_web(state: QueryGraphState) -> list[dict]:
     try:
         mcp_result = asyncio.run(_call_bailian_web_search(rewritten_query))
     except Exception as exc:  # noqa: BLE001 - 联网检索是可选增强，任何异常都降级为空
+        mark_degraded("web_error")
         logger.warning(f"联网搜索不可用，降级为纯本地召回：{exc}")
         return []
+    if mcp_result is None:
+        mark_degraded("web_error")
     if mcp_result is None or not mcp_result.content:
         logger.warning("联网搜索未返回有效结果，本次仅使用本地召回结果")
         return []
@@ -66,6 +70,7 @@ def search_by_web(state: QueryGraphState) -> list[dict]:
         # MCP 返回对象的字段是属性而非字典
         payload = json.loads(mcp_result.content[0].text)
     except (ValueError, AttributeError, IndexError) as exc:
+        mark_degraded("web_invalid_output")
         logger.warning(f"联网搜索结果解析失败，降级为空：{exc}")
         return []
     return payload.get("pages", []) or []

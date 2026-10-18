@@ -101,6 +101,10 @@ class MongoSettings:
     # 章节级父块：只按 parent_id 批量取回、从不参与向量检索，故存 Mongo 而非 Milvus，
     # 同时避开 Milvus VARCHAR(65535) 字节上限，长章节可完整存储
     parent_chunks_collection: str
+    query_sessions_collection: str = "query_sessions"
+    query_runs_collection: str = "query_runs"
+    query_feedback_collection: str = "query_feedback"
+    query_issues_collection: str = "query_issues"
 
 
 @dataclass
@@ -114,6 +118,7 @@ class ApiSettings:
     import_port: int
     query_port: int
     cors_origins: tuple[str, ...]
+    session_ownership_enabled: bool = True
 
 
 @dataclass
@@ -144,6 +149,7 @@ class EvolutionSettings:
     backtest_enabled: bool
     backtest_interval_hours: int
     backtest_min_hits: int
+    auto_tune_enabled: bool = False
 
 
 @dataclass
@@ -151,6 +157,9 @@ class RuntimeSettings:
     """进程内运行期参数（内存占用、缓存过期等）。"""
 
     task_state_ttl_seconds: int
+    model_prices_json: str = "{}"
+    intent_timeout_seconds: float = 2.0
+    default_issue_owner: str = ""
 
 
 @dataclass
@@ -258,6 +267,7 @@ def _build_settings() -> Settings:
             parent_chunks_collection=env_str("PARENT_CHUNKS_COLLECTION", "kb_parent_chunks"),
         ),
         api=ApiSettings(
+            session_ownership_enabled=env_bool("SESSION_OWNERSHIP_ENABLED", True),
             import_app_name=env_str("IMPORT_APP_NAME", "Enterprise RAG Import Service"),
             query_app_name=env_str("QUERY_APP_NAME", "Enterprise RAG Query Service"),
             app_env=env_str("APP_ENV", "dev"),
@@ -284,6 +294,7 @@ def _build_settings() -> Settings:
         ),
         evolution=EvolutionSettings(
             enabled=env_bool("EVOLUTION_ENABLED", False),
+            auto_tune_enabled=env_bool("EVOLUTION_AUTO_TUNE_ENABLED", False),
             collection=env_str("EVOLUTION_COLLECTION", "kb_evolution_items"),
             rrf_weight=env_float("EVOLUTION_RRF_WEIGHT", 1.0),
             observe_window_days=env_int("EVOLUTION_OBSERVE_WINDOW_DAYS", 7),
@@ -310,6 +321,9 @@ def _build_settings() -> Settings:
         ),
         runtime=RuntimeSettings(
             task_state_ttl_seconds=env_int("TASK_STATE_TTL_SECONDS", 6 * 3600),
+            model_prices_json=env_str("LLM_MODEL_PRICES_JSON", "{}"),
+            intent_timeout_seconds=max(0.05, min(2.0, env_float("INTENT_TIMEOUT_SECONDS", 2.0))),
+            default_issue_owner=env_str("DEFAULT_ISSUE_OWNER", ""),
         ),
     )
 

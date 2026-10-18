@@ -31,6 +31,62 @@
   if (tokenEl) {
     tokenEl.value = App.getAdminToken();
     tokenEl.addEventListener('input', () => App.setAdminToken(tokenEl.value.trim()));
+    tokenEl.addEventListener('change', () => { reload(); loadStatus(); });
+  }
+
+  async function loadIssues() {
+    const list = document.getElementById('issueList');
+    if (!list) return;
+    try {
+      const data = await App.fetchJson('/api/evolution/issues');
+      list.textContent = '';
+      (data.items || []).forEach(item => {
+        const row = App.create('div', 'item');
+        row.appendChild(App.create('p', null, item.query));
+        const types = { missing_material: '缺资料', retrieval_failure: '检索失败', answer_error: '回答错误', complaint: '业务投诉' };
+        row.appendChild(App.create('p', 'greet', (types[item.issue_type] || item.issue_type) + ' · 创建 ' + fmtTs(item.created_at) + (item.completed_at ? ' · 完成 ' + fmtTs(item.completed_at) : '')));
+        const owner = document.createElement('input');
+        owner.placeholder = '负责人'; owner.maxLength = 128; owner.value = item.owner || '';
+        const status = document.createElement('select');
+        [['open', '待处理'], ['in_progress', '处理中'], ['resolved', '已解决']].forEach(([value, label]) => {
+          const opt = document.createElement('option'); opt.value = value; opt.textContent = label; status.appendChild(opt);
+        });
+        status.value = item.status;
+        const resolution = document.createElement('textarea');
+        resolution.placeholder = '处理结果'; resolution.maxLength = 2000; resolution.value = item.resolution || '';
+        const save = App.create('button', 'btn', '保存处理记录');
+        save.addEventListener('click', async () => {
+          save.disabled = true;
+          try {
+            await App.fetchJson('/api/evolution/issues/' + encodeURIComponent(item.id), {
+              method: 'POST', body: JSON.stringify({ owner: owner.value.trim(), status: status.value, resolution: resolution.value.trim() })
+            });
+            await loadIssues(); await loadTrialMetrics();
+          } catch (e) { toast(e.message); save.disabled = false; }
+        });
+        [owner, status, resolution, save].forEach(el => row.appendChild(el));
+        list.appendChild(row);
+      });
+      if (!(data.items || []).length) list.textContent = '当前没有待办。';
+    } catch (e) { list.textContent = e.message; }
+  }
+
+  async function loadTrialMetrics() {
+    const el = document.getElementById('trialMetrics');
+    if (!el) return;
+    try {
+      const data = await App.fetchJson('/api/evolution/trial-metrics');
+      const pct = value => value == null ? '未评估' : (value * 100).toFixed(1) + '%';
+      el.textContent = '近24小时知识提问 ' + data.rag_queries +
+        ' · 明确解决率 ' + pct(data.resolution_rate) + ' · 解决反馈覆盖率 ' + pct(data.resolution_feedback_coverage) +
+        ' · 重复提问率 ' + pct(data.repeat_query_rate) + ' · 转交率 ' + pct(data.handoff_rate) +
+        ' · 知识补充平均时长 ' + (data.knowledge_completion_mean_hours == null ? '未评估' : data.knowledge_completion_mean_hours.toFixed(1) + '小时');
+      Object.entries(data.routes || {}).forEach(([route, metric]) => {
+        const text = route + '：' + metric.count + '轮，P95 ' + Math.round(metric.duration_p95_ms) + '毫秒，平均模型调用 ' + metric.mean_llm_calls.toFixed(1) +
+          '次，估算费用 ' + (metric.cost_usd == null ? '未配置或未取得用量' : '$' + metric.cost_usd.toFixed(4));
+        el.appendChild(App.create('p', null, text));
+      });
+    } catch (e) { el.textContent = e.message; }
   }
 
   function shortId(id) { return String(id || '').slice(0, 8); }
@@ -45,6 +101,8 @@
 
   /** 闭环状态：把「扫描游标 / 缺口与候选计数」显式展示，避免只能翻日志判断是否卡住 */
   async function loadStatus() {
+    loadIssues();
+    loadTrialMetrics();
     if (!statusEl) return;
     try {
       const data = await App.fetchJson(App.PATHS.evolutionStatus);

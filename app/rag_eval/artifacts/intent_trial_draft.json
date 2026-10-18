@@ -1,0 +1,3302 @@
+[
+  {
+    "case_id": "trial-001",
+    "category": "product",
+    "query": "Brother HAK 180 烫金机怎么安装",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "Brother HAK 180 烫金机"
+    ],
+    "must_contain": [
+      "安装"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-002",
+    "category": "product",
+    "query": "Brother HAK 180 烫金机额定功率是多少",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "Brother HAK 180 烫金机"
+    ],
+    "must_contain": [
+      "功率"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-003",
+    "category": "product",
+    "query": "Brother HAK 180 烫金机有哪些功能",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "Brother HAK 180 烫金机"
+    ],
+    "must_contain": [
+      "功能"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-004",
+    "category": "product",
+    "query": "Brother HAK 180 烫金机怎么保养",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "Brother HAK 180 烫金机"
+    ],
+    "must_contain": [
+      "保养"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-005",
+    "category": "product",
+    "query": "Brother HAK 180 烫金机开不了机怎么办",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "Brother HAK 180 烫金机"
+    ],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-006",
+    "category": "product",
+    "query": "数字万用表怎么安装",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "数字万用表"
+    ],
+    "must_contain": [
+      "安装"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-007",
+    "category": "product",
+    "query": "数字万用表额定功率是多少",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "数字万用表"
+    ],
+    "must_contain": [
+      "功率"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-008",
+    "category": "product",
+    "query": "数字万用表有哪些功能",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "数字万用表"
+    ],
+    "must_contain": [
+      "功能"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-009",
+    "category": "product",
+    "query": "数字万用表怎么保养",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "数字万用表"
+    ],
+    "must_contain": [
+      "保养"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-010",
+    "category": "product",
+    "query": "数字万用表开不了机怎么办",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "数字万用表"
+    ],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-011",
+    "category": "product",
+    "query": "激光打印机怎么安装",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "激光打印机"
+    ],
+    "must_contain": [
+      "安装"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-012",
+    "category": "product",
+    "query": "激光打印机额定功率是多少",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "激光打印机"
+    ],
+    "must_contain": [
+      "功率"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-013",
+    "category": "product",
+    "query": "激光打印机有哪些功能",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "激光打印机"
+    ],
+    "must_contain": [
+      "功能"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-014",
+    "category": "product",
+    "query": "激光打印机怎么保养",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "激光打印机"
+    ],
+    "must_contain": [
+      "保养"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-015",
+    "category": "product",
+    "query": "激光打印机开不了机怎么办",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "激光打印机"
+    ],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-016",
+    "category": "product",
+    "query": "喷墨打印机怎么安装",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "喷墨打印机"
+    ],
+    "must_contain": [
+      "安装"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-017",
+    "category": "product",
+    "query": "喷墨打印机额定功率是多少",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "喷墨打印机"
+    ],
+    "must_contain": [
+      "功率"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-018",
+    "category": "product",
+    "query": "喷墨打印机有哪些功能",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "喷墨打印机"
+    ],
+    "must_contain": [
+      "功能"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-019",
+    "category": "product",
+    "query": "喷墨打印机怎么保养",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "喷墨打印机"
+    ],
+    "must_contain": [
+      "保养"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-020",
+    "category": "product",
+    "query": "喷墨打印机开不了机怎么办",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "喷墨打印机"
+    ],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-021",
+    "category": "product",
+    "query": "热敏打印机怎么安装",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "热敏打印机"
+    ],
+    "must_contain": [
+      "安装"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-022",
+    "category": "product",
+    "query": "热敏打印机额定功率是多少",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "热敏打印机"
+    ],
+    "must_contain": [
+      "功率"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-023",
+    "category": "product",
+    "query": "热敏打印机有哪些功能",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "热敏打印机"
+    ],
+    "must_contain": [
+      "功能"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-024",
+    "category": "product",
+    "query": "热敏打印机怎么保养",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "热敏打印机"
+    ],
+    "must_contain": [
+      "保养"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-025",
+    "category": "product",
+    "query": "热敏打印机开不了机怎么办",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "热敏打印机"
+    ],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-026",
+    "category": "product",
+    "query": "标签打印机怎么安装",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "标签打印机"
+    ],
+    "must_contain": [
+      "安装"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-027",
+    "category": "product",
+    "query": "标签打印机额定功率是多少",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "标签打印机"
+    ],
+    "must_contain": [
+      "功率"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-028",
+    "category": "product",
+    "query": "标签打印机有哪些功能",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "标签打印机"
+    ],
+    "must_contain": [
+      "功能"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-029",
+    "category": "product",
+    "query": "标签打印机怎么保养",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "标签打印机"
+    ],
+    "must_contain": [
+      "保养"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-030",
+    "category": "product",
+    "query": "标签打印机开不了机怎么办",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "标签打印机"
+    ],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-031",
+    "category": "product",
+    "query": "装订机怎么安装",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "装订机"
+    ],
+    "must_contain": [
+      "安装"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-032",
+    "category": "product",
+    "query": "装订机额定功率是多少",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "装订机"
+    ],
+    "must_contain": [
+      "功率"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-033",
+    "category": "product",
+    "query": "装订机有哪些功能",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "装订机"
+    ],
+    "must_contain": [
+      "功能"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-034",
+    "category": "product",
+    "query": "装订机怎么保养",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "装订机"
+    ],
+    "must_contain": [
+      "保养"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-035",
+    "category": "product",
+    "query": "装订机开不了机怎么办",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "装订机"
+    ],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-036",
+    "category": "product",
+    "query": "覆膜机怎么安装",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "覆膜机"
+    ],
+    "must_contain": [
+      "安装"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-037",
+    "category": "product",
+    "query": "覆膜机额定功率是多少",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "覆膜机"
+    ],
+    "must_contain": [
+      "功率"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-038",
+    "category": "product",
+    "query": "覆膜机有哪些功能",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "覆膜机"
+    ],
+    "must_contain": [
+      "功能"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-039",
+    "category": "product",
+    "query": "覆膜机怎么保养",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "覆膜机"
+    ],
+    "must_contain": [
+      "保养"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-040",
+    "category": "product",
+    "query": "覆膜机开不了机怎么办",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "覆膜机"
+    ],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-041",
+    "category": "product",
+    "query": "切纸机怎么安装",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "切纸机"
+    ],
+    "must_contain": [
+      "安装"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-042",
+    "category": "product",
+    "query": "切纸机额定功率是多少",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "切纸机"
+    ],
+    "must_contain": [
+      "功率"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-043",
+    "category": "product",
+    "query": "切纸机有哪些功能",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "切纸机"
+    ],
+    "must_contain": [
+      "功能"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-044",
+    "category": "product",
+    "query": "切纸机怎么保养",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "切纸机"
+    ],
+    "must_contain": [
+      "保养"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-045",
+    "category": "product",
+    "query": "切纸机开不了机怎么办",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "切纸机"
+    ],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-046",
+    "category": "product",
+    "query": "扫描仪怎么安装",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "扫描仪"
+    ],
+    "must_contain": [
+      "安装"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-047",
+    "category": "product",
+    "query": "扫描仪额定功率是多少",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "扫描仪"
+    ],
+    "must_contain": [
+      "功率"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-048",
+    "category": "product",
+    "query": "扫描仪有哪些功能",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "扫描仪"
+    ],
+    "must_contain": [
+      "功能"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-049",
+    "category": "product",
+    "query": "扫描仪怎么保养",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "扫描仪"
+    ],
+    "must_contain": [
+      "保养"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-050",
+    "category": "product",
+    "query": "扫描仪开不了机怎么办",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "扫描仪"
+    ],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-051",
+    "category": "chitchat",
+    "query": "你好",
+    "history": [],
+    "expected_intent": "chitchat",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": false,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-052",
+    "category": "chitchat",
+    "query": "你好！",
+    "history": [],
+    "expected_intent": "chitchat",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": false,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-053",
+    "category": "chitchat",
+    "query": "早上好",
+    "history": [],
+    "expected_intent": "chitchat",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": false,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-054",
+    "category": "chitchat",
+    "query": "早上好！",
+    "history": [],
+    "expected_intent": "chitchat",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": false,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-055",
+    "category": "chitchat",
+    "query": "晚上好",
+    "history": [],
+    "expected_intent": "chitchat",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": false,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-056",
+    "category": "chitchat",
+    "query": "晚上好！",
+    "history": [],
+    "expected_intent": "chitchat",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": false,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-057",
+    "category": "chitchat",
+    "query": "谢谢",
+    "history": [],
+    "expected_intent": "chitchat",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": false,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-058",
+    "category": "chitchat",
+    "query": "谢谢！",
+    "history": [],
+    "expected_intent": "chitchat",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": false,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-059",
+    "category": "chitchat",
+    "query": "辛苦了",
+    "history": [],
+    "expected_intent": "chitchat",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": false,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-060",
+    "category": "chitchat",
+    "query": "辛苦了！",
+    "history": [],
+    "expected_intent": "chitchat",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": false,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-061",
+    "category": "chitchat",
+    "query": "给我讲个笑话",
+    "history": [],
+    "expected_intent": "chitchat",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": false,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-062",
+    "category": "chitchat",
+    "query": "给我讲个笑话！",
+    "history": [],
+    "expected_intent": "chitchat",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": false,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-063",
+    "category": "chitchat",
+    "query": "今天心情不错",
+    "history": [],
+    "expected_intent": "chitchat",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": false,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-064",
+    "category": "chitchat",
+    "query": "今天心情不错！",
+    "history": [],
+    "expected_intent": "chitchat",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": false,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-065",
+    "category": "chitchat",
+    "query": "你叫什么名字",
+    "history": [],
+    "expected_intent": "chitchat",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": false,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-066",
+    "category": "chitchat",
+    "query": "你叫什么名字！",
+    "history": [],
+    "expected_intent": "chitchat",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": false,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-067",
+    "category": "chitchat",
+    "query": "再见",
+    "history": [],
+    "expected_intent": "chitchat",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": false,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-068",
+    "category": "chitchat",
+    "query": "再见！",
+    "history": [],
+    "expected_intent": "chitchat",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": false,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-069",
+    "category": "chitchat",
+    "query": "在吗",
+    "history": [],
+    "expected_intent": "chitchat",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": false,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-070",
+    "category": "chitchat",
+    "query": "在吗！",
+    "history": [],
+    "expected_intent": "chitchat",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": false,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-071",
+    "category": "chitchat",
+    "query": "午安",
+    "history": [],
+    "expected_intent": "chitchat",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": false,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-072",
+    "category": "chitchat",
+    "query": "午安！",
+    "history": [],
+    "expected_intent": "chitchat",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": false,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-073",
+    "category": "chitchat",
+    "query": "你好呀",
+    "history": [],
+    "expected_intent": "chitchat",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": false,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-074",
+    "category": "chitchat",
+    "query": "你好呀！",
+    "history": [],
+    "expected_intent": "chitchat",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": false,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-075",
+    "category": "chitchat",
+    "query": "多谢帮忙",
+    "history": [],
+    "expected_intent": "chitchat",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": false,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-076",
+    "category": "chitchat",
+    "query": "多谢帮忙！",
+    "history": [],
+    "expected_intent": "chitchat",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": false,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-077",
+    "category": "chitchat",
+    "query": "我有点累",
+    "history": [],
+    "expected_intent": "chitchat",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": false,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-078",
+    "category": "chitchat",
+    "query": "我有点累！",
+    "history": [],
+    "expected_intent": "chitchat",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": false,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-079",
+    "category": "chitchat",
+    "query": "聊点轻松的吧",
+    "history": [],
+    "expected_intent": "chitchat",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": false,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-080",
+    "category": "chitchat",
+    "query": "聊点轻松的吧！",
+    "history": [],
+    "expected_intent": "chitchat",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": false,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-081",
+    "category": "chitchat",
+    "query": "哈哈",
+    "history": [],
+    "expected_intent": "chitchat",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": false,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-082",
+    "category": "chitchat",
+    "query": "哈哈！",
+    "history": [],
+    "expected_intent": "chitchat",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": false,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-083",
+    "category": "chitchat",
+    "query": "周末愉快",
+    "history": [],
+    "expected_intent": "chitchat",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": false,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-084",
+    "category": "chitchat",
+    "query": "周末愉快！",
+    "history": [],
+    "expected_intent": "chitchat",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": false,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-085",
+    "category": "chitchat",
+    "query": "晚安",
+    "history": [],
+    "expected_intent": "chitchat",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": false,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-086",
+    "category": "chitchat",
+    "query": "晚安！",
+    "history": [],
+    "expected_intent": "chitchat",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": false,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-087",
+    "category": "chitchat",
+    "query": "你喜欢聊天吗",
+    "history": [],
+    "expected_intent": "chitchat",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": false,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-088",
+    "category": "chitchat",
+    "query": "你喜欢聊天吗！",
+    "history": [],
+    "expected_intent": "chitchat",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": false,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-089",
+    "category": "chitchat",
+    "query": "讲个小故事",
+    "history": [],
+    "expected_intent": "chitchat",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": false,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-090",
+    "category": "chitchat",
+    "query": "讲个小故事！",
+    "history": [],
+    "expected_intent": "chitchat",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": false,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-091",
+    "category": "mixed",
+    "query": "你好，请问Brother HAK 180 烫金机怎么安装",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "Brother HAK 180 烫金机"
+    ],
+    "must_contain": [
+      "安装"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-092",
+    "category": "mixed",
+    "query": "谢谢，不过我还想知道Brother HAK 180 烫金机怎么安装",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "Brother HAK 180 烫金机"
+    ],
+    "must_contain": [
+      "安装"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-093",
+    "category": "mixed",
+    "query": "麻烦你帮我看看Brother HAK 180 烫金机怎么安装",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "Brother HAK 180 烫金机"
+    ],
+    "must_contain": [
+      "安装"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-094",
+    "category": "mixed",
+    "query": "早上好，Brother HAK 180 烫金机怎么安装",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "Brother HAK 180 烫金机"
+    ],
+    "must_contain": [
+      "安装"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-095",
+    "category": "mixed",
+    "query": "你好，请问数字万用表怎么安装",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "数字万用表"
+    ],
+    "must_contain": [
+      "安装"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-096",
+    "category": "mixed",
+    "query": "谢谢，不过我还想知道数字万用表怎么安装",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "数字万用表"
+    ],
+    "must_contain": [
+      "安装"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-097",
+    "category": "mixed",
+    "query": "麻烦你帮我看看数字万用表怎么安装",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "数字万用表"
+    ],
+    "must_contain": [
+      "安装"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-098",
+    "category": "mixed",
+    "query": "早上好，数字万用表怎么安装",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "数字万用表"
+    ],
+    "must_contain": [
+      "安装"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-099",
+    "category": "mixed",
+    "query": "你好，请问激光打印机怎么安装",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "激光打印机"
+    ],
+    "must_contain": [
+      "安装"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-100",
+    "category": "mixed",
+    "query": "谢谢，不过我还想知道激光打印机怎么安装",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "激光打印机"
+    ],
+    "must_contain": [
+      "安装"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-101",
+    "category": "mixed",
+    "query": "麻烦你帮我看看激光打印机怎么安装",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "激光打印机"
+    ],
+    "must_contain": [
+      "安装"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-102",
+    "category": "mixed",
+    "query": "早上好，激光打印机怎么安装",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "激光打印机"
+    ],
+    "must_contain": [
+      "安装"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-103",
+    "category": "mixed",
+    "query": "你好，请问喷墨打印机怎么安装",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "喷墨打印机"
+    ],
+    "must_contain": [
+      "安装"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-104",
+    "category": "mixed",
+    "query": "谢谢，不过我还想知道喷墨打印机怎么安装",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "喷墨打印机"
+    ],
+    "must_contain": [
+      "安装"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-105",
+    "category": "mixed",
+    "query": "麻烦你帮我看看喷墨打印机怎么安装",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "喷墨打印机"
+    ],
+    "must_contain": [
+      "安装"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-106",
+    "category": "mixed",
+    "query": "早上好，喷墨打印机怎么安装",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "喷墨打印机"
+    ],
+    "must_contain": [
+      "安装"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-107",
+    "category": "mixed",
+    "query": "你好，请问热敏打印机怎么安装",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "热敏打印机"
+    ],
+    "must_contain": [
+      "安装"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-108",
+    "category": "mixed",
+    "query": "谢谢，不过我还想知道热敏打印机怎么安装",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "热敏打印机"
+    ],
+    "must_contain": [
+      "安装"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-109",
+    "category": "mixed",
+    "query": "麻烦你帮我看看热敏打印机怎么安装",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "热敏打印机"
+    ],
+    "must_contain": [
+      "安装"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-110",
+    "category": "mixed",
+    "query": "早上好，热敏打印机怎么安装",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "热敏打印机"
+    ],
+    "must_contain": [
+      "安装"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-111",
+    "category": "mixed",
+    "query": "你好，请问标签打印机怎么安装",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "标签打印机"
+    ],
+    "must_contain": [
+      "安装"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-112",
+    "category": "mixed",
+    "query": "谢谢，不过我还想知道标签打印机怎么安装",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "标签打印机"
+    ],
+    "must_contain": [
+      "安装"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-113",
+    "category": "mixed",
+    "query": "麻烦你帮我看看标签打印机怎么安装",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "标签打印机"
+    ],
+    "must_contain": [
+      "安装"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-114",
+    "category": "mixed",
+    "query": "早上好，标签打印机怎么安装",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "标签打印机"
+    ],
+    "must_contain": [
+      "安装"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-115",
+    "category": "mixed",
+    "query": "你好，请问装订机怎么安装",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "装订机"
+    ],
+    "must_contain": [
+      "安装"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-116",
+    "category": "mixed",
+    "query": "谢谢，不过我还想知道装订机怎么安装",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "装订机"
+    ],
+    "must_contain": [
+      "安装"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-117",
+    "category": "mixed",
+    "query": "麻烦你帮我看看装订机怎么安装",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "装订机"
+    ],
+    "must_contain": [
+      "安装"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-118",
+    "category": "mixed",
+    "query": "早上好，装订机怎么安装",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "装订机"
+    ],
+    "must_contain": [
+      "安装"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-119",
+    "category": "mixed",
+    "query": "你好，请问覆膜机怎么安装",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "覆膜机"
+    ],
+    "must_contain": [
+      "安装"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-120",
+    "category": "mixed",
+    "query": "谢谢，不过我还想知道覆膜机怎么安装",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "覆膜机"
+    ],
+    "must_contain": [
+      "安装"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-121",
+    "category": "mixed",
+    "query": "麻烦你帮我看看覆膜机怎么安装",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "覆膜机"
+    ],
+    "must_contain": [
+      "安装"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-122",
+    "category": "mixed",
+    "query": "早上好，覆膜机怎么安装",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "覆膜机"
+    ],
+    "must_contain": [
+      "安装"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-123",
+    "category": "mixed",
+    "query": "你好，请问切纸机怎么安装",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "切纸机"
+    ],
+    "must_contain": [
+      "安装"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-124",
+    "category": "mixed",
+    "query": "谢谢，不过我还想知道切纸机怎么安装",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "切纸机"
+    ],
+    "must_contain": [
+      "安装"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-125",
+    "category": "mixed",
+    "query": "麻烦你帮我看看切纸机怎么安装",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "切纸机"
+    ],
+    "must_contain": [
+      "安装"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-126",
+    "category": "mixed",
+    "query": "早上好，切纸机怎么安装",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "切纸机"
+    ],
+    "must_contain": [
+      "安装"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-127",
+    "category": "mixed",
+    "query": "你好，请问扫描仪怎么安装",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "扫描仪"
+    ],
+    "must_contain": [
+      "安装"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-128",
+    "category": "mixed",
+    "query": "谢谢，不过我还想知道扫描仪怎么安装",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "扫描仪"
+    ],
+    "must_contain": [
+      "安装"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-129",
+    "category": "mixed",
+    "query": "麻烦你帮我看看扫描仪怎么安装",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "扫描仪"
+    ],
+    "must_contain": [
+      "安装"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-130",
+    "category": "mixed",
+    "query": "早上好，扫描仪怎么安装",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [
+      "扫描仪"
+    ],
+    "must_contain": [
+      "安装"
+    ],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-131",
+    "category": "followup",
+    "query": "它怎么安装",
+    "history": [
+      "Brother HAK 180 烫金机是什么",
+      "谢谢",
+      "给我讲个笑话",
+      "你好",
+      "辛苦了",
+      "聊点轻松的吧"
+    ],
+    "expected_intent": "rag",
+    "expected_items": [
+      "Brother HAK 180 烫金机"
+    ],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-132",
+    "category": "followup",
+    "query": "那它的参数呢",
+    "history": [
+      "Brother HAK 180 烫金机是什么",
+      "谢谢",
+      "给我讲个笑话",
+      "你好",
+      "辛苦了",
+      "聊点轻松的吧"
+    ],
+    "expected_intent": "rag",
+    "expected_items": [
+      "Brother HAK 180 烫金机"
+    ],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-133",
+    "category": "followup",
+    "query": "那个怎么保养",
+    "history": [
+      "Brother HAK 180 烫金机是什么",
+      "谢谢",
+      "给我讲个笑话",
+      "你好",
+      "辛苦了",
+      "聊点轻松的吧"
+    ],
+    "expected_intent": "rag",
+    "expected_items": [
+      "Brother HAK 180 烫金机"
+    ],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-134",
+    "category": "followup",
+    "query": "刚才说的型号怎么维修",
+    "history": [
+      "Brother HAK 180 烫金机是什么",
+      "谢谢",
+      "给我讲个笑话",
+      "你好",
+      "辛苦了",
+      "聊点轻松的吧"
+    ],
+    "expected_intent": "rag",
+    "expected_items": [
+      "Brother HAK 180 烫金机"
+    ],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-135",
+    "category": "followup",
+    "query": "它怎么安装",
+    "history": [
+      "数字万用表是什么",
+      "谢谢",
+      "给我讲个笑话",
+      "你好",
+      "辛苦了",
+      "聊点轻松的吧"
+    ],
+    "expected_intent": "rag",
+    "expected_items": [
+      "数字万用表"
+    ],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-136",
+    "category": "followup",
+    "query": "那它的参数呢",
+    "history": [
+      "数字万用表是什么",
+      "谢谢",
+      "给我讲个笑话",
+      "你好",
+      "辛苦了",
+      "聊点轻松的吧"
+    ],
+    "expected_intent": "rag",
+    "expected_items": [
+      "数字万用表"
+    ],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-137",
+    "category": "followup",
+    "query": "那个怎么保养",
+    "history": [
+      "数字万用表是什么",
+      "谢谢",
+      "给我讲个笑话",
+      "你好",
+      "辛苦了",
+      "聊点轻松的吧"
+    ],
+    "expected_intent": "rag",
+    "expected_items": [
+      "数字万用表"
+    ],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-138",
+    "category": "followup",
+    "query": "刚才说的型号怎么维修",
+    "history": [
+      "数字万用表是什么",
+      "谢谢",
+      "给我讲个笑话",
+      "你好",
+      "辛苦了",
+      "聊点轻松的吧"
+    ],
+    "expected_intent": "rag",
+    "expected_items": [
+      "数字万用表"
+    ],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-139",
+    "category": "followup",
+    "query": "它怎么安装",
+    "history": [
+      "激光打印机是什么",
+      "谢谢",
+      "给我讲个笑话",
+      "你好",
+      "辛苦了",
+      "聊点轻松的吧"
+    ],
+    "expected_intent": "rag",
+    "expected_items": [
+      "激光打印机"
+    ],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-140",
+    "category": "followup",
+    "query": "那它的参数呢",
+    "history": [
+      "激光打印机是什么",
+      "谢谢",
+      "给我讲个笑话",
+      "你好",
+      "辛苦了",
+      "聊点轻松的吧"
+    ],
+    "expected_intent": "rag",
+    "expected_items": [
+      "激光打印机"
+    ],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-141",
+    "category": "followup",
+    "query": "那个怎么保养",
+    "history": [
+      "激光打印机是什么",
+      "谢谢",
+      "给我讲个笑话",
+      "你好",
+      "辛苦了",
+      "聊点轻松的吧"
+    ],
+    "expected_intent": "rag",
+    "expected_items": [
+      "激光打印机"
+    ],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-142",
+    "category": "followup",
+    "query": "刚才说的型号怎么维修",
+    "history": [
+      "激光打印机是什么",
+      "谢谢",
+      "给我讲个笑话",
+      "你好",
+      "辛苦了",
+      "聊点轻松的吧"
+    ],
+    "expected_intent": "rag",
+    "expected_items": [
+      "激光打印机"
+    ],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-143",
+    "category": "followup",
+    "query": "它怎么安装",
+    "history": [
+      "喷墨打印机是什么",
+      "谢谢",
+      "给我讲个笑话",
+      "你好",
+      "辛苦了",
+      "聊点轻松的吧"
+    ],
+    "expected_intent": "rag",
+    "expected_items": [
+      "喷墨打印机"
+    ],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-144",
+    "category": "followup",
+    "query": "那它的参数呢",
+    "history": [
+      "喷墨打印机是什么",
+      "谢谢",
+      "给我讲个笑话",
+      "你好",
+      "辛苦了",
+      "聊点轻松的吧"
+    ],
+    "expected_intent": "rag",
+    "expected_items": [
+      "喷墨打印机"
+    ],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-145",
+    "category": "followup",
+    "query": "那个怎么保养",
+    "history": [
+      "喷墨打印机是什么",
+      "谢谢",
+      "给我讲个笑话",
+      "你好",
+      "辛苦了",
+      "聊点轻松的吧"
+    ],
+    "expected_intent": "rag",
+    "expected_items": [
+      "喷墨打印机"
+    ],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-146",
+    "category": "followup",
+    "query": "刚才说的型号怎么维修",
+    "history": [
+      "喷墨打印机是什么",
+      "谢谢",
+      "给我讲个笑话",
+      "你好",
+      "辛苦了",
+      "聊点轻松的吧"
+    ],
+    "expected_intent": "rag",
+    "expected_items": [
+      "喷墨打印机"
+    ],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-147",
+    "category": "followup",
+    "query": "它怎么安装",
+    "history": [
+      "热敏打印机是什么",
+      "谢谢",
+      "给我讲个笑话",
+      "你好",
+      "辛苦了",
+      "聊点轻松的吧"
+    ],
+    "expected_intent": "rag",
+    "expected_items": [
+      "热敏打印机"
+    ],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-148",
+    "category": "followup",
+    "query": "那它的参数呢",
+    "history": [
+      "热敏打印机是什么",
+      "谢谢",
+      "给我讲个笑话",
+      "你好",
+      "辛苦了",
+      "聊点轻松的吧"
+    ],
+    "expected_intent": "rag",
+    "expected_items": [
+      "热敏打印机"
+    ],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-149",
+    "category": "followup",
+    "query": "那个怎么保养",
+    "history": [
+      "热敏打印机是什么",
+      "谢谢",
+      "给我讲个笑话",
+      "你好",
+      "辛苦了",
+      "聊点轻松的吧"
+    ],
+    "expected_intent": "rag",
+    "expected_items": [
+      "热敏打印机"
+    ],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-150",
+    "category": "followup",
+    "query": "刚才说的型号怎么维修",
+    "history": [
+      "热敏打印机是什么",
+      "谢谢",
+      "给我讲个笑话",
+      "你好",
+      "辛苦了",
+      "聊点轻松的吧"
+    ],
+    "expected_intent": "rag",
+    "expected_items": [
+      "热敏打印机"
+    ],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-151",
+    "category": "followup",
+    "query": "它怎么安装",
+    "history": [
+      "标签打印机是什么",
+      "谢谢",
+      "给我讲个笑话",
+      "你好",
+      "辛苦了",
+      "聊点轻松的吧"
+    ],
+    "expected_intent": "rag",
+    "expected_items": [
+      "标签打印机"
+    ],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-152",
+    "category": "followup",
+    "query": "那它的参数呢",
+    "history": [
+      "标签打印机是什么",
+      "谢谢",
+      "给我讲个笑话",
+      "你好",
+      "辛苦了",
+      "聊点轻松的吧"
+    ],
+    "expected_intent": "rag",
+    "expected_items": [
+      "标签打印机"
+    ],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-153",
+    "category": "followup",
+    "query": "那个怎么保养",
+    "history": [
+      "标签打印机是什么",
+      "谢谢",
+      "给我讲个笑话",
+      "你好",
+      "辛苦了",
+      "聊点轻松的吧"
+    ],
+    "expected_intent": "rag",
+    "expected_items": [
+      "标签打印机"
+    ],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-154",
+    "category": "followup",
+    "query": "刚才说的型号怎么维修",
+    "history": [
+      "标签打印机是什么",
+      "谢谢",
+      "给我讲个笑话",
+      "你好",
+      "辛苦了",
+      "聊点轻松的吧"
+    ],
+    "expected_intent": "rag",
+    "expected_items": [
+      "标签打印机"
+    ],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-155",
+    "category": "followup",
+    "query": "它怎么安装",
+    "history": [
+      "装订机是什么",
+      "谢谢",
+      "给我讲个笑话",
+      "你好",
+      "辛苦了",
+      "聊点轻松的吧"
+    ],
+    "expected_intent": "rag",
+    "expected_items": [
+      "装订机"
+    ],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-156",
+    "category": "followup",
+    "query": "那它的参数呢",
+    "history": [
+      "装订机是什么",
+      "谢谢",
+      "给我讲个笑话",
+      "你好",
+      "辛苦了",
+      "聊点轻松的吧"
+    ],
+    "expected_intent": "rag",
+    "expected_items": [
+      "装订机"
+    ],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-157",
+    "category": "followup",
+    "query": "那个怎么保养",
+    "history": [
+      "装订机是什么",
+      "谢谢",
+      "给我讲个笑话",
+      "你好",
+      "辛苦了",
+      "聊点轻松的吧"
+    ],
+    "expected_intent": "rag",
+    "expected_items": [
+      "装订机"
+    ],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-158",
+    "category": "followup",
+    "query": "刚才说的型号怎么维修",
+    "history": [
+      "装订机是什么",
+      "谢谢",
+      "给我讲个笑话",
+      "你好",
+      "辛苦了",
+      "聊点轻松的吧"
+    ],
+    "expected_intent": "rag",
+    "expected_items": [
+      "装订机"
+    ],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-159",
+    "category": "followup",
+    "query": "它怎么安装",
+    "history": [
+      "覆膜机是什么",
+      "谢谢",
+      "给我讲个笑话",
+      "你好",
+      "辛苦了",
+      "聊点轻松的吧"
+    ],
+    "expected_intent": "rag",
+    "expected_items": [
+      "覆膜机"
+    ],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-160",
+    "category": "followup",
+    "query": "那它的参数呢",
+    "history": [
+      "覆膜机是什么",
+      "谢谢",
+      "给我讲个笑话",
+      "你好",
+      "辛苦了",
+      "聊点轻松的吧"
+    ],
+    "expected_intent": "rag",
+    "expected_items": [
+      "覆膜机"
+    ],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-161",
+    "category": "followup",
+    "query": "那个怎么保养",
+    "history": [
+      "覆膜机是什么",
+      "谢谢",
+      "给我讲个笑话",
+      "你好",
+      "辛苦了",
+      "聊点轻松的吧"
+    ],
+    "expected_intent": "rag",
+    "expected_items": [
+      "覆膜机"
+    ],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-162",
+    "category": "followup",
+    "query": "刚才说的型号怎么维修",
+    "history": [
+      "覆膜机是什么",
+      "谢谢",
+      "给我讲个笑话",
+      "你好",
+      "辛苦了",
+      "聊点轻松的吧"
+    ],
+    "expected_intent": "rag",
+    "expected_items": [
+      "覆膜机"
+    ],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-163",
+    "category": "followup",
+    "query": "它怎么安装",
+    "history": [
+      "切纸机是什么",
+      "谢谢",
+      "给我讲个笑话",
+      "你好",
+      "辛苦了",
+      "聊点轻松的吧"
+    ],
+    "expected_intent": "rag",
+    "expected_items": [
+      "切纸机"
+    ],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-164",
+    "category": "followup",
+    "query": "那它的参数呢",
+    "history": [
+      "切纸机是什么",
+      "谢谢",
+      "给我讲个笑话",
+      "你好",
+      "辛苦了",
+      "聊点轻松的吧"
+    ],
+    "expected_intent": "rag",
+    "expected_items": [
+      "切纸机"
+    ],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-165",
+    "category": "followup",
+    "query": "那个怎么保养",
+    "history": [
+      "切纸机是什么",
+      "谢谢",
+      "给我讲个笑话",
+      "你好",
+      "辛苦了",
+      "聊点轻松的吧"
+    ],
+    "expected_intent": "rag",
+    "expected_items": [
+      "切纸机"
+    ],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-166",
+    "category": "followup",
+    "query": "刚才说的型号怎么维修",
+    "history": [
+      "切纸机是什么",
+      "谢谢",
+      "给我讲个笑话",
+      "你好",
+      "辛苦了",
+      "聊点轻松的吧"
+    ],
+    "expected_intent": "rag",
+    "expected_items": [
+      "切纸机"
+    ],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-167",
+    "category": "followup",
+    "query": "它怎么安装",
+    "history": [
+      "扫描仪是什么",
+      "谢谢",
+      "给我讲个笑话",
+      "你好",
+      "辛苦了",
+      "聊点轻松的吧"
+    ],
+    "expected_intent": "rag",
+    "expected_items": [
+      "扫描仪"
+    ],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-168",
+    "category": "followup",
+    "query": "那它的参数呢",
+    "history": [
+      "扫描仪是什么",
+      "谢谢",
+      "给我讲个笑话",
+      "你好",
+      "辛苦了",
+      "聊点轻松的吧"
+    ],
+    "expected_intent": "rag",
+    "expected_items": [
+      "扫描仪"
+    ],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-169",
+    "category": "followup",
+    "query": "那个怎么保养",
+    "history": [
+      "扫描仪是什么",
+      "谢谢",
+      "给我讲个笑话",
+      "你好",
+      "辛苦了",
+      "聊点轻松的吧"
+    ],
+    "expected_intent": "rag",
+    "expected_items": [
+      "扫描仪"
+    ],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-170",
+    "category": "followup",
+    "query": "刚才说的型号怎么维修",
+    "history": [
+      "扫描仪是什么",
+      "谢谢",
+      "给我讲个笑话",
+      "你好",
+      "辛苦了",
+      "聊点轻松的吧"
+    ],
+    "expected_intent": "rag",
+    "expected_items": [
+      "扫描仪"
+    ],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-171",
+    "category": "complaint",
+    "query": "Brother HAK 180 烫金机，我要投诉，售后一直没解决",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-172",
+    "category": "complaint",
+    "query": "Brother HAK 180 烫金机，承诺的退款还没到账，我要投诉",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-173",
+    "category": "complaint",
+    "query": "Brother HAK 180 烫金机，谢谢，但是问题根本没解决",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-174",
+    "category": "complaint",
+    "query": "数字万用表，我要投诉，售后一直没解决",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-175",
+    "category": "complaint",
+    "query": "数字万用表，承诺的退款还没到账，我要投诉",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-176",
+    "category": "complaint",
+    "query": "数字万用表，谢谢，但是问题根本没解决",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-177",
+    "category": "complaint",
+    "query": "激光打印机，我要投诉，售后一直没解决",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-178",
+    "category": "complaint",
+    "query": "激光打印机，承诺的退款还没到账，我要投诉",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-179",
+    "category": "complaint",
+    "query": "激光打印机，谢谢，但是问题根本没解决",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-180",
+    "category": "complaint",
+    "query": "喷墨打印机，我要投诉，售后一直没解决",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-181",
+    "category": "complaint",
+    "query": "喷墨打印机，承诺的退款还没到账，我要投诉",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-182",
+    "category": "complaint",
+    "query": "喷墨打印机，谢谢，但是问题根本没解决",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-183",
+    "category": "complaint",
+    "query": "热敏打印机，我要投诉，售后一直没解决",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-184",
+    "category": "complaint",
+    "query": "热敏打印机，承诺的退款还没到账，我要投诉",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-185",
+    "category": "complaint",
+    "query": "热敏打印机，谢谢，但是问题根本没解决",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-186",
+    "category": "complaint",
+    "query": "标签打印机，我要投诉，售后一直没解决",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-187",
+    "category": "complaint",
+    "query": "标签打印机，承诺的退款还没到账，我要投诉",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-188",
+    "category": "complaint",
+    "query": "标签打印机，谢谢，但是问题根本没解决",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-189",
+    "category": "complaint",
+    "query": "装订机，我要投诉，售后一直没解决",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-190",
+    "category": "complaint",
+    "query": "装订机，承诺的退款还没到账，我要投诉",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-191",
+    "category": "complaint",
+    "query": "装订机，谢谢，但是问题根本没解决",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-192",
+    "category": "complaint",
+    "query": "覆膜机，我要投诉，售后一直没解决",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-193",
+    "category": "complaint",
+    "query": "覆膜机，承诺的退款还没到账，我要投诉",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-194",
+    "category": "complaint",
+    "query": "覆膜机，谢谢，但是问题根本没解决",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-195",
+    "category": "complaint",
+    "query": "切纸机，我要投诉，售后一直没解决",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-196",
+    "category": "complaint",
+    "query": "切纸机，承诺的退款还没到账，我要投诉",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-197",
+    "category": "complaint",
+    "query": "切纸机，谢谢，但是问题根本没解决",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-198",
+    "category": "complaint",
+    "query": "扫描仪，我要投诉，售后一直没解决",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-199",
+    "category": "complaint",
+    "query": "扫描仪，承诺的退款还没到账，我要投诉",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  },
+  {
+    "case_id": "trial-200",
+    "category": "complaint",
+    "query": "扫描仪，谢谢，但是问题根本没解决",
+    "history": [],
+    "expected_intent": "rag",
+    "expected_items": [],
+    "must_contain": [],
+    "critical": true,
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft"
+  }
+]

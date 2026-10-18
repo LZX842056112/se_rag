@@ -70,7 +70,7 @@
 
   /** 统一请求：自动拼 base、解析 JSON、错误转成带 message 的 Error */
   async function fetchJson(path, options) {
-    var opts = Object.assign({}, options || {});
+    var opts = Object.assign({ credentials: 'same-origin' }, options || {});
     var headers = Object.assign({}, opts.headers || {});
     // opts.token 可显式指定令牌（导入页用自己的 IMPORT_ADMIN_TOKEN，与审批令牌互不干扰）；
     // 未指定时沿用审批令牌，保持既有页面行为不变。

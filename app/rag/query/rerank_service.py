@@ -2,9 +2,9 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 
 from langchain_core.messages import HumanMessage
-from langchain_core.output_parsers import StrOutputParser
 
 from app.process.query.agent.state import QueryGraphState
 from app.rag.query.config import (
@@ -61,6 +61,9 @@ def deal_rrf_and_web_result(rrf_chunks: list, web_search_docs: list) -> list[dic
             "page": chunk.get("page"),
             "heading_path": chunk.get("heading_path"),
             "file_title": chunk.get("file_title"),
+            "document_kind": chunk.get("document_kind", "manual"),
+            "document_version": chunk.get("document_version", ""),
+            "valid_until": chunk.get("valid_until", 0.0),
         }
         for chunk in rrf_chunks
     ]
@@ -143,8 +146,7 @@ def ensure_evolution_docs(docs: list[dict], candidates: list[dict]) -> list[dict
 def _summarize_for_rerank(rewritten_query: str, answer: str, limit: int) -> str:
     """超长文本压缩：仅用于重排打分，不改变最终答案上下文。"""
     prompt_text = load_prompt("rerank_text_refine", question=rewritten_query, answer=answer, limit=limit)
-    chain = llm_providers.chat() | StrOutputParser()
-    return chain.invoke([HumanMessage(content=prompt_text)])
+    return llm_providers.chat().invoke([HumanMessage(content=prompt_text)]).content
 
 
 def _encode_capped(tokenizer, text: str, max_tokens: int) -> list:
@@ -198,10 +200,8 @@ def create_question_answer_lists(rewritten_query: str, reranker_docs: list[dict]
         max_workers = min(RERANK_SUMMARY_MAX_WORKERS, len(tasks))
         try:
             with ThreadPoolExecutor(max_workers=max_workers) as pool:
-                results = list(pool.map(
-                    lambda item: _summarize_for_rerank(rewritten_query, item[1], limit),
-                    tasks,
-                ))
+                futures = [pool.submit(copy_context().run, _summarize_for_rerank, rewritten_query, item[1], limit) for item in tasks]
+                results = [future.result() for future in futures]
             for (index, _), summary in zip(tasks, results):
                 if summary:
                     pairs[index][1] = summary

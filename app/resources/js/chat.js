@@ -24,6 +24,11 @@
   const sendBtn = document.getElementById('send');
   const apiPill = document.getElementById('apiPill');
   const btnClear = document.getElementById('btnClear');
+  const btnNew = document.getElementById('btnNew');
+  if (btnNew) btnNew.addEventListener('click', () => {
+    localStorage.setItem('kb_session_id', 'sess-' + crypto.randomUUID());
+    location.reload();
+  });
   const streamToggle = document.getElementById('streamToggle');
 
   // 会话 ID：存 localStorage，刷新后沿用同一会话（历史回显依赖它）
@@ -68,7 +73,7 @@
     scrollToBottom();
   }
 
-  function addBotMsgWithTime(text, ts, imageUrls, citations, groundedness, query, itemNames, intent) {
+  function addBotMsgWithTime(text, ts, imageUrls, citations, groundedness, query, itemNames, intent, answerId, issueId) {
     const id = 'bot-his-' + Math.random().toString(36).slice(2);
     chatEl.insertAdjacentHTML('beforeend', `
       <div class="msg bot" id="${id}">
@@ -83,9 +88,10 @@
     if (!el) return;
     App.renderAnswerWithImages(el.querySelector('.answer'), text || '', imageUrls || []);
     // 历史消息同样渲染引用来源 / 置信度 / 反馈，保证刷新后不丢失
-    renderCitationsAndFeedback(el, buildBotMeta(citations, groundedness, sessionId, query, itemNames));
+    renderCitationsAndFeedback(el, buildBotMeta(citations, groundedness, sessionId, query, itemNames, intent, answerId));
     // 闲聊轮（intent=chitchat）渲染「闲聊」徽标，与知识库作答区分
     if (intent === 'chitchat') renderChitchatBadge(el);
+    if (issueId) el.querySelector('.bubble').appendChild(App.create('div', 'option-hint', '已登记待办：' + issueId));
     scrollToBottom();
   }
 
@@ -134,18 +140,20 @@
     lines.forEach(line => ul.insertAdjacentHTML('beforeend', `<li>${escapeHtml(line)}</li>`));
   }
 
-  function buildBotMeta(citations, groundedness, sid, query, itemNames) {
+  function buildBotMeta(citations, groundedness, sid, query, itemNames, intent, answerId) {
     return {
       citations: Array.isArray(citations) ? citations : [],
       groundedness: (typeof groundedness === 'number' && isFinite(groundedness)) ? groundedness : null,
       sessionId: sid || '',
+      intent: intent || 'rag',
+      answerId: answerId || '',
       query: query || '',
       // 该回答关联的主体：点踩时回传后端，保证缺口/候选能带上正确 item_name
       itemNames: Array.isArray(itemNames) ? itemNames : []
     };
   }
 
-  async function submitFeedback(msgEl, btnEl, meta, value) {
+  async function submitFeedback(msgEl, btnEl, meta, value, resolved) {
     if (btnEl.dataset.submitted === '1') return;
     btnEl.disabled = true;
     try {
@@ -153,13 +161,15 @@
         method: 'POST',
         body: JSON.stringify({
           session_id: meta.sessionId,
+          answer_id: meta.answerId,
           query: meta.query,
           // 联网引用没有知识库 id：不能参与缺口/候选信号，否则 URL 会被当成 chunk_id
           cited_chunk_ids: meta.citations
             .filter(c => c && c.source !== 'web' && c.faq_id)
             .map(c => c.faq_id),
           item_names: meta.itemNames || [],
-          thumbs: value
+          thumbs: value,
+          resolved: resolved
         })
       });
       btnEl.dataset.submitted = '1';
@@ -208,14 +218,16 @@
             item.appendChild(App.create('span', 'cit-id', text));
           }
         } else {
-          item.appendChild(App.create('span', 'cit-id', String((c && c.faq_id) || '').slice(0, 24)));
+          item.appendChild(App.create('span', 'cit-id', [c.title || c.faq_id, c.heading, c.page ? '第' + c.page + '页' : '', c.version ? '版本 ' + c.version : ''].filter(Boolean).join(' · ')));
         }
         list.appendChild(item);
       });
       wrap.appendChild(list);
     }
 
-    if (typeof groundedness === 'number' && isFinite(groundedness)) {
+    if (meta.intent === 'chitchat') {
+      wrap.appendChild(App.create('span', 'groundedness unknown', '日常交流'));
+    } else if (typeof groundedness === 'number' && isFinite(groundedness)) {
       const pct = Math.round(groundedness * 100);
       const gz = App.create('div', 'groundedness');
       const gauge = App.create('div', 'gauge');
@@ -223,12 +235,12 @@
       fill.style.width = Math.max(0, Math.min(100, pct)) + '%';
       gauge.appendChild(fill);
       gz.appendChild(gauge);
-      gz.appendChild(App.create('span', null, '回答置信度 ' + pct + '%'));
+      gz.appendChild(App.create('span', null, '证据支持度 ' + pct + '%'));
       wrap.appendChild(gz);
     } else {
       // 未评估（证据为空 / 评估失败）时不显示 0%，避免与「确实不接地」混淆
       const gz = App.create('div', 'groundedness unknown');
-      gz.appendChild(App.create('span', null, '回答置信度 未评估'));
+      gz.appendChild(App.create('span', null, '证据支持度 未评估'));
       wrap.appendChild(gz);
     }
 
@@ -241,6 +253,14 @@
     down.addEventListener('click', () => submitFeedback(msgEl, down, meta, -1));
     bar.appendChild(up);
     bar.appendChild(down);
+    if (meta.intent !== 'chitchat') {
+      [ [true, '已解决'], [false, '仍未解决'] ].forEach(([resolved, label]) => {
+        const button = App.create('button', 'fb-btn', label);
+        button.type = 'button';
+        button.addEventListener('click', () => submitFeedback(msgEl, button, meta, null, resolved));
+        bar.appendChild(button);
+      });
+    }
     wrap.appendChild(bar);
 
     // 插到 .meta 之前（.meta 在骨架的内层容器里，必须用其父节点 insertBefore，
@@ -302,25 +322,29 @@
     try {
       const data = await App.fetchJson(App.PATHS.history(sessionId));
       const items = Array.isArray(data.items) ? data.items : [];
-      if (!items.length) return { lastRole: '', lastUserText: '' };
+      if (!items.length) return { lastRole: '', lastUserText: '', lastTurnId: '', lastUserTurnId: '' };
       // 保留首条欢迎消息，其余先清空再按时间正序渲染
       Array.from(chatEl.querySelectorAll('.msg')).slice(1).forEach(node => node.remove());
       items.reverse();
       let lastUserQuery = '';
+      let lastUserTurnId = '';
       items.forEach(item => {
         if (item.role === 'user') {
           lastUserQuery = item.text || '';
+          lastUserTurnId = item.turn_id || '';
           addUserMsgWithTime(item.text || '', item.ts);
         } else {
           addBotMsgWithTime(item.text || '', item.ts, item.image_urls || [],
                             item.citations || [], item.groundedness, lastUserQuery,
-                            item.item_names || [], item.intent);
+                            item.item_names || [], item.intent, item.id, item.issue_id);
         }
       });
       scrollToBottom();
       return {
         lastRole: String(items[items.length - 1].role || ''),
-        lastUserText: lastUserQuery
+        lastUserText: lastUserQuery,
+        lastTurnId: items[items.length - 1].turn_id || '',
+        lastUserTurnId: lastUserTurnId
       };
     } catch (err) {
       // 不要静默吞掉异常：历史上「反馈按钮不渲染」正是被静默 catch 掩盖的
@@ -509,9 +533,10 @@
                                    hasFinal ? d.answer : (rawText || answerEl.textContent || ''),
                                    (d && d.image_urls) || []);
         renderCitationsAndFeedback(botMsgEl, buildBotMeta(
-          d && d.citations, d && d.groundedness, sessionId, queryText, d && d.item_names));
+          d && d.citations, d && d.groundedness, sessionId, queryText, d && d.item_names, d && d.intent, d && d.answer_id));
         renderItemNameOptions(botMsgEl, d && d.item_name_options, queryText);
         if (d && d.intent === 'chitchat') renderChitchatBadge(botMsgEl);
+        if (d && d.issue_id) botMsgEl.querySelector('.bubble').appendChild(App.create('div', 'option-hint', '已登记待办：' + d.issue_id));
         sendBtn.disabled = false;
       },
       onClose() { sendBtn.disabled = false; },
@@ -557,9 +582,10 @@
         renderProgress(botMsgEl, data.done_list || [], [], 'completed');
         finalizeBotAnswer(botMsgEl, data.answer, data.error, data.image_urls || [],
                           buildBotMeta(data.citations, data.groundedness, data.session_id, text,
-                                       data.item_names));
+                                       data.item_names, data.intent, data.answer_id));
         renderItemNameOptions(botMsgEl, data.item_name_options, text);
         if (data.intent === 'chitchat') renderChitchatBadge(botMsgEl);
+        if (data.issue_id) botMsgEl.querySelector('.bubble').appendChild(App.create('div', 'option-hint', '已登记待办：' + data.issue_id));
         sendBtn.disabled = false;
         return;
       }
@@ -602,18 +628,19 @@
    */
   async function restoreSession() {
     const status = await fetchQueryStatus();
-    const { lastRole, lastUserText } = await loadHistory();
+    const { lastRole, lastUserText, lastTurnId, lastUserTurnId } = await loadHistory();
 
     if (!status || !ACTIVE_TASK_STATUS[status.status]) return; // 无进行中查询：历史即全部
-    if (lastRole === 'assistant') return; // 回答已落库：历史已完整，不再重复接管
+    if (lastRole === 'assistant' && status.turn_id && lastTurnId === status.turn_id) return; // 回答已落库：历史已完整，不再重复接管
 
     // 用户消息由主体确认节点落库，此刻可能还没写进去 → 用快照里的原文补上
-    if (!lastUserText && status.query) addUserMsg(status.query);
+    const hasCurrentUser = status.turn_id ? lastUserTurnId === status.turn_id : !!lastUserText;
+    if (!hasCurrentUser && status.query) addUserMsg(status.query);
 
     const botMsgEl = addBotMsgSkeleton();
     renderProgress(botMsgEl, status.done_list, status.running_list, status.status);
     sendBtn.disabled = true;
-    attachStream(botMsgEl, sessionId, lastUserText || status.query || '');
+    attachStream(botMsgEl, sessionId, status.query || lastUserText || '');
   }
 
   // 不能直接绑 onSend：浏览器会把 MouseEvent 当作第一个实参传进来，

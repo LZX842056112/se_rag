@@ -467,3 +467,8 @@ E2E_ENABLED=1 pytest -m e2e tests/e2e -s   # 真机端到端（会产生模型�
 | 上传后一直「处理中」 | `GET /api/import/status/{task_id}` + 终端日志 | PDF 走 MinerU 轮询（600s 上限）；不支持的扩展名会在入口 422 |
 | 上传报 503 / 401 | `.env` 的 `IMPORT_ADMIN_TOKEN` 与请求头 `X-Internal-Token` | 503 = 令牌被置空（fail-closed）；401 = 请求头与配置不一致。注意该配置带开发默认值 |
 | 页面样式 / 交互异常 | `/api/health` 的 `asset_version` 与页面脚本 `?v=` | 版本不一致即页面过期，刷新即可 |
+
+
+## 内部试用更新
+
+部署、接口兼容、政策资料、待办管理和完整入口评测见 [内部试用说明](docs/internal-trial.md)。

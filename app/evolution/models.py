@@ -17,12 +17,14 @@ def _now() -> float:
 # ---------------- 反馈事件 fb_events ----------------
 class FeedbackEvent(BaseModel):
     session_id: str
+    answer_id: str = Field(default="", max_length=24)
+    resolved: bool | None = None
     query: str = ""
     rewritten_query: str = ""
     cited_chunk_ids: list[str] = Field(default_factory=list)
     item_names: list[str] = Field(default_factory=list)  # 查询已识别的商品名，供缺口/候选透传
     adopt: bool | None = None          # None=未知, True=采纳(点赞/命中), False=拒绝(点踩/差评)
-    thumbs: int | None = None          # +1 点赞 / -1 点踩 / 0 无
+    thumbs: int | None = Field(default=None, ge=-1, le=1)          # +1 点赞 / -1 点踩 / 0 无
     source: str = "kb"                 # web | kb | evolution | hyde
     ts: float = Field(default_factory=_now)
 

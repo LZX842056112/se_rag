@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+os.environ.setdefault("PROJECT_ROOT", str(PROJECT_ROOT))
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -39,6 +40,9 @@ def offline_guard(monkeypatch):
         yield
         return
 
+    from app.shared.config import settings
+    # 旧接口回归独立于认证；认证测试会显式开启并使用隔离 Mongo。
+    monkeypatch.setattr(settings.api, "session_ownership_enabled", False)
     from app.shared.clients import milvus_gateway as milvus_module
     from app.shared.clients import minio_gateway as minio_module
     from app.shared.clients import mongo as mongo_module

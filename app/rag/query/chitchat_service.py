@@ -17,6 +17,7 @@ from app.rag.query.intent_route_service import INTENT_CHITCHAT
 from app.shared.clients.history_repository import history_repository
 from app.shared.models import llm_providers
 from app.shared.runtime.logger import logger, step_log
+from app.shared.runtime.query_metrics import mark_degraded
 from app.shared.runtime.prompts import load_prompt
 from app.shared.utils.sse_broker import SSEEvent, publish
 
@@ -41,9 +42,9 @@ def load_chitchat_prompt(state: QueryGraphState) -> str:
 
 def call_llm_chitchat(state: QueryGraphState, prompt_text: str) -> None:
     """调用 LLM 生成闲聊回复；流式逐段推送 SSE delta，失败降级为兜底话术。"""
-    llm_client = llm_providers.chat()
     messages = [HumanMessage(content=prompt_text)]
     try:
+        llm_client = llm_providers.chat()
         if state.get("is_stream", False):
             answer = ""
             for chunk in llm_client.stream(messages):
@@ -54,26 +55,19 @@ def call_llm_chitchat(state: QueryGraphState, prompt_text: str) -> None:
         else:
             state["answer"] = llm_client.invoke(messages).content or CHITCHAT_FALLBACK_ANSWER
     except Exception as exc:  # noqa: BLE001 - 闲聊失败降级，口径同 HyDE/联网
+        mark_degraded("chitchat_error")
         logger.warning(f"闲聊作答失败，使用兜底话术：{exc}")
         if not state.get("answer"):
             state["answer"] = CHITCHAT_FALLBACK_ANSWER
 
 
 def save_chitchat_history(state: QueryGraphState) -> None:
-    """落库 user + assistant 两条消息（闲聊链不经过主体确认 / 作答节点）。
+    """保存助手消息。用户消息已在生成前保存。
 
     ``item_names`` 置空：被 ``list_valid_history`` 过滤，不污染下一轮主体消解；
     ``pending_subject_ask`` 置空：不被 ``find_pending_clarify`` 认领为反问轮。
     """
-    history_repository.save_message(
-        session_id=state.get("session_id"),
-        role="user",
-        text=state.get("original_query"),
-        item_names=[],
-        image_urls=[],
-        intent=INTENT_CHITCHAT,
-    )
-    history_repository.save_message(
+    state["answer_id"] = history_repository.save_message(
         session_id=state.get("session_id"),
         role="assistant",
         text=state.get("answer"),
@@ -83,13 +77,26 @@ def save_chitchat_history(state: QueryGraphState) -> None:
         groundedness=None,
         pending_subject_ask={},
         intent=INTENT_CHITCHAT,
+        turn_id=state.get("turn_id", ""),
+        query=state.get("original_query", ""),
     )
 
 
 @step_log("generate_chitchat_answer")
 def generate_chitchat_answer(state: QueryGraphState) -> QueryGraphState:
-    """闲聊作答服务入口：生成回复 → 回填 state → 落库两条历史。"""
-    call_llm_chitchat(state, load_chitchat_prompt(state))
+    """闲聊入口：取旧历史 → 保存提问 → 生成回复 → 保存回答。"""
+    prompt_text = load_chitchat_prompt(state)
+    history_repository.save_message(
+        session_id=state.get("session_id"),
+        role="user",
+        text=state.get("original_query"),
+        item_names=[],
+        image_urls=[],
+        intent=INTENT_CHITCHAT,
+        turn_id=state.get("turn_id", ""),
+    )
+    call_llm_chitchat(state, prompt_text)
+    state["business_tag"] = "chitchat"
     state["intent"] = INTENT_CHITCHAT
     state["citations"] = []
     state["groundedness"] = None  # 前端显示「未评估」

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from langchain_core.messages import HumanMessage
-from langchain_core.output_parsers import StrOutputParser
 
 from app.process.query.agent.state import QueryGraphState
 from app.rag.query.chunk_search import require_query_and_items, search_chunks, to_chunks
@@ -31,8 +30,7 @@ def _skip_hyde(rewritten_query: str) -> bool:
 def call_llm_answer(rewritten_query: str) -> str:
     """让 LLM 生成假设性答案（HyDE 的 H）。"""
     prompt_text = load_prompt("hyde_prompt", rewritten_query=rewritten_query)
-    chain = llm_providers.chat() | StrOutputParser()
-    return chain.invoke([HumanMessage(content=prompt_text)])
+    return llm_providers.chat().invoke([HumanMessage(content=prompt_text)]).content
 
 
 def search_by_hyde(state: QueryGraphState) -> list:

@@ -14,6 +14,7 @@ from app.process.query.agent.state import QueryGraphState
 from app.rag.config import SUPPORTED_IMAGE_EXTENSIONS
 from app.rag.query.citations import build_citations, build_doc_meta, split_cited
 from app.rag.query.history_utils import build_history_context
+from app.rag.query.business import apply_business_policy
 from app.shared.clients.history_repository import history_repository
 from app.shared.config import settings
 from app.shared.models import llm_providers
@@ -51,14 +52,16 @@ def load_answer_prompt(state: QueryGraphState) -> str:
         source = "网络搜索" if doc.get("type") == "web" else "向量库"
         page = doc.get("page")
         page_text = f",页码:{page}" if isinstance(page, int) and page > 0 else ""
-        background = doc.get("parent_content")
+        background = None if state.get("business_tag") in ("pricing", "after_sales") else doc.get("parent_content")
         background_text = f",章节背景:{background}" if background else ""
         context += (
             f"第{index}部分,标题:{doc.get('title')},来源:{source} ,"
             f"置信度: {doc.get('score')}{page_text}{background_text},内容:{doc.get('text')}\n"
         )
     item_names = f"{','.join(state.get('item_names', []))}"
-    history_text = build_history_context(state.get("session_id"), limit=6)
+    history_text = ("本轮只使用当前有效的业务政策，不使用历史回答中的价格或承诺。"
+                    if state.get("business_tag") in ("pricing", "after_sales")
+                    else build_history_context(state.get("session_id"), limit=6))
     return load_prompt(
         "answer_out",
         question=state.get("rewritten_query"),
@@ -146,7 +149,7 @@ def save_answer_message_history(state: QueryGraphState) -> None:
             if isinstance(item, dict) and item.get("item_name")
         ],
     } if options else {}
-    history_repository.save_message(
+    state["answer_id"] = history_repository.save_message(
         session_id=state.get("session_id"),
         role="assistant",
         text=state.get("answer"),
@@ -156,11 +159,16 @@ def save_answer_message_history(state: QueryGraphState) -> None:
         citations=state.get("citations", []),
         groundedness=state.get("groundedness", 0.0),
         pending_subject_ask=pending_subject_ask,
+        intent="rag",
+        turn_id=state.get("turn_id", ""),
+        query=state.get("original_query", ""),
+        business_tag=state.get("business_tag", ""),
     )
 
 
 def generate_answer(state: QueryGraphState) -> QueryGraphState:
     """答案生成服务入口。"""
+    apply_business_policy(state)
     if not state_exists_answer(state):
         answer_prompt_text = load_answer_prompt(state)
         call_llm_deal_answer(state, answer_prompt_text)
