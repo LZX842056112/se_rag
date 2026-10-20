@@ -1,0 +1,682 @@
+[
+  {
+    "case_id": "answer-001",
+    "product": "HAK180",
+    "category": "safety",
+    "query": "HAK180 应在什么温度和湿度环境下使用？",
+    "reference": "工作温度应为 10°C 到 32°C，湿度应为 20% 到 80%，且无冷凝。",
+    "source": {
+      "path": "doc/hak180产品安全手册.pdf",
+      "pdf_page": 1,
+      "section": "警告/设备",
+      "excerpt": "的Brother经销商。•请在以下环境使用本设备：温度保持在10°C和32°C之间，湿度保持在20%和80%之间，无冷凝。•请勿使本设备受到阳光直射、过热、接触明火、腐蚀性气体、湿气或灰尘。否则可能产生触电、短路或火灾的风险，从而导致损坏设备和/或导致设备无法运行。•请勿将设备放在加热器、空调、电风扇或水附近。否则当水（包括加热/空调/通风设备所产生的冷凝水）接触本设备时可能产生短路或火灾的风险。•如果设备变得异常高温、冒烟、产生任何强烈味道，或者如果您意外在设备上倒入任何液体，请立即从电源插座拔掉设备的插头。请联系Brother呼叫中心或您当地的Brother经销商。•如果设备跌落或者已损坏，则有触电的可能性。请从电源插座中拔掉设备的插头，然后联系Brother呼叫中心或您当地的Brother经销商。•如果水、其他液体或金属物体进入设备内部，请立即从电源插座中拔掉设备的插头，然后联系Br",
+      "sha256": "dff3aaa8133427992d0e0693391287f936a81b4b3806bc1ebc3b047609026765"
+    },
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "manual_based_agent_draft"
+  },
+  {
+    "case_id": "answer-002",
+    "product": "HAK180",
+    "category": "safety",
+    "query": "HAK180 出现异常高温、冒烟或强烈气味时应如何处理？",
+    "reference": "立即从电源插座拔掉设备插头，然后联系 Brother 呼叫中心或当地 Brother 经销商。",
+    "source": {
+      "path": "doc/hak180产品安全手册.pdf",
+      "pdf_page": 1,
+      "section": "警告/设备",
+      "excerpt": "设备所产生的冷凝水）接触本设备时可能产生短路或火灾的风险。•如果设备变得异常高温、冒烟、产生任何强烈味道，或者如果您意外在设备上倒入任何液体，请立即从电源插座拔掉设备的插头。请联系Brother呼叫中心或您当地的Brother经销商。•如果设备跌落或者已损坏，则有触电的可能性。请从电源插座中拔掉设备的插头，然后联系Brother呼叫中心或您当地的Brother经销商。•如果水、其他液体或金属物体进入设备内部，请立即从电源插座中拔掉设备的插头，然后联系Brother呼叫中心或您当地的Brother经销商。•请勿在卡纸或有纸张散落在设备内部的情况下尝试使用本设备。纸张与定影单元长时间接触可能导致火灾。•请勿使用任何易燃物品、任何类型的喷雾剂包含酒精或氨水的有机溶剂/液体来清洁本设备的内部或外部。否则可能导致火灾。请改用无绒干抹布。有关如何清洁本设备的说明，请参阅使用说明书。•请勿将本设备放在化",
+      "sha256": "dff3aaa8133427992d0e0693391287f936a81b4b3806bc1ebc3b047609026765"
+    },
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "manual_based_agent_draft"
+  },
+  {
+    "case_id": "answer-003",
+    "product": "HAK180",
+    "category": "safety",
+    "query": "HAK180 发生故障后，可以自行打开盖子维修吗？",
+    "reference": "不可以。请勿自行维修。打开或拆下盖子可能接触危险电压，并可能使保修失效。维修应联系 Brother 呼叫中心或当地 Brother 经销商。",
+    "source": {
+      "path": "doc/hak180产品安全手册.pdf",
+      "pdf_page": 1,
+      "section": "警告/设备",
+      "excerpt": "的风险。•请勿拆解本设备。拆解本设备可能会导致火灾或触电。•请勿尝试自行维修本设备。打开或拆下盖子可能使您接触到危险电压点以及带来其他风险，并且可能使您的保修失效。对于所有维修事宜，请联系Brother呼叫中心或您当地的Brother经销商。•请在以下环境使用本设备：温度保持在10°C和32°C之间，湿度保持在20%和80%之间，无冷凝。•请勿使本设备受到阳光直射、过热、接触明火、腐蚀性气体、湿气或灰尘。否则可能产生触电、短路或火灾的风险，从而导致损坏设备和/或导致设备无法运行。•请勿将设备放在加热器、空调、电风扇或水附近。否则当水（包括加热/空调/通风设备所产生的冷凝水）接触本设备时可能产生短路或火灾的风险。•如果设备变得异常高温、冒烟、产生任何强烈味道，或者如果您意外在设备上倒入任何液体，请立即从电源插座拔掉设备的插头。请联系Brother呼叫中心或您当地的Brother经销商。•如果",
+      "sha256": "dff3aaa8133427992d0e0693391287f936a81b4b3806bc1ebc3b047609026765"
+    },
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "manual_based_agent_draft"
+  },
+  {
+    "case_id": "answer-004",
+    "product": "HAK180",
+    "category": "safety",
+    "query": "可以用酒精或氨水清洁 HAK180 的内部或外部吗？",
+    "reference": "不可以。不要使用含酒精或氨水的有机溶剂、液体或喷雾剂清洁设备，以免起火。应使用无绒干抹布。",
+    "source": {
+      "path": "doc/hak180产品安全手册.pdf",
+      "pdf_page": 1,
+      "section": "警告/设备",
+      "excerpt": "况下尝试使用本设备。纸张与定影单元长时间接触可能导致火灾。•请勿使用任何易燃物品、任何类型的喷雾剂包含酒精或氨水的有机溶剂/液体来清洁本设备的内部或外部。否则可能导致火灾。请改用无绒干抹布。有关如何清洁本设备的说明，请参阅使用说明书。•请勿将本设备放在化学品附近，或者将本设备放置在可能会泼溅到化学品的位置。万一化学品接触本设备，则存在火灾或触电的风险。特别是有机溶剂或液体（如苯、油漆稀释剂、抛光剂或除臭剂）可能导致塑料盖和/或电缆溶解或分解，从而产生火灾或触电的风险。这些化学品或其他化学品可能导致本设备故障或褪色。•本设备的包装中使用了塑料袋。塑料袋并不是玩具。为避免窒息的危险，请将这些塑料袋远离婴儿和儿童，并正确弃置这些塑料袋。•对于使用起搏器的用户：本设备可能会产生弱磁场。如果您在本设备附近感觉到起搏器工作不正常，请远离本设备，并立即咨询医生。•使用本设备之后短时间内，本设备的一些内部",
+      "sha256": "dff3aaa8133427992d0e0693391287f936a81b4b3806bc1ebc3b047609026765"
+    },
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "manual_based_agent_draft"
+  },
+  {
+    "case_id": "answer-005",
+    "product": "HAK180",
+    "category": "fact",
+    "query": "HAK180 的 Foil Save 指示灯亮起和熄灭分别表示什么？",
+    "reference": "亮起表示正在以节省烫金膜模式转印；熄灭表示正在以标准模式转印。",
+    "source": {
+      "path": "doc/hak180使用说明书.pdf",
+      "pdf_page": 9,
+      "section": "2.2 操作面板和 LED 指示灯",
+      "excerpt": "备简介5212LED指示灯查看LED指示灯以了解设备状态。1FoilSave（节省烫金膜）亮起：正在以节省烫金膜模式转印烫金膜。熄灭：正在以标准模式转印烫金膜。注释有关如何启用或禁用节省烫金膜模式的详细信息，请参见第31页上的节省烫金膜模式。2CoverLock（盖锁定）亮起：在烫金膜转印期间或者当设备内部的温度很高时，将会锁住前盖。熄灭：前盖处于解锁状态。3Error（错误）亮起：发生错误。（有关错误的详细信息，请参见第53页上的错误消息。）熄灭：设备正常工作。注释当超过一分钟未操作设备或者未装入介质时，液晶显示屏背光灯将会熄灭。要点亮背光灯，请按设备操作面板上的任何按键或装入介质。123",
+      "sha256": "5f75797d1ce6e14746de41c8acd562eec3210a2a0f7ae079177561f2a8e48538"
+    },
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "manual_based_agent_draft"
+  },
+  {
+    "case_id": "answer-006",
+    "product": "HAK180",
+    "category": "fact",
+    "query": "HAK180 的 Cover Lock 指示灯亮起表示什么？",
+    "reference": "表示前盖已锁定。设备在转印烫金膜期间或内部温度很高时会锁住前盖；指示灯熄灭表示前盖已解锁。",
+    "source": {
+      "path": "doc/hak180使用说明书.pdf",
+      "pdf_page": 9,
+      "section": "2.2 操作面板和 LED 指示灯",
+      "excerpt": "省烫金膜模式的详细信息，请参见第31页上的节省烫金膜模式。2CoverLock（盖锁定）亮起：在烫金膜转印期间或者当设备内部的温度很高时，将会锁住前盖。熄灭：前盖处于解锁状态。3Error（错误）亮起：发生错误。（有关错误的详细信息，请参见第53页上的错误消息。）熄灭：设备正常工作。注释当超过一分钟未操作设备或者未装入介质时，液晶显示屏背光灯将会熄灭。要点亮背光灯，请按设备操作面板上的任何按键或装入介质。123",
+      "sha256": "5f75797d1ce6e14746de41c8acd562eec3210a2a0f7ae079177561f2a8e48538"
+    },
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "manual_based_agent_draft"
+  },
+  {
+    "case_id": "answer-007",
+    "product": "HAK180",
+    "category": "procedure",
+    "query": "HAK180 的液晶显示屏背光熄灭后，怎样重新点亮？",
+    "reference": "按操作面板上的任意按键，或装入介质，即可点亮背光。",
+    "source": {
+      "path": "doc/hak180使用说明书.pdf",
+      "pdf_page": 9,
+      "section": "2.2 操作面板和 LED 指示灯",
+      "excerpt": "一分钟未操作设备或者未装入介质时，液晶显示屏背光灯将会熄灭。要点亮背光灯，请按设备操作面板上的任何按键或装入介质。123",
+      "sha256": "5f75797d1ce6e14746de41c8acd562eec3210a2a0f7ae079177561f2a8e48538"
+    },
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "manual_based_agent_draft"
+  },
+  {
+    "case_id": "answer-008",
+    "product": "HAK180",
+    "category": "parameter",
+    "query": "HAK180 初始设置时应连接哪种电压的电源？",
+    "reference": "使用随机附带的电源线，连接 220 V 到 240 V 电源插座，并确保插头完全插入。",
+    "source": {
+      "path": "doc/hak180使用说明书.pdf",
+      "pdf_page": 13,
+      "section": "3.3.1 连接设备并安装进纸托板和烫金膜盒",
+      "excerpt": "将附带提供的电源线连接到电源线接口1，然后将电源线插头插入到220V-240V电源插座2。确保电源线插头完全插入到电源插座中。重要事项请务必使用随机附带的电源线。b安装进纸托板。c打开前盖。21",
+      "sha256": "5f75797d1ce6e14746de41c8acd562eec3210a2a0f7ae079177561f2a8e48538"
+    },
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "manual_based_agent_draft"
+  },
+  {
+    "case_id": "answer-009",
+    "product": "HAK180",
+    "category": "procedure",
+    "query": "取出 HAK180 烫金膜盒支架和膜盒组件前，应满足哪些条件？",
+    "reference": "先等待设备冷却，并确认 Cover Lock 指示灯熄灭，然后再打开前盖，取出组件。",
+    "source": {
+      "path": "doc/hak180使用说明书.pdf",
+      "pdf_page": 20,
+      "section": "3.4.3 取出烫金膜盒支架和烫金膜盒组件",
+      "excerpt": "出烫金膜盒支架和烫金膜盒组件警告设备的内部零件温度将会很烫。请等待设备冷却后再触摸他们。a确保CoverLock（盖锁定）LED指示灯熄灭。b打开前盖。c提起烫金膜盒支架和烫金膜盒组件的下半部分1，然后将整个烫金膜盒支架和烫金膜盒组件2向上提起，以将它从设备中取出。21",
+      "sha256": "5f75797d1ce6e14746de41c8acd562eec3210a2a0f7ae079177561f2a8e48538"
+    },
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "manual_based_agent_draft"
+  },
+  {
+    "case_id": "answer-010",
+    "product": "HAK180",
+    "category": "procedure",
+    "query": "不使用 HAK180 的烫金膜盒时，应怎样存放？",
+    "reference": "将膜盒放在原包装盒中，避免灰尘影响转印效果。存放位置应远离高温、高湿、火和过热环境。",
+    "source": {
+      "path": "doc/hak180使用说明书.pdf",
+      "pdf_page": 22,
+      "section": "3.4.3 烫金膜盒存放注释",
+      "excerpt": "之前183注释不使用烫金膜盒时，请按如下所示存放烫金膜盒：•存放在原包装盒中。否则灰尘会落到烫金膜盒上，从而导致转印效果不佳。1烫金膜盒的烫金膜缠绕面2烫金膜盒的框架面•存放在远离温度高和湿度高的环境。•存放在远离火和过热的位置。12",
+      "sha256": "5f75797d1ce6e14746de41c8acd562eec3210a2a0f7ae079177561f2a8e48538"
+    },
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "manual_based_agent_draft"
+  },
+  {
+    "case_id": "answer-011",
+    "product": "HAK180",
+    "category": "parameter",
+    "query": "HAK180 可接受介质的长度、宽度、重量和最大总厚度是多少？",
+    "reference": "长度为 90 到 500 mm，宽度为 55 到 225 mm，重量为 90 到 350 g/m²，总厚度不超过 5 mm。使用长度在 297 到 500 mm 之间的广告纸时，宽度不能超过 210 mm。",
+    "source": {
+      "path": "doc/hak180使用说明书.pdf",
+      "pdf_page": 23,
+      "section": "4.1 可接受的介质",
+      "excerpt": "m。重要事项不要混合装入纸张质量或尺寸不同的介质。介质规格0长度:90mm到500mm1宽度:55mm到225mm重量90g/m2到350g/m2纸张的最大总厚度不超过5mm",
+      "sha256": "5f75797d1ce6e14746de41c8acd562eec3210a2a0f7ae079177561f2a8e48538"
+    },
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "manual_based_agent_draft"
+  },
+  {
+    "case_id": "answer-012",
+    "product": "HAK180",
+    "category": "procedure",
+    "query": "HAK180 的烫金膜容易脱落或打印缺失时，应怎样调整送纸速度？",
+    "reference": "降低送纸速度。按 Menu，选择“打印速度”并按 OK，修改速度后按 OK 确认，最后按 Stop/Exit。",
+    "source": {
+      "path": "doc/hak180使用说明书.pdf",
+      "pdf_page": 34,
+      "section": "6.3.2 更改送纸速度",
+      "excerpt": "更改设置3066.3.2更改送纸速度如果烫金膜很容易脱落或打印缺失，请降低设备的送纸速度。a按(Menu)（菜单）。b按▼或▲选择[打印速度]，然后按(OK)（确定）。c按▼或▲更改送纸速度，然后按(OK)（确定）。注释对于A4纸张尺寸，选择7.0ppm或15ppm。d按(Stop/Exit)（停止/退出）。",
+      "sha256": "5f75797d1ce6e14746de41c8acd562eec3210a2a0f7ae079177561f2a8e48538"
+    },
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "manual_based_agent_draft"
+  },
+  {
+    "case_id": "answer-013",
+    "product": "HAK180",
+    "category": "parameter",
+    "query": "HAK180 使用 A4 纸时，可以选择哪些送纸速度？",
+    "reference": "可以选择 7.0 ppm 或 15 ppm。",
+    "source": {
+      "path": "doc/hak180使用说明书.pdf",
+      "pdf_page": 34,
+      "section": "6.3.2 更改送纸速度",
+      "excerpt": "送纸速度，然后按(OK)（确定）。注释对于A4纸张尺寸，选择7.0ppm或15ppm。d按(Stop/Exit)（停止/退出）。",
+      "sha256": "5f75797d1ce6e14746de41c8acd562eec3210a2a0f7ae079177561f2a8e48538"
+    },
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "manual_based_agent_draft"
+  },
+  {
+    "case_id": "answer-014",
+    "product": "HAK180",
+    "category": "parameter",
+    "query": "HAK180 开启节省烫金膜模式时，允许的进纸宽度和长度是多少？",
+    "reference": "宽度为 55 到 225 mm，长度为 210 到 500 mm。节省烫金膜模式不支持小于 A5 的纸张。",
+    "source": {
+      "path": "doc/hak180使用说明书.pdf",
+      "pdf_page": 35,
+      "section": "6.4 节省烫金膜模式",
+      "excerpt": "模式：关宽度：55mm到225mm长度：90mm到500mm节省烫金膜模式：开宽度：55mm到225mm长度：210mm到500mm451236445566112233112233",
+      "sha256": "5f75797d1ce6e14746de41c8acd562eec3210a2a0f7ae079177561f2a8e48538"
+    },
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "manual_based_agent_draft"
+  },
+  {
+    "case_id": "answer-015",
+    "product": "HAK180",
+    "category": "procedure",
+    "query": "怎样清洁 HAK180 的操作面板和出纸托板？",
+    "reference": "用柔软的无绒干抹布擦去操作面板灰尘。拉出可伸缩出纸托板翼板，擦拭出纸托板内侧和翼板，再将翼板牢固插回。",
+    "source": {
+      "path": "doc/hak180使用说明书.pdf",
+      "pdf_page": 44,
+      "section": "7.1 清洁设备的外部",
+      "excerpt": "40777.1清洁设备的外部a使用柔软的无绒干抹布擦去操作面板上的灰尘。b将可伸缩出纸托板翼板拉出到设备外。c使用柔软的无绒干抹布擦拭出纸托板内侧和可伸缩出纸托板翼板以去除灰尘。d将可伸缩出纸托板翼板牢固地插回设备中。日常维护01",
+      "sha256": "5f75797d1ce6e14746de41c8acd562eec3210a2a0f7ae079177561f2a8e48538"
+    },
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "manual_based_agent_draft"
+  },
+  {
+    "case_id": "answer-016",
+    "product": "HAK180",
+    "category": "parameter",
+    "query": "HAK180 定影单元的标称寿命是多少？需要更换时应联系谁？",
+    "reference": "定影单元寿命约为 80,000 页，更换频率取决于介质类型。不能完成转印可能表示寿命已尽，需要更换时联系 Brother 经销商。",
+    "source": {
+      "path": "doc/hak180使用说明书.pdf",
+      "pdf_page": 56,
+      "section": "9.3 设备规格",
+      "excerpt": "频率因所用介质类型不同而有所不同。如果您未能完成转印，则表示定影单元寿命已尽。如需更换定影单元，请联系Brother经销商。9.4耗材当需要更换耗材（例如烫金膜盒）时，设备的操作面板上会出现错误消息。有关设备耗材的更多信息，请访问www.brother.com/original/index.html或联系您当地的Brother经销商。注释“耗材型号名称”会因国家和地区而异。介质尺寸宽度：55mm到225mm长度：90mm到500mm介质重量90g/m2到350g/m2介质类型普通纸、薄纸、再生纸、厚纸、特种纸纸张输入(A4)44张纸(90g/m2)12张纸(350g/m2)纸张输出44张纸，正面朝下(90g/m2)12张纸，正面朝下(350g/m2)最大转印速度(A4)最高15ppm进纸尺寸宽度：55mm到225mm长度：90mm到500mm进纸尺寸（节省烫金膜模式）宽度：55mm到225",
+      "sha256": "5f75797d1ce6e14746de41c8acd562eec3210a2a0f7ae079177561f2a8e48538"
+    },
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "manual_based_agent_draft"
+  },
+  {
+    "case_id": "answer-017",
+    "product": "HL3040",
+    "category": "fact",
+    "query": "HL-3040CN 支持 IEEE 802.11b/g 无线网络吗？",
+    "reference": "不支持。该手册覆盖 HL-3040CN 和 HL-3070CW，其中只有 HL-3070CW 支持 IEEE 802.11b/g 无线以太网。",
+    "source": {
+      "path": "doc/hl3040网络说明书.pdf",
+      "pdf_page": 10,
+      "section": "简介/概述",
+      "excerpt": "版本)。下列表格显示各操作系统所支持的网络功能特性和连接。1仅HL-3070CW支持IEEE802.11b/g无线以太网(TCP/IP)。2可登录http://solutions.brother.com/网站下载BRAdminProfessional3、WebBRAdmin和BRPrintAuditor。3在通过USB接口连接到客户端计算机的设备上使用BRAdmin专业版3或WebBRAdmin时可用。4如需获取更多信息，请参考随机光盘上的使用说明书。若要通过网络使用Brother设备，您需要配置打印服务器，并设置您需要使用的计算机。简介1操作系统Windows®2000/XPWindowsVista®WindowsServer®2003/2008Windows®7MacOSX10.3.9或更高版本10/100BASE-TX有线以太网(TCP/IP)rrIEEE802.11b/g无线以太网",
+      "sha256": "a2201897ee3f07cd5f2039b0d498ee02e24e4d4e22f774d24b60b36fdea6653e"
+    },
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "manual_based_agent_draft"
+  },
+  {
+    "case_id": "answer-018",
+    "product": "HL3040",
+    "category": "fact",
+    "query": "BRAdmin Light 可以为 HL-3040CN 执行哪些基本网络管理操作？",
+    "reference": "它用于网络设备的初始设置，可以搜索 Brother 产品、查看状态，并配置 IP 地址等基本网络设置。",
+    "source": {
+      "path": "doc/hl3040网络说明书.pdf",
+      "pdf_page": 11,
+      "section": "网络功能特性/BRAdmin Light",
+      "excerpt": "高版本)的打印服务。管理实用程序1BRAdminLight1BRAdminLight是一个用于为连接网络的Brother设备进行初始设置的实用程序。该实用程序可以在您的网络中搜索Brother产品，查看状态并配置如IP地址等基本网络设置。BRAdminLight实用程序可在Windows®2000/XP、WindowsVista®、Windows®7和WindowsServer®2003/2008和MacOSX10.3.9(或更高版本)的计算机上使用。关于在Windows®中安装BRAdminLight的详细信息，请参考随机附带的快速安装指南。对于Macintosh用户，当您安装打印机驱动程序时，BRAdminLight软件将自动安装。如果已安装了打印机驱动程序，则不需要重新安装。关于BRAdminLight的详细信息，请访问以下网站：http://solutions.brother.co",
+      "sha256": "a2201897ee3f07cd5f2039b0d498ee02e24e4d4e22f774d24b60b36fdea6653e"
+    },
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "manual_based_agent_draft"
+  },
+  {
+    "case_id": "answer-019",
+    "product": "HL3040",
+    "category": "fact",
+    "query": "只有两三台计算机的小型网络使用 HL-3040CN 时，手册推荐哪种打印方式？",
+    "reference": "推荐使用 TCP/IP 对等打印。每台计算机直接与打印机收发数据，不需要中央打印服务器，而且比网络共享打印更容易配置。",
+    "source": {
+      "path": "doc/hl3040网络说明书.pdf",
+      "pdf_page": 13,
+      "section": "网络连接的类型/使用 TCP/IP 协议的对等打印",
+      "excerpt": "共享的中央服务器。1)路由器2)网络打印机(本设备)在拥有2台或3台计算机的小型网络环境中，Brother建议您采用对等打印方式，因其比网络共享打印方式更易于配置。请参考第5页上的网络共享打印。每台计算机必须使用TCP/IP协议。Brother设备需要配置合适的IP地址。如果使用路由器，则必须在计算机和Brother设备中配置网关地址。TCP/IPRWindowsRWindowsR2TCP/IPWindows1",
+      "sha256": "a2201897ee3f07cd5f2039b0d498ee02e24e4d4e22f774d24b60b36fdea6653e"
+    },
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "manual_based_agent_draft"
+  },
+  {
+    "case_id": "answer-020",
+    "product": "HL3040",
+    "category": "fact",
+    "query": "大型网络使用 HL-3040CN 时，手册推荐哪种打印方式？",
+    "reference": "推荐网络共享打印。客户端通过中央计算机或打印服务器发送数据，由服务器控制打印作业；服务器必须使用 TCP/IP 打印协议。",
+    "source": {
+      "path": "doc/hl3040网络说明书.pdf",
+      "pdf_page": 14,
+      "section": "网络共享打印",
+      "excerpt": "务器”3)TCP/IP或USB接口电缆4)打印机(本设备)在大型网络环境中，Brother建议您使用网络共享打印方式。“服务器”或“打印服务器”必须使用TCP/IP打印协议。若设备并非通过服务器上的USB接口连接，则需要为Brother设备配置合适的IP地址。32TCP/IPWindowsRWindowsRWindowsRWindowsR1114",
+      "sha256": "a2201897ee3f07cd5f2039b0d498ee02e24e4d4e22f774d24b60b36fdea6653e"
+    },
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "manual_based_agent_draft"
+  },
+  {
+    "case_id": "answer-021",
+    "product": "HL3040",
+    "category": "parameter",
+    "query": "HL-3040CN 没有手动 IP 配置，也没有 DHCP、BOOTP 或 RARP 服务器时，APIPA 会使用哪个地址范围？",
+    "reference": "APIPA 会在 169.254.1.0 到 169.254.254.255 范围内自动指定 IP 地址。",
+    "source": {
+      "path": "doc/hl3040网络说明书.pdf",
+      "pdf_page": 16,
+      "section": "TCP/IP 协议和功能/APIPA",
+      "excerpt": "务器)指定IP地址，则自动专用IP寻址(APIPA)协议将在169.254.1.0至169.254.254.255范围内自动指定IP地址。ARP1地址解析协议在TCP/IP网络中将IP地址映射到MAC地址。DNS客户端1Brother打印服务器支持域名系统(DNS)客户端功能。该功能允许打印服务器使用DNS名称与其他设备进行通信。NetBIOS名称解析1通过使用网络基本输入/输出系统(NetBIOS)名称解析，您可以在进行网络连接时通过其他设备的NetBIOS名称获得其IP地址。WINS1Windows因特网名称服务信息通过合并IP地址和本地网络中的NetBIOS名称为NetBIOS名称解析提供服务。",
+      "sha256": "a2201897ee3f07cd5f2039b0d498ee02e24e4d4e22f774d24b60b36fdea6653e"
+    },
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "manual_based_agent_draft"
+  },
+  {
+    "case_id": "answer-022",
+    "product": "HL3040",
+    "category": "parameter",
+    "query": "HL-3040CN 的自定义原始打印端口默认是多少？",
+    "reference": "默认使用 Port 9100，即 TCP 9100 端口。",
+    "source": {
+      "path": "doc/hl3040网络说明书.pdf",
+      "pdf_page": 17,
+      "section": "自定义原始端口",
+      "excerpt": "子邮件。自定义原始端口(CustomRawPort)(默认为Port9100)1另一个在TCP/IP网络中广泛应用的打印协议。该协议实现了交互式数据传输。IPP1因特网打印协议(IPP版本1.0)允许通过因特网直接将文档打印至任何可访问的打印机上。注释关于IPPS协议，请参考第91页上的安全协议。mDNS1mDNS允许Brother打印服务器在MacOSX简单网络配置系统中自动进行工作配置。(MacOSX10.3.9或更高版本)。Telnet1Brother打印服务器支持Telnet服务器的命令行配置。SNMP1简单网络管理协议(SNMP)用于管理计算机、路由器和Brother网络设备等网络设备。Brother打印服务器支持SNMPv1、SNMPv2c和SNMPv3。注释关于SNMPv3协议，请参考第91页上的安全协议。LLMNR1如果网络中没有域名系统(DNS)服务器，则由链路局部多播名",
+      "sha256": "a2201897ee3f07cd5f2039b0d498ee02e24e4d4e22f774d24b60b36fdea6653e"
+    },
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "manual_based_agent_draft"
+  },
+  {
+    "case_id": "answer-023",
+    "product": "HL3040",
+    "category": "fact",
+    "query": "HL-3040CN 打印服务器支持哪些 SNMP 版本？",
+    "reference": "支持 SNMPv1、SNMPv2c 和 SNMPv3。",
+    "source": {
+      "path": "doc/hl3040网络说明书.pdf",
+      "pdf_page": 17,
+      "section": "TCP/IP 协议和功能/SNMP",
+      "excerpt": "和Brother网络设备等网络设备。Brother打印服务器支持SNMPv1、SNMPv2c和SNMPv3。注释关于SNMPv3协议，请参考第91页上的安全协议。LLMNR1如果网络中没有域名系统(DNS)服务器，则由链路局部多播名称解析协议(LLMNR)确定邻接计算机的名称。当使用具有LLMNR发送器功能的计算机(如WindowsVista®和Windows®7系统)时，LLMNR应答器功能可作用于IPv4或IPv6环境。网络服务1通过使用网络服务协议，WindowsVista®和Windows®7用户只需要右击网络文件夹中的设备图标即可安装Brother打印机驱动程序。请参考第135页上的使用网络服务时的安装(适用于WindowsVista®和Windows®7用户)。网络服务同时也可在计算机中查看设备的当前状态。",
+      "sha256": "a2201897ee3f07cd5f2039b0d498ee02e24e4d4e22f774d24b60b36fdea6653e"
+    },
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "manual_based_agent_draft"
+  },
+  {
+    "case_id": "answer-024",
+    "product": "HL3040",
+    "category": "fact",
+    "query": "HL-3040CN 支持 IPv6 吗？",
+    "reference": "支持。网络说明书说明该设备兼容 IPv6。",
+    "source": {
+      "path": "doc/hl3040网络说明书.pdf",
+      "pdf_page": 18,
+      "section": "IPv6",
+      "excerpt": "•关于HTTPS协议，请参考第91页上的安全协议。IPv61本设备兼容下一代因特网协议IPv6。关于IPv6协议的更多信息，请访问以下网站：http://solutions.brother.com/。其他协议1LLTD1通过使用链路层发现协议(LLTD)，您可以在WindowsVista®和Windows®7网络映射中轻松定位Brother设备。将以一个明显图标和节点名称显示您的Brother设备。此协议的默认设置为关闭。您可以使用BRAdmin专业版3实用程序激活LLTD。请通过登录以下网站：http://solutions.brother.com/在下载页面中下载适用于您的产品型号的BRAdmin专业版3。",
+      "sha256": "a2201897ee3f07cd5f2039b0d498ee02e24e4d4e22f774d24b60b36fdea6653e"
+    },
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "manual_based_agent_draft"
+  },
+  {
+    "case_id": "answer-025",
+    "product": "HL3040",
+    "category": "procedure",
+    "query": "HL-3040CN 的 LLTD 默认开启吗？怎样启用？",
+    "reference": "LLTD 默认关闭。可以使用 BRAdmin 专业版 3 实用程序激活。",
+    "source": {
+      "path": "doc/hl3040网络说明书.pdf",
+      "pdf_page": 18,
+      "section": "其他协议/LLTD",
+      "excerpt": "设备。将以一个明显图标和节点名称显示您的Brother设备。此协议的默认设置为关闭。您可以使用BRAdmin专业版3实用程序激活LLTD。请通过登录以下网站：http://solutions.brother.com/在下载页面中下载适用于您的产品型号的BRAdmin专业版3。",
+      "sha256": "a2201897ee3f07cd5f2039b0d498ee02e24e4d4e22f774d24b60b36fdea6653e"
+    },
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "manual_based_agent_draft"
+  },
+  {
+    "case_id": "answer-026",
+    "product": "HL3040",
+    "category": "parameter",
+    "query": "禁用 APIPA 后，HL-3040CN 打印服务器的默认 IP 地址是多少？",
+    "reference": "默认 IP 地址为 192.0.0.192。可以将其改为与所在网络匹配的 IP 地址。",
+    "source": {
+      "path": "doc/hl3040网络说明书.pdf",
+      "pdf_page": 20,
+      "section": "配置网络设备/IP 地址",
+      "excerpt": "IP地址。如果禁用APIPA协议，Brother打印服务器的默认IP地址为192.0.0.192。但您可以方便地将IP地址更改为与您网络相匹配的IP地址。关于如何更改IP地址的详细信息，请参考第13页上的设置IP地址和子网掩码。子网掩码2子网掩码限制网络通信。例如：计算机1可以与计算机2通信•计算机1IP地址：192.168.1.2子网掩码：255.255.255.000•计算机2IP地址：192.168.1.3子网掩码：255.255.255.000子网掩码中的0表示在这部分地址中无通信限制。在上例中，我们可以与任何以192.168.1.x(x.为0至255之间的数字)开始的IP地址的设备进行通信。网关(和路由器)2网关是进入其他网络的网络节点，可以通过网络将传输数据发送至准确目的地。路由器可确认在网关上数据传输的路径。如果目的地处于外部网络，路由器就会将数据传输至外部网络。如果您的网",
+      "sha256": "a2201897ee3f07cd5f2039b0d498ee02e24e4d4e22f774d24b60b36fdea6653e"
+    },
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "manual_based_agent_draft"
+  },
+  {
+    "case_id": "answer-027",
+    "product": "HL3040",
+    "category": "fact",
+    "query": "在 BRAdmin Light 中，HL-3040CN 有线网络的默认节点名称采用什么格式？",
+    "reference": "有线网络的默认节点名称是 BRNxxxxxxxxxxxx，其中 xxxxxxxxxxxx 是设备的 MAC 地址或以太网地址。",
+    "source": {
+      "path": "doc/hl3040网络说明书.pdf",
+      "pdf_page": 22,
+      "section": "使用 BRAdmin Light 实用程序配置网络打印机",
+      "excerpt": "dminLight窗口中。本设备打印服务器的默认节点名称为“BRNxxxxxxxxxxxx”(有线网络)或“BRWxxxxxxxxxxxx”(无线网络)。(“xxxxxxxxxxxx”为本设备的MAC地址/以太网地址。)•Brother打印服务器的默认密码为“access”。a启动BRAdminLight实用程序。Windows®用户点击开始/所有程序1/Brother/BRAdminLight/BRAdminLight。1对于Windows®2000用户，此处为程序Macintosh用户双击MacintoshHD(硬盘)/Library(资源库)/Printers(打印机)/Brother/Utilities(实用程序)/BRAdminLight.jar文件。bBRAdminLight将自动搜索新设备。",
+      "sha256": "a2201897ee3f07cd5f2039b0d498ee02e24e4d4e22f774d24b60b36fdea6653e"
+    },
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "manual_based_agent_draft"
+  },
+  {
+    "case_id": "answer-028",
+    "product": "HL3040",
+    "category": "procedure",
+    "query": "怎样通过 BRAdmin Light 为 HL-3040CN 设置静态 IP 地址？",
+    "reference": "双击未配置设备，在引导方式中选择 STATIC，输入 IP 地址、子网掩码以及需要时的网关，然后单击“确定”。",
+    "source": {
+      "path": "doc/hl3040网络说明书.pdf",
+      "pdf_page": 23,
+      "section": "设置 IP 地址和子网掩码",
+      "excerpt": "AC地址(以太网地址)。请参考第68页上的打印网络配置页。d在引导方式中选择STATIC。输入打印服务器的IP地址、子网掩码和网关(如有需要)。e点击确定。f输入正确的IP地址，设备列表中将显示Brother打印服务器。Windows®MacintoshWindows®Macintosh",
+      "sha256": "a2201897ee3f07cd5f2039b0d498ee02e24e4d4e22f774d24b60b36fdea6653e"
+    },
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "manual_based_agent_draft"
+  },
+  {
+    "case_id": "answer-029",
+    "product": "H3C ER2100",
+    "category": "parameter",
+    "query": "H3C ER2100 的 LAN 口默认 IP 地址和子网掩码是什么？",
+    "reference": "默认 IP 地址为 192.168.1.1，子网掩码为 255.255.255.0。",
+    "source": {
+      "path": "doc/H3C ER2100企业级路由器 用户手册-6W104-整本手册.pdf",
+      "pdf_page": 12,
+      "section": "3.1.2 建立网络连接",
+      "excerpt": "LAN口IP地址设置在同一网段内（LAN口缺省的IP地址为：192.168.1.1，子网掩码为255.255.255.0）操作步骤如下（以WindowsXP系统为例）：",
+      "sha256": "391ecdf261f2912c8a0508df285cf0e6e35ff0d19393e3354b3070e2027742f9"
+    },
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "manual_based_agent_draft"
+  },
+  {
+    "case_id": "answer-030",
+    "product": "H3C ER2100",
+    "category": "parameter",
+    "query": "使用静态地址管理默认配置的 H3C ER2100 时，计算机可设置哪个 IP 范围和网关？",
+    "reference": "计算机可使用 192.168.1.2 到 192.168.1.254 中的地址，子网掩码为 255.255.255.0，默认网关为 192.168.1.1。",
+    "source": {
+      "path": "doc/H3C ER2100企业级路由器 用户手册-6W104-整本手册.pdf",
+      "pdf_page": 13,
+      "section": "3.1.2 建立网络连接",
+      "excerpt": "”窗口。选择“使用下面的IP地址”单选按钮，输入IP地址（在192.168.1.2～192.168.1.254中任意值）、子网掩码（255.255.255.0）及默认网关（192.168.1.1），确定后完成操作",
+      "sha256": "391ecdf261f2912c8a0508df285cf0e6e35ff0d19393e3354b3070e2027742f9"
+    },
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "manual_based_agent_draft"
+  },
+  {
+    "case_id": "answer-031",
+    "product": "H3C ER2100",
+    "category": "procedure",
+    "query": "怎样检查管理计算机与默认配置的 H3C ER2100 是否连通？",
+    "reference": "在管理计算机上执行 ping 192.168.1.1。收到路由器回应表示网络连通；没有回应时检查网络连接。",
+    "source": {
+      "path": "doc/H3C ER2100企业级路由器 用户手册-6W104-整本手册.pdf",
+      "pdf_page": 14,
+      "section": "3.1.2 确认网络连通",
+      "excerpt": "入[开始]菜单，选择“运行”，弹出“运行”对话框(2)输入“ping192.168.1.1（路由器的IP地址，此处是缺省IP地址）”，单击<确定>按钮。如果在弹出的对话框中显示了从路由器侧返回的回应，则表示网络连通；否则请检查网络连接3.1.3取消代理服务器如果当前管理计算机使用代理服务器访问因特网，则必须取消代理服务，操作步骤如下：(1)在浏览器窗口中，选择[工具/Internet选项]进入“Internet选项”窗口",
+      "sha256": "391ecdf261f2912c8a0508df285cf0e6e35ff0d19393e3354b3070e2027742f9"
+    },
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "manual_based_agent_draft"
+  },
+  {
+    "case_id": "answer-032",
+    "product": "H3C ER2100",
+    "category": "procedure",
+    "query": "怎样首次登录 H3C ER2100 的 Web 设置页面？",
+    "reference": "在浏览器输入 http://192.168.1.1，输入默认用户名 admin、默认密码 admin 和验证码，然后单击“登录”或按回车。用户名和密码区分大小写，验证码不区分大小写。",
+    "source": {
+      "path": "doc/H3C ER2100企业级路由器 用户手册-6W104-整本手册.pdf",
+      "pdf_page": 15,
+      "section": "3.2 登录路由器 Web 设置页面",
+      "excerpt": "车后跳转到Web登录页面，如图3-1所示。输入用户名、密码（缺省均为admin，区分大小写）以及验证码（不区分大小写），单击<登录>按钮或直接回车即可进入Web设置页面。图3-1登录路由器Web设置页面•同一时间，路由器最多允许五个用户通过Web设置页面进行管理。当对路由器进行多用户管理时，建议不要同时对其进行配置操作，否则可能会导致数据配置不一致。•为了安全起见，建议您首次登录后修改缺省的登录密码，并保管好密码信息。•验证码功能会使您的系统安全性更高。如果您想在登录路由器Web设置页面时不需要输入验证码，可以通过登录管理页面来设置其状态。",
+      "sha256": "391ecdf261f2912c8a0508df285cf0e6e35ff0d19393e3354b3070e2027742f9"
+    },
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "manual_based_agent_draft"
+  },
+  {
+    "case_id": "answer-033",
+    "product": "H3C ER2100",
+    "category": "parameter",
+    "query": "H3C ER2100 同时最多允许多少个用户通过 Web 页面管理？",
+    "reference": "同时最多允许 5 个用户。多用户管理时，建议不要同时修改配置，以免配置数据不一致。",
+    "source": {
+      "path": "doc/H3C ER2100企业级路由器 用户手册-6W104-整本手册.pdf",
+      "pdf_page": 15,
+      "section": "3.2 登录路由器 Web 设置页面",
+      "excerpt": "设置页面。图3-1登录路由器Web设置页面•同一时间，路由器最多允许五个用户通过Web设置页面进行管理。当对路由器进行多用户管理时，建议不要同时对其进行配置操作，否则可能会导致数据配置不一致。•为了安全起见，建议您首次登录后修改缺省的登录密码，并保管好密码信息。•验证码功能会使您的系统安全性更高。如果您想在登录路由器Web设置页面时不需要输入验证码，可以通过登录管理页面来设置其状态。",
+      "sha256": "391ecdf261f2912c8a0508df285cf0e6e35ff0d19393e3354b3070e2027742f9"
+    },
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "manual_based_agent_draft"
+  },
+  {
+    "case_id": "answer-034",
+    "product": "H3C ER2100",
+    "category": "safety",
+    "query": "首次登录 H3C ER2100 后，应采取什么密码安全措施？",
+    "reference": "修改默认登录密码，并妥善保管密码信息。",
+    "source": {
+      "path": "doc/H3C ER2100企业级路由器 用户手册-6W104-整本手册.pdf",
+      "pdf_page": 15,
+      "section": "3.2 登录路由器 Web 设置页面",
+      "excerpt": "置操作，否则可能会导致数据配置不一致。•为了安全起见，建议您首次登录后修改缺省的登录密码，并保管好密码信息。•验证码功能会使您的系统安全性更高。如果您想在登录路由器Web设置页面时不需要输入验证码，可以通过登录管理页面来设置其状态。",
+      "sha256": "391ecdf261f2912c8a0508df285cf0e6e35ff0d19393e3354b3070e2027742f9"
+    },
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "manual_based_agent_draft"
+  },
+  {
+    "case_id": "answer-035",
+    "product": "H3C ER2100",
+    "category": "fact",
+    "query": "手动配置 H3C ER2100 的 WAN 口速率和双工模式时，有什么匹配要求？",
+    "reference": "除 Auto 模式外，WAN 口的速率和双工模式必须与对端设备保持一致。",
+    "source": {
+      "path": "doc/H3C ER2100企业级路由器 用户手册-6W104-整本手册.pdf",
+      "pdf_page": 22,
+      "section": "5.1 WAN 网口模式",
+      "excerpt": "本页面为您提供如下主要功能：•选择WAN口的速率和双工模式•除了Auto模式外，路由器WAN口的速率和双工模式需要与对端设备保持一致。•设置完成后，您可以通过查看端口流量页面中的“链路状态”来验证设置是否已生效。5.2设置LAN5.2.1修改LAN口的IP地址当您修改了路由器LAN口的IP地址后，您需要在浏览器中输入新的IP地址重新登录，才能对路由器继续进行配置和管理。比如：某企业事先已经将整个IP地址段均已规划好，因此，您需要根据已规划好的IP地址来修改路由器LAN口的IP地址，以适应实际环境。页面向导：接口设置→LAN设置→局域网设置本页面为您提供如下主要功能：•修改LAN口的IP地址（缺省情况下，路由器LAN口的IP地址为192.168.1.1，子网掩码为255.255.255.0）修改LAN口IP地址后，其他页面中和IP地址相关的配置可能需要相应修改（如IP/MAC绑定表中的IP地",
+      "sha256": "391ecdf261f2912c8a0508df285cf0e6e35ff0d19393e3354b3070e2027742f9"
+    },
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "manual_based_agent_draft"
+  },
+  {
+    "case_id": "answer-036",
+    "product": "H3C ER2100",
+    "category": "procedure",
+    "query": "修改 H3C ER2100 的 LAN 口 IP 地址后，怎样继续管理路由器？",
+    "reference": "在浏览器输入新的 LAN 口 IP 地址，重新登录后继续配置和管理。其他页面中依赖原 IP 地址的配置也可能需要相应修改。",
+    "source": {
+      "path": "doc/H3C ER2100企业级路由器 用户手册-6W104-整本手册.pdf",
+      "pdf_page": 22,
+      "section": "5.2.1 修改 LAN 口的 IP 地址",
+      "excerpt": "改LAN口的IP地址当您修改了路由器LAN口的IP地址后，您需要在浏览器中输入新的IP地址重新登录，才能对路由器继续进行配置和管理。比如：某企业事先已经将整个IP地址段均已规划好，因此，您需要根据已规划好的IP地址来修改路由器LAN口的IP地址，以适应实际环境。页面向导：接口设置→LAN设置→局域网设置本页面为您提供如下主要功能：•修改LAN口的IP地址（缺省情况下，路由器LAN口的IP地址为192.168.1.1，子网掩码为255.255.255.0）修改LAN口IP地址后，其他页面中和IP地址相关的配置可能需要相应修改（如IP/MAC绑定表中的IP地址等），保持和LAN口IP在统一网段。",
+      "sha256": "391ecdf261f2912c8a0508df285cf0e6e35ff0d19393e3354b3070e2027742f9"
+    },
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "manual_based_agent_draft"
+  },
+  {
+    "case_id": "answer-037",
+    "product": "H3C ER2100",
+    "category": "fact",
+    "query": "H3C ER2100 的一个 VLAN 接口上可以创建几个 DHCP 服务器？",
+    "reference": "一个 VLAN 接口上只能创建一个 DHCP 服务器。",
+    "source": {
+      "path": "doc/H3C ER2100企业级路由器 用户手册-6W104-整本手册.pdf",
+      "pdf_page": 28,
+      "section": "5.3 DHCP 设置/全局地址池",
+      "excerpt": "地址池名称选择需要在哪一个VLAN接口上创建DHCP服务器，一个VLAN接口上只能创建一个DHCP服务器全局地址池名称如果您选择全局地址池，请输入全局地址池的名称地址池起始地址DHCP服务器地址池的起始地址地址池结束地址DHCP服务器地址池的结束地址，地址池结束地址不能小于地址池起始地址子网掩码如果您选择全局地址池，请配置该全局地址池对应的子网掩码网关地址如果您选择全局地址池，请配置该全局地址池对应的网关地址，如果您不配置网关地址，有可能造成网络不通地址租约设置DHCP服务器分配给客户端IP地址的租借期限。当租借期满后，DHCP服务器会收回该IP地址，客户端必须重新向路由器申请（客户端一般会自动申请）缺省情况下，地址租约为1440分钟客户端域名设置DHCP服务器分配给客户端使用的域名地址后缀主DNS服务器设置DHCP服务器分配IP地址时所携带的主DNS服务器地址缺省情况下，非全局地址池的D",
+      "sha256": "391ecdf261f2912c8a0508df285cf0e6e35ff0d19393e3354b3070e2027742f9"
+    },
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "manual_based_agent_draft"
+  },
+  {
+    "case_id": "answer-038",
+    "product": "H3C ER2100",
+    "category": "parameter",
+    "query": "H3C ER2100 的 DHCP 地址租约默认是多少分钟？",
+    "reference": "默认地址租约为 1440 分钟。租期满后，服务器收回 IP 地址，客户端需重新申请，通常会自动申请。",
+    "source": {
+      "path": "doc/H3C ER2100企业级路由器 用户手册-6W104-整本手册.pdf",
+      "pdf_page": 28,
+      "section": "5.3 DHCP 设置/地址租约",
+      "excerpt": "户端必须重新向路由器申请（客户端一般会自动申请）缺省情况下，地址租约为1440分钟客户端域名设置DHCP服务器分配给客户端使用的域名地址后缀主DNS服务器设置DHCP服务器分配IP地址时所携带的主DNS服务器地址缺省情况下，非全局地址池的DNS服务器分配IP地址时所携带的DNS服务器地址为网关地址。全局地址池时，如果您不配置任何DNS服务器，有可能造成网络不通辅DNS服务器设置DHCP服务器分配IP地址时所携带的辅DNS服务器地址5.3.4设置DHCP静态表如果您想让路由器给某些特定的客户端分配固定的IP地址，可以事先通过DHCP静态表将客户端的MAC地址和IP地址进行绑定，使其成为一对一的分配关系。",
+      "sha256": "391ecdf261f2912c8a0508df285cf0e6e35ff0d19393e3354b3070e2027742f9"
+    },
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "manual_based_agent_draft"
+  },
+  {
+    "case_id": "answer-039",
+    "product": "H3C ER2100",
+    "category": "procedure",
+    "query": "怎样让 H3C ER2100 通过 DHCP 给某台客户端分配固定 IP 地址？",
+    "reference": "在 DHCP 静态表中，将该客户端的 MAC 地址和指定 IP 地址进行一对一绑定。",
+    "source": {
+      "path": "doc/H3C ER2100企业级路由器 用户手册-6W104-整本手册.pdf",
+      "pdf_page": 28,
+      "section": "5.3.4 设置 DHCP 静态表",
+      "excerpt": "些特定的客户端分配固定的IP地址，可以事先通过DHCP静态表将客户端的MAC地址和IP地址进行绑定，使其成为一对一的分配关系。",
+      "sha256": "391ecdf261f2912c8a0508df285cf0e6e35ff0d19393e3354b3070e2027742f9"
+    },
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "manual_based_agent_draft"
+  },
+  {
+    "case_id": "answer-040",
+    "product": "H3C ER2100",
+    "category": "procedure",
+    "query": "H3C ER2100 批量导入 DHCP 静态表时，文件格式和每行内容有什么要求？",
+    "reference": "使用 .cfg 文件，每行按照“MAC 地址 IP 地址 描述”的顺序填写一条静态表项，并用换行分隔各条记录。通过 DHCP 静态表页面的“导入”按钮选择文件。",
+    "source": {
+      "path": "doc/H3C ER2100企业级路由器 用户手册-6W104-整本手册.pdf",
+      "pdf_page": 29,
+      "section": "5.3.4 设置 DHCP 静态表",
+      "excerpt": "弹出的对话框中设置相应的参数，并单击<增加>按钮完成操作）•批量添加DHCP静态表项（您可以先在本地编辑一个.cfg文件，内容格式为“MAC地址IP地址描述”（比如：00:0A:EB:7F:AA:AB192.168.1.2zhangshan），且每条静态表项之间需换行。单击主页面上的<导入>按钮，在弹出的对话框中选择该文件将其导入即可）",
+      "sha256": "391ecdf261f2912c8a0508df285cf0e6e35ff0d19393e3354b3070e2027742f9"
+    },
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "manual_based_agent_draft"
+  }
+]

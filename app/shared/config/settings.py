@@ -36,6 +36,16 @@ class EmbeddingSettings:
 
 
 @dataclass
+class EvaluationSettings:
+    """离线答案评测。模型名必须明确配置；接口和密钥可复用回答服务。"""
+
+    model: str
+    base_url: str
+    api_key: str
+    timeout_seconds: float = 120
+
+
+@dataclass
 class RerankerSettings:
     """BGE-Reranker 重排模型配置。"""
 
@@ -208,11 +218,18 @@ class Settings:
     import_: ImportSettings
     evolution: EvolutionSettings
     runtime: RuntimeSettings
+    evaluation: EvaluationSettings
 
 
 def _build_settings() -> Settings:
     """集中构造配置；所有环境变量解析都在此完成。"""
     return Settings(
+        evaluation=EvaluationSettings(
+            model=env_str("EVAL_LLM_MODEL"),
+            base_url=env_str("EVAL_LLM_BASE_URL"),
+            api_key=env_str("EVAL_LLM_API_KEY"),
+            timeout_seconds=env_float("EVAL_LLM_TIMEOUT_SECONDS", 120),
+        ),
         llm=LLMSettings(
             base_url=env_str("OPENAI_BASE_URL"),
             api_key=env_str("OPENAI_API_KEY"),

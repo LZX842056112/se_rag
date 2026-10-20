@@ -47,17 +47,18 @@ def load_answer_prompt(state: QueryGraphState) -> str:
     本地子块会附带所属章节的背景与页码：子块负责精确命中，章节背景补足跨子块的语义连续性
     （见 ``node_parent_expand``）；联网结果与自进化条目没有父块，字段自动省略。
     """
-    context = ""
+    contexts: list[str] = []
     for index, doc in enumerate(state.get("reranked_docs", []), start=1):
         source = "网络搜索" if doc.get("type") == "web" else "向量库"
         page = doc.get("page")
         page_text = f",页码:{page}" if isinstance(page, int) and page > 0 else ""
         background = None if state.get("business_tag") in ("pricing", "after_sales") else doc.get("parent_content")
         background_text = f",章节背景:{background}" if background else ""
-        context += (
+        contexts.append(
             f"第{index}部分,标题:{doc.get('title')},来源:{source} ,"
             f"置信度: {doc.get('score')}{page_text}{background_text},内容:{doc.get('text')}\n"
         )
+    state["answer_contexts"] = contexts
     item_names = f"{','.join(state.get('item_names', []))}"
     history_text = ("本轮只使用当前有效的业务政策，不使用历史回答中的价格或承诺。"
                     if state.get("business_tag") in ("pricing", "after_sales")
@@ -65,7 +66,7 @@ def load_answer_prompt(state: QueryGraphState) -> str:
     return load_prompt(
         "answer_out",
         question=state.get("rewritten_query"),
-        context=context,
+        context="".join(contexts),
         item_names=item_names,
         history=history_text,
     )
@@ -168,6 +169,7 @@ def save_answer_message_history(state: QueryGraphState) -> None:
 
 def generate_answer(state: QueryGraphState) -> QueryGraphState:
     """答案生成服务入口。"""
+    state["answer_contexts"] = []
     apply_business_policy(state)
     if not state_exists_answer(state):
         answer_prompt_text = load_answer_prompt(state)

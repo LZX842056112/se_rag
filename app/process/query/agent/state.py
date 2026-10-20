@@ -41,6 +41,7 @@ class QueryGraphState(TypedDict):
     # 生成过程中的数据
     prompt: str  # 组装好的 Prompt
     answer: str  # 最终生成的答案
+    answer_contexts: list[str]  # 实际送入答案提示词的证据；不属于公开 API
 
     # 自进化辅助输出
     cited_chunk_ids: list  # 被采纳的引用 id（chunk_id / evo_doc_id）
@@ -79,6 +80,7 @@ query_graph_default_state: QueryGraphState = {
     "reranked_docs": [],
     "prompt": "",
     "answer": "",
+    "answer_contexts": [],
     "cited_chunk_ids": [],
     "groundedness": None,
     "retrieval_signals": {},

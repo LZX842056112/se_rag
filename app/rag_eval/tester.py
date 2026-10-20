@@ -2,10 +2,11 @@
 RAG 评估测试类。
 
 这个文件故意写得很薄。
-你只需要记住一个类和两个方法：
+你只需要记住一个类和三个方法：
 
 - `RagEvalTester.run_insert_test_data()`
 - `RagEvalTester.run_eval()`
+- `RagEvalTester.run_answer_eval()`
 
 其他具体流程都放在 `runner.py` 里。
 
@@ -29,6 +30,11 @@ class RagEvalTester:
     tester.run_eval()
     ```
     """
+
+    def run_answer_eval(self, *args, **kwargs) -> dict:
+        """校验或运行离线答案评测；默认不调用外部服务。"""
+        from app.rag_eval.answer_quality import run_answer_eval
+        return run_answer_eval(*args, **kwargs)
 
     def run_insert_test_data(self) -> dict:
         """
