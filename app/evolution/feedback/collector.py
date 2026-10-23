@@ -5,6 +5,7 @@ import time
 from typing import Any
 
 from app.evolution.models import FeedbackEvent
+from app.evolution.flags import writes_enabled
 from app.evolution.repositories import evolution_repo
 from app.shared.config import settings
 from app.shared.clients.history_repository import history_repository
@@ -62,7 +63,7 @@ def record_feedback(event: FeedbackEvent) -> None:
         evolution_repo.query_feedback.update_one(
             {"answer_id": event.answer_id}, {"$set": payload}, upsert=True,
         )
-        if settings.evolution.enabled and answer["intent"] == "rag":
+        if writes_enabled() and answer["intent"] == "rag":
             _emit(canonical)
         if answer["intent"] == "rag" and (event.resolved is False or (event.thumbs or 0) < 0):
             from app.evolution.issues import open_issue
@@ -76,7 +77,7 @@ def record_feedback(event: FeedbackEvent) -> None:
 
 def flush_session_signals(state: dict[str, Any]) -> None:
     """读链路会话结束信号：零命中 / 无检索直达 / 命中却答不出 → 写入 ``fb_events``。"""
-    if not settings.evolution.enabled:
+    if not writes_enabled():
         return
     try:
         session_id = state.get("session_id")
@@ -97,6 +98,14 @@ def flush_session_signals(state: dict[str, Any]) -> None:
             thumbs=-1,
             source="evolution" if signals.get("evolution_hit") else "kb",
         ))
+        diagnostics = state.get('agentic_diagnostics')
+        if diagnostics and state.get('answer_id'):
+            # 仅使用服务器推导的事实。显式的用户反馈会保留这些字段，
+            # 因为 _emit 只会更新已知的反馈字段而不会删除它们。
+            evolution_repo.fb_events.update_one(
+                {'session_id': session_id, 'answer_id': state['answer_id']},
+                {'$set': {key: diagnostics[key] for key in ('evidence_sufficient', 'read_chunk_ids')
+                          if key in diagnostics}}, upsert=False)
         logger.info(f"会话 {session_id} 已写入未解决信号到 fb_events")
     except Exception as exc:  # noqa: BLE001
         logger.warning(f"写入会话信号失败：{exc}")

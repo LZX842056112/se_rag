@@ -1,0 +1,2775 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>se_rag 代码审计与清理报告</title>
+<style>
+:root{
+  --bg:#ffffff; --bg-soft:#f6f7f9; --bg-code:#f8f9fb; --bg-inset:#fbfcfd;
+  --ink:#14181d; --ink-2:#3d4650; --muted:#6b7480; --faint:#9aa3ae;
+  --line:#e4e8ec; --line-2:#eef1f4;
+  --accent:#1f5fe0; --accent-bg:#eef3fe;
+  --ok:#12724a; --ok-bg:#e9f7f0;
+  --warn:#8a5a00; --warn-bg:#fdf5e4;
+  --bad:#b3242b; --bad-bg:#fdeceb;
+  --violet:#6544d6; --violet-bg:#f1edfe;
+  --teal:#0d6e75; --teal-bg:#e6f5f6;
+  --radius:10px; --radius-sm:6px;
+  --shadow:0 1px 2px rgba(20,24,29,.05),0 4px 14px rgba(20,24,29,.05);
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  --mono:"Cascadia Code","JetBrains Mono","SFMono-Regular",Consolas,"Liberation Mono",monospace;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important;animation:none!important}}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:15.5px;line-height:1.75;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+::selection{background:#d7e3fd;color:var(--ink)}
+#readbar{position:fixed;top:0;left:0;height:2.5px;width:0;background:linear-gradient(90deg,var(--accent),var(--violet));z-index:200;transition:width .08s linear}
+
+/* ============ 布局 ============ */
+.layout{display:grid;grid-template-columns:272px minmax(0,1fr)}
+.sidebar{position:sticky;top:0;height:100vh;overflow-y:auto;background:var(--bg-soft);border-right:1px solid var(--line);padding:24px 18px 60px;font-size:13.4px}
+.sidebar::-webkit-scrollbar{width:8px}
+.sidebar::-webkit-scrollbar-thumb{background:#d3d9e0;border-radius:4px}
+.brand{display:flex;gap:10px;align-items:flex-start;margin-bottom:6px}
+.brand-mark{width:30px;height:30px;border-radius:8px;background:linear-gradient(135deg,var(--bad),var(--warn));flex:0 0 auto;display:grid;place-items:center;color:#fff;font-weight:700;font-size:13px;letter-spacing:-.5px}
+.brand-title{font-weight:650;font-size:14.5px;line-height:1.35;letter-spacing:-.01em}
+.brand-sub{color:var(--muted);font-size:11.6px;margin-top:2px;font-family:var(--mono)}
+.sidebar hr{border:0;border-top:1px solid var(--line);margin:16px 0}
+.toc{list-style:none;margin:0;padding:0}
+.toc a{display:block;padding:5px 9px;border-radius:6px;color:var(--ink-2);text-decoration:none;border-left:2px solid transparent;transition:background .12s,color .12s}
+.toc a:hover{background:#eaeef3;color:var(--ink)}
+.toc .lvl1 > a{font-weight:600;margin-top:9px;color:var(--ink)}
+.toc .lvl2 > a{padding-left:20px;font-size:12.9px;color:var(--muted)}
+.toc a.active{background:var(--accent-bg);color:var(--accent);border-left-color:var(--accent);font-weight:600}
+.toc .num{font-family:var(--mono);font-size:11.4px;color:var(--faint);margin-right:5px}
+.toc a.active .num{color:var(--accent)}
+.toc .cnt{float:right;font-family:var(--mono);font-size:10.6px;color:var(--faint);background:#eaeef3;border-radius:99px;padding:0 6px;margin-top:3px}
+.side-note{margin-top:22px;padding:11px 12px;background:#fff;border:1px solid var(--line);border-radius:var(--radius-sm);font-size:11.8px;color:var(--muted);line-height:1.6}
+.side-note b{color:var(--ink-2)}
+
+.main{padding:44px 56px 140px;max-width:1080px;min-width:0}
+.cover{margin-bottom:44px;padding-bottom:30px;border-bottom:1px solid var(--line)}
+.eyebrow{display:inline-flex;align-items:center;gap:7px;font-family:var(--mono);font-size:11.6px;letter-spacing:.06em;text-transform:uppercase;color:var(--bad);background:var(--bad-bg);padding:4px 9px;border-radius:99px;margin-bottom:16px}
+h1{font-size:33px;line-height:1.28;letter-spacing:-.022em;margin:0 0 14px;font-weight:700}
+.cover .lede{font-size:16.5px;color:var(--ink-2);line-height:1.72;margin:0 0 20px;max-width:76ch}
+
+.chapter{margin:0 0 64px;scroll-margin-top:96px}
+.chapter-head{display:flex;align-items:baseline;gap:14px;padding-bottom:12px;border-bottom:2px solid var(--ink);margin-bottom:24px}
+.chapter-no{font-family:var(--mono);font-size:12.5px;font-weight:700;color:#fff;background:var(--ink);padding:2px 8px;border-radius:5px;letter-spacing:.03em;flex:0 0 auto;transform:translateY(-3px)}
+h2{font-size:24px;line-height:1.3;letter-spacing:-.018em;margin:0;font-weight:700}
+.sec{margin:0 0 36px;scroll-margin-top:96px}
+h3{font-size:18px;line-height:1.42;margin:30px 0 12px;letter-spacing:-.01em;font-weight:650;display:flex;align-items:baseline;gap:9px}
+h3 .sn{font-family:var(--mono);font-size:12.4px;color:var(--accent);font-weight:700;flex:0 0 auto}
+h4{font-size:15.2px;margin:22px 0 8px;font-weight:650;color:var(--ink)}
+p{margin:0 0 13px;max-width:80ch}
+ul,ol{margin:0 0 14px;padding-left:22px;max-width:80ch}
+li{margin:5px 0}
+strong{font-weight:650;color:var(--ink)}
+a{color:var(--accent);text-decoration:none;border-bottom:1px solid #c3d4f8}
+a:hover{border-bottom-color:var(--accent)}
+code{font-family:var(--mono);font-size:.885em;background:var(--bg-soft);border:1px solid var(--line-2);padding:1px 5px;border-radius:4px;color:#243447;white-space:nowrap}
+.fp{font-family:var(--mono);font-size:.86em;color:var(--teal);background:var(--teal-bg);border:1px solid #c9e7e9;padding:1px 5px;border-radius:4px;white-space:nowrap}
+.fl{font-family:var(--mono);font-size:.84em;color:var(--violet);background:var(--violet-bg);border:1px solid #ddd3fb;padding:1px 5px;border-radius:4px;white-space:nowrap}
+
+/* ============ 提示框 ============ */
+.callout{display:grid;grid-template-columns:auto 1fr;gap:12px;padding:13px 16px;border-radius:var(--radius);margin:16px 0;border:1px solid;font-size:14.3px;line-height:1.68}
+.callout .ico{font-family:var(--mono);font-weight:700;font-size:11.6px;padding-top:2px;letter-spacing:.02em;white-space:nowrap}
+.callout p:last-child{margin-bottom:0}
+.callout .ttl{font-weight:650;display:block;margin-bottom:3px}
+.c-info{background:var(--accent-bg);border-color:#cfdcfb;color:#173a80}.c-info .ico{color:var(--accent)}
+.c-ok{background:var(--ok-bg);border-color:#c6e8d7;color:#0d4c33}.c-ok .ico{color:var(--ok)}
+.c-warn{background:var(--warn-bg);border-color:#f0dfb6;color:#5f3f00}.c-warn .ico{color:var(--warn)}
+.c-bad{background:var(--bad-bg);border-color:#f6cfce;color:#7d1a1f}.c-bad .ico{color:var(--bad)}
+.c-key{background:#fbfaff;border-color:#e0d9fb;color:#33235f}.c-key .ico{color:var(--violet)}
+
+/* ============ 表格 ============ */
+.tw{overflow-x:auto;margin:16px 0 20px;border:1px solid var(--line);border-radius:var(--radius);background:#fff}
+table{width:100%;border-collapse:collapse;font-size:13.4px;line-height:1.6}
+thead th{background:var(--bg-soft);text-align:left;padding:9px 12px;font-weight:650;color:var(--ink-2);border-bottom:1px solid var(--line);white-space:nowrap;font-size:12.5px;letter-spacing:.02em}
+tbody td{padding:9px 12px;border-bottom:1px solid var(--line-2);vertical-align:top}
+tbody tr:last-child td{border-bottom:0}
+tbody tr:hover{background:#fafbfc}
+td code,th code{font-size:.92em}
+tbody td code,tbody td .fp,tbody td .fl{white-space:normal;overflow-wrap:break-word}
+/* 密集参考表：字号略降；路径整段不折行，代码片段允许折行，避免撑破容器又不出现孤字 */
+.dense{font-size:12.7px}
+.dense thead th{font-size:11.9px;padding:8px 9px}
+.dense tbody td{padding:8px 9px}
+.dense tbody td .fp,.dense tbody td .fl{white-space:nowrap;overflow-wrap:normal}
+.dense tbody td code{overflow-wrap:anywhere}
+.t-num{font-family:var(--mono);font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+.t-c{text-align:center}
+.tight td,.tight th{padding:7px 10px}
+caption{caption-side:top;text-align:left;padding:0 0 8px;font-size:12.4px;color:var(--muted)}
+
+/* ============ 代码块 ============ */
+.code{margin:14px 0 18px;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--bg-code)}
+.code-bar{display:flex;align-items:center;gap:10px;padding:7px 11px;background:#f0f3f7;border-bottom:1px solid var(--line);font-size:11.9px;font-family:var(--mono)}
+.code-bar .dot{width:8px;height:8px;border-radius:50%;background:#d5dbe3;flex:0 0 auto}
+.code-bar .path{color:var(--teal);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.code-bar .rng{color:var(--faint);flex:0 0 auto}
+.code-bar .spacer{flex:1}
+.copy{border:1px solid var(--line);background:#fff;color:var(--muted);border-radius:5px;font-family:var(--mono);font-size:11px;padding:2px 8px;cursor:pointer;transition:all .12s}
+.copy:hover{color:var(--accent);border-color:#b9cdf7;background:var(--accent-bg)}
+.copy.done{color:var(--ok);border-color:#b6e0cb;background:var(--ok-bg)}
+.code pre{margin:0;padding:12px 0 13px;overflow-x:auto;font-family:var(--mono);font-size:12.4px;line-height:1.68;color:#1f2733;tab-size:4}
+.code pre code{background:none;border:0;padding:0;white-space:pre;font-size:inherit;color:inherit}
+.cl{display:block;padding:0 14px 0 46px;position:relative;min-height:1.68em}
+.cl::before{content:attr(data-n);position:absolute;left:0;width:35px;text-align:right;color:#b4bcc7;font-size:11.2px;user-select:none}
+
+/* ============ 筛选栏 ============ */
+.filterbar{position:sticky;top:0;z-index:120;background:rgba(255,255,255,.94);backdrop-filter:blur(10px);border-bottom:1px solid var(--line);padding:9px 0 10px;margin:0 0 22px}
+.frow{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.frow + .frow{margin-top:7px}
+.flabel{font-family:var(--mono);font-size:10.8px;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);margin-right:2px;min-width:44px}
+.fchip{border:1px solid var(--line);background:#fff;border-radius:99px;padding:3px 11px;font-size:12.4px;cursor:pointer;font-family:var(--sans);color:var(--ink-2);transition:all .12s;line-height:1.6}
+.fchip:hover{border-color:#c3cbd5;background:#fafbfc}
+.fchip .n{font-family:var(--mono);font-size:10.6px;color:var(--faint);margin-left:5px}
+.fchip.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+.fchip.on .n{color:rgba(255,255,255,.66)}
+.fchip.on[data-tier="A"]{background:var(--ok);border-color:var(--ok)}
+.fchip.on[data-tier="B"]{background:var(--accent);border-color:var(--accent)}
+.fchip.on[data-tier="C"]{background:var(--bad);border-color:var(--bad)}
+.fchip.on[data-tier="D"]{background:#6b7480;border-color:#6b7480}
+.fsearch{border:1px solid var(--line);border-radius:6px;padding:4px 10px;font-size:12.6px;width:170px;font-family:var(--sans);color:var(--ink)}
+.fsearch:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:transparent}
+.fcount{margin-left:auto;font-family:var(--mono);font-size:11.6px;color:var(--muted);white-space:nowrap}
+.fcount b{color:var(--ink);font-size:13px}
+
+/* ============ 审计卡片 ============ */
+.card{border:1px solid var(--line);border-left:3px solid #8b95a3;border-radius:var(--radius);margin:11px 0;background:#fff;overflow:hidden;box-shadow:0 1px 2px rgba(20,24,29,.03)}
+.card[data-tier="A"]{border-left-color:var(--ok)}
+.card[data-tier="B"]{border-left-color:var(--accent)}
+.card[data-tier="C"]{border-left-color:var(--bad)}
+.card[data-tier="D"]{border-left-color:#8b95a3}
+.card.hide{display:none}
+.card-hd{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto 14px;gap:10px;align-items:center;padding:10px 14px;cursor:pointer;user-select:none;transition:background .1s}
+.card-hd:hover{background:#fafbfd}
+.card-id{font-family:var(--mono);font-size:11.2px;font-weight:700;padding:1px 7px;border-radius:4px;white-space:nowrap}
+.card[data-tier="A"] .card-id{background:var(--ok-bg);color:var(--ok)}
+.card[data-tier="B"] .card-id{background:var(--accent-bg);color:var(--accent)}
+.card[data-tier="C"] .card-id{background:var(--bad-bg);color:var(--bad)}
+.card[data-tier="D"] .card-id{background:#f0f2f5;color:#46505c}
+.card-t{font-size:14.4px;font-weight:650;letter-spacing:-.005em;line-height:1.5;overflow:hidden;text-overflow:ellipsis}
+.card-size{font-family:var(--mono);font-size:11.2px;color:var(--muted);background:var(--bg-soft);border:1px solid var(--line-2);border-radius:4px;padding:1px 6px;white-space:nowrap}
+.card-chev{color:var(--faint);font-size:10px;transition:transform .15s}
+.card.open .card-chev{transform:rotate(90deg);color:var(--accent)}
+.card-bd{padding:0 14px 13px 14px;border-top:1px solid var(--line-2)}
+.card-bd .loc{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:10px 0 9px;font-size:12.4px}
+.dl{display:grid;grid-template-columns:66px minmax(0,1fr);gap:4px 12px;margin:0;font-size:13.7px;line-height:1.68}
+.dl dt{font-family:var(--mono);font-size:10.8px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;padding-top:3px;font-weight:600}
+.dl dd{margin:0;color:var(--ink-2)}
+.dl dd ol,.dl dd ul{margin:2px 0 0;padding-left:19px}
+.dl dd li{margin:3px 0}
+.dl dd p{margin:0 0 6px;max-width:none}
+.dl dd p:last-child{margin-bottom:0}
+.dl dd code{white-space:normal;overflow-wrap:break-word}
+.more{margin-top:9px;padding-top:9px;border-top:1px dashed var(--line)}
+.card:not(.open) .more{display:none}
+.pick{display:inline-flex;align-items:center;gap:5px;font-size:11.6px;color:var(--muted);cursor:pointer;white-space:nowrap;padding:2px 4px;border-radius:4px}
+.pick:hover{background:var(--bg-soft)}
+.pick input{appearance:none;width:14px;height:14px;border:1.5px solid #c3cbd5;border-radius:3px;cursor:pointer;position:relative;background:#fff;flex:0 0 auto;margin:0}
+.pick input:checked{background:var(--ok);border-color:var(--ok)}
+.pick input:checked::after{content:"";position:absolute;left:3.6px;top:0.8px;width:4px;height:8px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}
+
+/* ============ 指标卡 ============ */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(126px,1fr));gap:11px;margin:20px 0 24px}
+.stat{border:1px solid var(--line);border-radius:var(--radius-sm);padding:11px 13px;background:#fff}
+.stat .sv{font-family:var(--mono);font-size:22px;font-weight:700;letter-spacing:-.03em;line-height:1.15;color:var(--ink)}
+.stat .sl{font-size:11.5px;color:var(--muted);margin-top:3px;line-height:1.45}
+.stat.ok .sv{color:var(--ok)}.stat.acc .sv{color:var(--accent)}.stat.bad .sv{color:var(--bad)}.stat.wrn .sv{color:var(--warn)}
+
+/* ============ 徽标 ============ */
+.bdg{display:inline-block;font-family:var(--mono);font-size:11px;font-weight:650;padding:1px 7px;border-radius:99px;border:1px solid;white-space:nowrap;line-height:1.55}
+.b-a{background:var(--ok-bg);border-color:#c6e8d7;color:#0d4c33}
+.b-b{background:var(--accent-bg);border-color:#cfdcfb;color:#173a80}
+.b-c{background:var(--bad-bg);border-color:#f6cfce;color:#7d1a1f}
+.b-d{background:#f0f2f5;border-color:#dde2e8;color:#46505c}
+.b-p0{background:var(--bad);color:#fff;border-color:var(--bad)}
+.b-p1{background:var(--warn);color:#fff;border-color:var(--warn)}
+.b-p2{background:#6b7480;color:#fff;border-color:#6b7480}
+.b-ok{background:var(--ok-bg);border-color:#c6e8d7;color:#0d4c33}
+.b-no{background:var(--bad-bg);border-color:#f6cfce;color:#7d1a1f}
+
+/* ============ 进度 / 清单 ============ */
+.cl-wrap{border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:#fff;box-shadow:var(--shadow)}
+.cl-top{padding:13px 18px;background:linear-gradient(180deg,#fbfcfe,#f5f8fb);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.cl-prog{flex:1;min-width:180px}
+.cl-prog-track{height:8px;background:#e6eaf0;border-radius:99px;overflow:hidden}
+.cl-prog-bar{height:100%;width:0;background:linear-gradient(90deg,var(--accent),var(--ok));border-radius:99px;transition:width .25s ease}
+.cl-prog-txt{font-family:var(--mono);font-size:12px;color:var(--muted);margin-top:5px}
+.cl-prog-txt b{color:var(--ink);font-size:14px}
+.cl-reset{border:1px solid var(--line);background:#fff;border-radius:6px;padding:5px 12px;font-size:12.2px;color:var(--muted);cursor:pointer;font-family:var(--sans)}
+.cl-reset:hover{color:var(--bad);border-color:#f6cfce;background:var(--bad-bg)}
+.ck{display:grid;grid-template-columns:20px minmax(0,1fr);gap:10px;padding:7px 9px;border-radius:6px;cursor:pointer;transition:background .1s;align-items:start}
+.ck:hover{background:var(--bg-soft)}
+.ck input{appearance:none;width:17px;height:17px;border:1.5px solid #c3cbd5;border-radius:4px;margin:3px 0 0;cursor:pointer;position:relative;transition:all .12s;background:#fff;flex:0 0 auto}
+.ck input:checked{background:var(--ok);border-color:var(--ok)}
+.ck input:checked::after{content:"";position:absolute;left:4.6px;top:1.2px;width:4.5px;height:9px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}
+.ck input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.ck-txt{font-size:13.7px;line-height:1.62;color:var(--ink-2)}
+.ck input:checked + .ck-txt{color:var(--faint);text-decoration:line-through;text-decoration-color:#c3cbd5}
+.ck-txt .ref{font-family:var(--mono);font-size:11.2px;color:var(--accent);margin-left:4px;border-bottom:1px dotted #b9cdf7;text-decoration:none}
+.cl-group{padding:6px 18px 14px}
+.cl-group h4{display:flex;align-items:center;gap:9px;margin:15px 0 6px;font-size:13.5px;color:var(--ink)}
+.cl-group h4 .gdot{width:7px;height:7px;border-radius:50%;background:var(--accent);flex:0 0 auto}
+.cl-group h4 .gcount{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--faint);font-weight:400}
+
+/* ============ 阶段路线图 ============ */
+.phase{display:grid;grid-template-columns:78px minmax(0,1fr);gap:14px;border:1px solid var(--line);border-radius:var(--radius);margin:13px 0;background:#fff;overflow:hidden}
+.phase-tag{background:var(--ink);color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:14px 6px;gap:3px}
+.phase-tag .p-n{font-family:var(--mono);font-size:10.4px;letter-spacing:.08em;opacity:.66}
+.phase-tag .p-t{font-size:19px;font-weight:700;font-family:var(--mono);line-height:1}
+.phase-bd{padding:13px 16px}
+.phase-bd h4{margin:0 0 6px;font-size:14.6px}
+.phase-bd .meta{font-family:var(--mono);font-size:11.4px;color:var(--muted);margin-bottom:8px}
+.phase-bd ul{margin:0 0 8px;padding-left:19px;font-size:13.4px}
+.phase-bd li{margin:3px 0}
+.phase-bd .cmd{font-family:var(--mono);font-size:11.6px;background:var(--bg-code);border:1px solid var(--line);border-radius:5px;padding:5px 9px;color:var(--ink-2);overflow-x:auto;white-space:pre}
+
+/* ============ 矩阵 ============ */
+.matrix{width:100%;border-collapse:separate;border-spacing:0;font-size:12.8px}
+.matrix th,.matrix td{border:1px solid var(--line);padding:8px 10px;text-align:center}
+.matrix th{background:var(--bg-soft);font-weight:650;color:var(--ink-2)}
+.matrix td.lbl{text-align:left;font-weight:600;background:#fbfcfd}
+.mx-hi{background:var(--bad-bg);color:#7d1a1f;font-weight:650}
+.mx-md{background:var(--warn-bg);color:#5f3f00}
+.mx-lo{background:var(--ok-bg);color:#0d4c33}
+.mx-na{background:#f7f8fa;color:var(--faint)}
+
+/* ============ 杂项 ============ */
+.hr{height:1px;background:var(--line);border:0;margin:30px 0}
+.small{font-size:12.6px;color:var(--muted)}
+.foot{border-top:1px solid var(--line);padding-top:22px;margin-top:56px;font-size:12.6px;color:var(--muted);line-height:1.78}
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media (max-width:900px){.two-col{grid-template-columns:1fr}}
+.hide{display:none!important}
+
+/* ============ 响应式 ============ */
+@media (max-width:1120px){
+  .layout{grid-template-columns:minmax(0,1fr)}
+  .sidebar{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line);padding:20px 18px;min-width:0}
+  .toc{display:none}
+  .main{padding:26px 20px 100px;max-width:none}
+  h1{font-size:26px}
+  .card-hd{grid-template-columns:auto minmax(0,1fr) auto 14px}
+  .card-size{display:none}
+  .dl{grid-template-columns:1fr;gap:2px}
+  .dl dt{padding-top:6px}
+  .filterbar{position:static}
+  .phase{grid-template-columns:1fr}
+  .phase-tag{flex-direction:row;justify-content:flex-start;padding:8px 14px;gap:8px}
+}
+
+/* ============ 打印 ============ */
+@media print{
+  #readbar,.sidebar,.filterbar,.copy,.cl-reset,.pick,.card-chev{display:none!important}
+  .layout{display:block}
+  .main{padding:0;max-width:none}
+  .more{display:block!important}
+  .card,.tw,.code,.cl-wrap,.phase{break-inside:avoid;box-shadow:none}
+  .chapter{break-before:page}
+  body{font-size:10.4pt}
+  .code pre{font-size:8.4pt}
+  a{border-bottom:0;color:var(--ink)}
+}
+</style>
+</head>
+<body>
+<div id="readbar"></div>
+<div class="layout">
+
+<aside class="sidebar">
+  <div class="brand">
+    <div class="brand-mark">AUD</div>
+    <div>
+      <div class="brand-title">代码审计<br>与清理报告</div>
+      <div class="brand-sub">se_rag · 2026-10-22</div>
+    </div>
+  </div>
+  <hr>
+  <ul class="toc" id="toc">
+    <li class="lvl1"><a href="#c0"><span class="num">00</span>执行摘要</a></li>
+    <li class="lvl1"><a href="#c1"><span class="num">01</span>审计方法与判定标准</a></li>
+    <li class="lvl1"><a href="#c2"><span class="num">02</span>A 档 · 可直接删除</a><span class="cnt">11</span></li>
+    <li class="lvl1"><a href="#c3"><span class="num">03</span>B 档 · 需确认后移除</a><span class="cnt">6</span></li>
+    <li class="lvl1"><a href="#c4"><span class="num">04</span>C 档 · 安全与健壮性</a><span class="cnt">11</span></li>
+    <li class="lvl2"><a href="#s4-1">4.1 P0 安全缺陷</a></li>
+    <li class="lvl2"><a href="#s4-2">4.2 P1 稳定性缺陷</a></li>
+    <li class="lvl1"><a href="#c5"><span class="num">05</span>C 档 · 规范与可维护性</a><span class="cnt">12</span></li>
+    <li class="lvl1"><a href="#c6"><span class="num">06</span>D 档 · 低价值特性</a><span class="cnt">6</span></li>
+    <li class="lvl1"><a href="#c7"><span class="num">07</span>依赖治理</a></li>
+    <li class="lvl1"><a href="#c8"><span class="num">08</span>文档治理</a></li>
+    <li class="lvl1"><a href="#c9"><span class="num">09</span>分批执行路线图</a></li>
+    <li class="lvl1"><a href="#c10"><span class="num">10</span>风险矩阵与自查</a></li>
+  </ul>
+  <div class="side-note">
+    <b>如何使用</b><br>
+    顶部筛选栏可按置信度与维度过滤；<br>
+    卡片默认折叠，点击标题展开；<br>
+    勾选「纳入清理」可汇总进度。
+  </div>
+</aside>
+
+<main class="main">
+
+<header class="cover">
+  <div class="eyebrow">CODE AUDIT · 46 FINDINGS</div>
+  <h1>se_rag 代码审计与清理报告</h1>
+  <p class="lede">
+    对 <code>app/</code> 161 个 Python 文件（12 593 行）、69 个测试文件（7 246 行）、4 个前端 JS（1 566 行）与全部配置项做了逐符号引用核查。
+    报告按<strong>删除置信度</strong>分为四档：A 可安全删除、B 需确认后移除、C 应重构（在用但有缺陷）、D 低价值特性。
+    每条均给出<code>文件:行号</code>、证据、影响面、移除步骤与验证命令。
+  </p>
+  <div class="stats">
+    <div class="stat ok"><div class="sv">267</div><div class="sl">行可直接删除<br>（11 个符号，零引用）</div></div>
+    <div class="stat acc"><div class="sv">2 143</div><div class="sl">行可移出生产包<br>（rag_eval 整包）</div></div>
+    <div class="stat bad"><div class="sv">3</div><div class="sl">P0 安全缺陷<br>（令牌/鉴权/存储）</div></div>
+    <div class="stat wrn"><div class="sv">8</div><div class="sl">P1 稳定性缺陷<br>（超时/阻塞/静默）</div></div>
+    <div class="stat"><div class="sv">12</div><div class="sl">P2 规范问题<br>（可维护性）</div></div>
+    <div class="stat"><div class="sv">6</div><div class="sl">低价值特性组<br>（建议收包或下线）</div></div>
+  </div>
+</header>
+
+<!-- ============================================================ §0 ============================================================ -->
+<section class="chapter" id="c0">
+  <div class="chapter-head"><span class="chapter-no">00</span><h2>执行摘要</h2></div>
+
+  <div class="callout c-key">
+    <div class="ico">结论</div>
+    <div>
+      <span class="ttl">死代码只占 2%，真正的成本在架构冗余与文档漂移；最该先修的却是三个「安全默认值」。</span>
+      <p>
+        逐符号核查的结论有些反直觉：这套代码的<strong>冗余度并不高</strong>——无 TODO、无注释掉的代码块、无未使用 import、
+        无裸 <code>except:</code>。可确认删除的死代码只有 267 行，占 <code>app/</code> 的 2.1%。
+        但有三类成本被低估了：① <code>rag_eval</code> 2 143 行离线评测工具混在生产包内，生产链路零引用；
+        ② 392 KB 文档与代码严重脱节（10 处可证漂移）；③ 三个安全默认值把已有的防护措施架空。
+      </p>
+    </div>
+  </div>
+
+  <h3><span class="sn">0.1</span>三条核心判断</h3>
+  <div class="tw">
+    <table>
+      <thead><tr><th style="width:44px" class="t-c">#</th><th style="width:210px">判断</th><th>依据与影响</th></tr></thead>
+      <tbody>
+        <tr>
+          <td class="t-c"><strong>1</strong></td>
+          <td><strong>冗余不在「死代码」，在「错位的代码」</strong></td>
+          <td>真正零引用的只有 267 行。但 <code>app/rag_eval/</code> 2 143 行（占 <code>app/</code> 的 17%）是纯离线工具，生产链路 <code>grep</code> 只命中 2 处 docstring。它被 <code>app/</code> 的包边界保护着，却从不参与运行时——这是<strong>架构层面的错位</strong>，不是死代码。</td>
+        </tr>
+        <tr>
+          <td class="t-c"><strong>2</strong></td>
+          <td><strong>最严重的问题不是冗余，是三个安全默认值</strong></td>
+          <td>硬编码管理员令牌（<span class="fp">settings.py:296</span>）让 fail-closed 形同虚设；会话鉴权的两条静默放行（<span class="fp">session_access.py:35</span>）；MinIO 桶匿名可读（<span class="fp">minio_gateway.py:22-40</span>）。三者都是「代码写好了防护，默认值把防护关掉」。</td>
+        </tr>
+        <tr>
+          <td class="t-c"><strong>3</strong></td>
+          <td><strong>有一处观测层的静默失真，此前未被记录</strong></td>
+          <td><span class="fp">param_registry.py:57</span> 的 <code>cached | dict(_FALLBACKS)</code> 合并顺序反了——dict 合并右侧优先，导致 <code>get_all_params()</code> 永远返回默认值 60/5/6。<code>k_metrics.params_snapshot</code> 因此失真，参数自调的回退分支只能「回退到默认值」。详见 <a href="#C-P1-8">P1-8</a>。</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3><span class="sn">0.2</span>四档分布</h3>
+  <div class="tw">
+    <table>
+      <thead><tr><th style="width:70px">档位</th><th style="width:150px">含义</th><th class="t-num" style="width:70px">条目</th><th class="t-num" style="width:90px">规模</th><th>处理建议</th></tr></thead>
+      <tbody>
+        <tr><td><span class="bdg b-a">A</span></td><td>确认可安全删除</td><td class="t-num">11</td><td class="t-num">267 行</td><td>零引用、零反射、零测试依赖。可一次性删除，跑单测即可验证。</td></tr>
+        <tr><td><span class="bdg b-b">B</span></td><td>需确认后移除</td><td class="t-num">6</td><td class="t-num">2 186 行</td><td>可能是运维入口或对外 API。建议先确认使用方，再决定「删 / 移出包 / 保留但加开关」。</td></tr>
+        <tr><td><span class="bdg b-c">C</span></td><td>应重构，不可删</td><td class="t-num">23</td><td class="t-num">—</td><td>在用且承载业务，但存在安全、稳定性或规范问题。按 P0/P1/P2 排序处理。</td></tr>
+        <tr><td><span class="bdg b-d">D</span></td><td>低价值特性</td><td class="t-num">6</td><td class="t-num">—</td><td>业务价值低于维护成本。建议收进独立包加单开关，或直接下线。</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3><span class="sn">0.3</span>按角色的建议阅读路径</h3>
+  <div class="tw">
+    <table class="tight">
+      <thead><tr><th style="width:130px">角色</th><th style="width:220px">先看</th><th>关注点</th></tr></thead>
+      <tbody>
+        <tr><td><strong>安全负责人</strong></td><td><a href="#c4">§4.1 P0 三项</a> → <a href="#C-P2-1">P2-1 CORS</a> → <a href="#C-P2-12">P2-12 路径穿越</a></td><td>令牌轮换、鉴权 fail-open、桶策略、上传面。P0-1 与 P0-3 建议本周内处理。</td></tr>
+        <tr><td><strong>后端负责人</strong></td><td><a href="#c2">§2 A 档</a> → <a href="#c4">§4.2 P1</a> → <a href="#c9">§9 路线图</a></td><td>先做零风险清理建立信心，再动超时与线程池。P1-1/P1-2 是线上可用性问题。</td></tr>
+        <tr><td><strong>技术负责人</strong></td><td><a href="#c3">§3 B1 rag_eval</a> → <a href="#c6">§6 低价值特性</a> → <a href="#c8">§8 文档治理</a></td><td>包边界、特性取舍、文档策略。B1 与 D3 需要产品决策。</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout c-warn">
+    <div class="ico">注意</div>
+    <div>
+      <span class="ttl">本报告只做审计，未修改任何项目代码。</span>
+      <p>
+        所有删除与重构建议都写成「步骤 + 验证命令」，由你决定执行时机。
+        每条结论都可用 §1.4 给出的命令复验；若发现某条判断有误，按「证据等级」倒查即可定位分歧点。
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ §1 ============================================================ -->
+<section class="chapter" id="c1">
+  <div class="chapter-head"><span class="chapter-no">01</span><h2>审计方法与判定标准</h2></div>
+
+  <section class="sec">
+    <h3><span class="sn">1.1</span>为什么不能只靠 grep</h3>
+    <p>
+      朴素的 <code>grep 函数名</code> 会给出错误答案，两个方向都会错。本报告用 AST 语义引用计数规避了这两类错误：
+    </p>
+    <div class="two-col">
+      <div class="callout c-bad" style="margin:0">
+        <div class="ico">假阴性</div>
+        <div>
+          <span class="ttl">grep 有命中，但其实没人调用</span>
+          <p><code>build_import_chunks</code> 全仓出现 6 次，其中 2 次是 <code>def</code>，<strong>4 次全在 docstring 与注释里</strong>（<span class="fp">dataset.py:10,11,192</span>、<span class="fp">split_dataset.py:3</span>）。grep 会判「在用」，AST 语义引用为 0。</p>
+        </div>
+      </div>
+      <div class="callout c-warn" style="margin:0">
+        <div class="ico">假阳性</div>
+        <div>
+          <span class="ttl">语义引用为 0，但其实在用</span>
+          <p>路由 handler 靠 <code>@router.get</code> 装饰器注册、异常 handler 靠 <code>@app.exception_handler</code>、中间件靠 <code>@app.middleware</code>、ragas 的 <code>aembed_text</code> 靠框架回调。这些函数体内无人显式调用。</p>
+        </div>
+      </div>
+    </div>
+
+    <h4>防误删反例清单（6 类，必须排除）</h4>
+    <div class="tw">
+      <table class="tight">
+        <thead><tr><th style="width:150px">模式</th><th style="width:250px">例子</th><th>注册方式</th></tr></thead>
+        <tbody>
+          <tr><td>路由 handler</td><td><code>evolution.py</code> 的 10 个函数</td><td><code>@router.get/post</code> + <code>include_router</code></td></tr>
+          <tr><td>异常 handler</td><td><span class="fp">api/errors.py:44,48,53,57</span></td><td><code>@app.exception_handler</code></td></tr>
+          <tr><td>中间件</td><td><span class="fp">session_access.py:20</span> <code>owner_cookie</code></td><td><code>@app.middleware("http")</code></td></tr>
+          <tr><td>框架抽象接口实现</td><td><span class="fp">ragas_adapter.py:54</span> <code>aembed_text</code></td><td>ragas 回调</td></tr>
+          <tr><td>Pydantic 模型字段</td><td><code>FeedbackEvent.cited_chunk_ids</code></td><td>反序列化时隐式使用</td></tr>
+          <tr><td>反射 / getattr</td><td><span class="fp">test_config_settings.py:33</span></td><td>仅校验非 None，不构成真实依赖</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h3><span class="sn">1.2</span>四档置信度定义</h3>
+    <div class="tw">
+      <table>
+        <thead><tr><th style="width:64px">档位</th><th style="width:200px">判定规则</th><th style="width:150px">最低证据要求</th><th>处理前提</th></tr></thead>
+        <tbody>
+          <tr><td><span class="bdg b-a">A</span></td><td>AST 语义引用 = 0，且不在反例清单内</td><td>语义引用计数 + grep 全量核对</td><td>无。可直接删</td></tr>
+          <tr><td><span class="bdg b-b">B</span></td><td>生产代码引用 = 0，但存在 CLI / 运维 / 对外 API 可能</td><td>需区分「生产 import」与「脚本调用」</td><td>需确认使用方</td></tr>
+          <tr><td><span class="bdg b-c">C</span></td><td>有真实调用，但实现违反安全 / 健壮性 / 规范</td><td>需给出后果推演，不只是「不规范」</td><td>需设计改动方案</td></tr>
+          <tr><td><span class="bdg b-d">D</span></td><td>在用，但价值 / 成本比低</td><td>需量化成本（集合数、字段数、层数）</td><td>需产品决策</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h3><span class="sn">1.3</span>证据等级</h3>
+    <p>报告中每条结论都标注了证据类型。等级从高到低：</p>
+    <div class="tw">
+      <table class="tight">
+        <thead><tr><th style="width:150px">等级</th><th style="width:230px">含义</th><th>可信度</th></tr></thead>
+        <tbody>
+          <tr><td><strong>E1 · 语义引用 0</strong></td><td>AST 解析后全仓无 Name/Attribute 引用</td><td>最高。可直接删</td></tr>
+          <tr><td><strong>E2 · 仅命中定义处</strong></td><td>grep 只有 1 处，即定义本身</td><td>高。可删</td></tr>
+          <tr><td><strong>E3 · 仅命中注释</strong></td><td>grep 多处命中，但都在 docstring / 注释</td><td>高，但需逐条核对注释内容</td></tr>
+          <tr><td><strong>E4 · 运行时证据</strong></td><td>配置文件实际值、集合索引、图节点注册</td><td>用于判断「是否真的生效」</td></tr>
+          <tr><td><strong>E5 · 推断</strong></td><td>基于代码结构的合理推断</td><td>最低。报告中已标注「需确认」</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h3><span class="sn">1.4</span>复验命令</h3>
+    <p>任一条结论都可用下面三条命令复验。建议先跑第 1 条，它一次性列出所有零引用符号。</p>
+    <figure class="code">
+      <div class="code-bar"><span class="dot"></span><span class="path">复验脚本（在项目根目录执行）</span><span class="rng">三条命令</span><span class="spacer"></span><button class="copy">复制</button></div>
+      <pre data-start="1"><code># 1) 符号级：列出全仓语义引用为 0 的公开函数（需 python 3.11+）
+python - &lt;&lt;'PY'
+import ast, pathlib, collections
+root = pathlib.Path("app")
+defs, refs = {}, collections.Counter()
+for p in root.rglob("*.py"):
+    t = ast.parse(p.read_text(encoding="utf-8"))
+    for n in ast.walk(t):
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            defs.setdefault(n.name, f"{p}:{n.lineno}")
+        elif isinstance(n, ast.Name):
+            refs[n.id] += 1
+        elif isinstance(n, ast.Attribute):
+            refs[n.attr] += 1
+for name, loc in sorted(defs.items()):
+    if refs[name] == 0 and not name.startswith("_"):
+        print(f"{refs[name]:3d}  {name:34s} {loc}")
+PY
+
+# 2) 文本级：确认某符号只出现在注释里
+grep -rn "build_import_chunks" app/ tests/ --include=*.py | grep -v __pycache__
+
+# 3) 配置级：确认某配置项无读取点（应只命中 settings.py 定义处）
+grep -rn "groundedness_min\|gray_enabled" app/ tests/ --include=*.py | grep -v __pycache__</code></pre>
+    </figure>
+    <div class="callout c-info">
+      <div class="ico">提示</div>
+      <div>
+        第 1 条脚本会把路由 handler、异常 handler 也列出来（它们体内无显式调用）。请对照 §1.1 的反例清单排除，
+        不要直接照单删除。
+      </div>
+    </div>
+  </section>
+</section>
+
+<div class="audit-scope">
+
+<div class="filterbar" id="filterbar">
+  <div class="frow">
+    <span class="flabel">置信度</span>
+    <button class="fchip on" data-ftier="all">全部<span class="n">46</span></button>
+    <button class="fchip" data-ftier="A">A 可删<span class="n">11</span></button>
+    <button class="fchip" data-ftier="B">B 需确认<span class="n">6</span></button>
+    <button class="fchip" data-ftier="C">C 应重构<span class="n">23</span></button>
+    <button class="fchip" data-ftier="D">D 低价值<span class="n">6</span></button>
+    <span class="fcount"><b id="fVisible">46</b> 项显示</span>
+  </div>
+  <div class="frow">
+    <span class="flabel">维度</span>
+    <button class="fchip on" data-fdim="all">全部</button>
+    <button class="fchip" data-fdim="dead">死代码</button>
+    <button class="fchip" data-fdim="sec">安全</button>
+    <button class="fchip" data-fdim="robust">健壮性</button>
+    <button class="fchip" data-fdim="norm">规范</button>
+    <button class="fchip" data-fdim="value">低价值</button>
+    <button class="fchip" data-fdim="dep">依赖/文档</button>
+    <input class="fsearch" id="fSearch" type="search" placeholder="搜索 ID / 标题 / 路径…">
+  </div>
+</div>
+
+<!-- ============================================================ §2 ============================================================ -->
+<section class="chapter" id="c2">
+  <div class="chapter-head"><span class="chapter-no">02</span><h2>A 档 · 确认可安全删除</h2></div>
+
+  <p class="lede" style="font-size:15px">
+    11 个符号、共 <strong>267 行</strong>。判定标准是 AST 语义引用为 0 且不在反例清单内。
+    全部为「重构后遗留」或「被新实现取代」，删除后不影响任何运行时路径。
+  </p>
+
+  <div class="callout c-ok">
+    <div class="ico">前置</div>
+    <div>
+      <span class="ttl">删除前只需确认一件事：没有外部脚本 import 它们。</span>
+      <p>
+        这 11 个符号均位于 <code>app/</code> 包内，不在 <code>__init__.py</code> 的 <code>__all__</code> 中导出，
+        也无 <code>getattr</code> 反射访问。跑一遍 <code>pytest tests/unit -q</code> 即可验证删除无副作用。
+      </p>
+    </div>
+  </div>
+
+  <article class="card" data-tier="A" data-dim="dead" data-id="A1" id="A1">
+    <div class="card-hd">
+      <span class="card-id">A1</span>
+      <span class="card-t">build_import_chunks — 旧版手写切片数据集生成器</span>
+      <span class="card-size">110 行</span>
+      <label class="pick"><input type="checkbox" data-pick="A1"><span>纳入</span></label>
+      <span class="card-chev">▶</span>
+    </div>
+    <div class="card-bd">
+      <div class="loc"><span class="fp">app/rag_eval/dataset.py</span><span class="fl">:28-137</span><span class="bdg b-a">E3 仅命中注释</span></div>
+      <dl class="dl">
+        <dt>证据</dt>
+        <dd>
+          全仓共 6 次命中：2 次 <code>def</code>，<strong>4 次全在 docstring / 注释</strong>——<span class="fp">dataset.py:10</span>（模块说明「先看 build_import_chunks()」）、<span class="fp">dataset.py:28</span>（函数 docstring）、<span class="fp">dataset.py:192</span>（注释）、<span class="fp">split_dataset.py:3</span>（「历史做法（dataset.build_import_chunks）直接手写 8 条切片」）。AST 语义引用 <strong>0</strong>。
+        </dd>
+        <dt>理由</dt>
+        <dd>
+          它已被 <code>split_dataset.py</code> 取代。<span class="fp">split_dataset.py:3</span> 的注释直接说明原因：手写 8 条切片送进导入链路时「切分器完全不在评估范围内」，无法反映真实切分质量。新实现走真实切分链路，旧函数因此成为纯历史遗留。
+        </dd>
+      </dl>
+      <div class="more">
+        <dl class="dl">
+          <dt>影响面</dt>
+          <dd>仅 <code>app/rag_eval/</code> 内部。无测试引用，无 CLI 入口调用。删除后 <code>dataset.py</code> 剩余 <code>build_web_search_docs</code> / <code>write_batch_eval_cases</code> / <code>load_batch_eval_cases</code> 三个函数，模块仍完整。</dd>
+          <dt>步骤</dt>
+          <dd><ol>
+            <li>删除 <code>dataset.py:28-137</code> 整个函数（含 docstring）。</li>
+            <li>同步删除 <span class="fp">dataset.py:10</span> 模块 docstring 中指向它的第 1 条说明。</li>
+            <li>检查 <code>dataset.py</code> 顶部 import 是否因此变成未使用（<code>copy</code> 等），一并清理。</li>
+          </ol></dd>
+          <dt>验证</dt>
+          <dd><code>pytest tests/unit/test_full_flow_eval.py tests/unit/test_split_dataset.py -q</code> 应全绿。</dd>
+        </dl>
+      </div>
+    </div>
+  </article>
+
+  <article class="card" data-tier="A" data-dim="dead" data-id="A2" id="A2">
+    <div class="card-hd">
+      <span class="card-id">A2</span>
+      <span class="card-t">build_batch_eval_cases — 旧版批量评测用例构造器</span>
+      <span class="card-size">100 行</span>
+      <label class="pick"><input type="checkbox" data-pick="A2"><span>纳入</span></label>
+      <span class="card-chev">▶</span>
+    </div>
+    <div class="card-bd">
+      <div class="loc"><span class="fp">app/rag_eval/dataset.py</span><span class="fl">:163-262</span><span class="bdg b-a">E3 仅命中注释</span></div>
+      <dl class="dl">
+        <dt>证据</dt>
+        <dd>全仓 2 次命中：<span class="fp">dataset.py:163</span> 定义、<span class="fp">dataset.py:11</span> 模块 docstring。AST 语义引用 <strong>0</strong>。与 A1 同一模块，同属旧数据集构造路径。</dd>
+        <dt>理由</dt>
+        <dd>与 A1 配套：A1 造切片、A2 造问题。两者构成旧的「手写数据集」方案，已被 <code>split_dataset.py</code>（真实切分）+ <code>artifacts/*.json</code>（落盘数据集）取代。<strong>建议与 A1 在同一次提交中删除</strong>，避免留下半套逻辑。</dd>
+      </dl>
+      <div class="more">
+        <dl class="dl">
+          <dt>影响面</dt>
+          <dd>无。注意 <code>write_batch_eval_cases</code>（<span class="fl">:263</span>）与 <code>load_batch_eval_cases</code>（<span class="fl">:279</span>）<strong>不要一起删</strong>——它们负责 JSON 落盘与读取，仍被 CLI 使用。</dd>
+          <dt>步骤</dt>
+          <dd><ol>
+            <li>删除 <code>dataset.py:163-262</code>。</li>
+            <li>删除 <span class="fp">dataset.py:11</span> 模块 docstring 第 2 条说明。</li>
+            <li>保留 <code>write_batch_eval_cases</code> / <code>load_batch_eval_cases</code>。</li>
+          </ol></dd>
+          <dt>验证</dt>
+          <dd><code>python -m app.rag_eval.answer_quality --help</code> 仍能启动（确认 CLI 未依赖被删函数）。</dd>
+        </dl>
+      </div>
+    </div>
+  </article>
+
+  <article class="card" data-tier="A" data-dim="dead" data-id="A3" id="A3">
+    <div class="card-hd">
+      <span class="card-id">A3</span>
+      <span class="card-t">MinioGateway.remove_images — 被 remove_stale_images 取代</span>
+      <span class="card-size">17 行</span>
+      <label class="pick"><input type="checkbox" data-pick="A3"><span>纳入</span></label>
+      <span class="card-chev">▶</span>
+    </div>
+    <div class="card-bd">
+      <div class="loc"><span class="fp">app/shared/clients/minio_gateway.py</span><span class="fl">:90-106</span><span class="bdg b-a">E2 仅命中定义处</span></div>
+      <dl class="dl">
+        <dt>证据</dt>
+        <dd>全仓 4 次命中：1 次 <code>def</code> + 3 次注释。其中 <span class="fp">minio_gateway.py:124</span> 的 docstring 直接写明「<strong>与 <code>remove_images</code> 的区别：后者是「先清空再上传」，上传失败会让图片全部丢失</strong>」——这是一份自我说明的「已被取代」证据。</dd>
+        <dt>理由</dt>
+        <dd>
+          它是「先删后传」的旧策略，存在数据丢失风险：清空成功但上传失败时，图片全部丢失且无法回滚。
+          新策略 <code>remove_stale_images(stem, keep_names)</code> 改为「上传后按白名单清理」，先保证新图就位再删旧图。
+          旧函数保留只会诱导误用。
+        </dd>
+      </dl>
+      <div class="more">
+        <dl class="dl">
+          <dt>影响面</dt>
+          <dd>无调用方。注意 <strong>不要删 <code>_list_object_names</code></strong>（<span class="fl">:108-119</span>）——它被 <code>remove_stale_images</code> 内部使用。</dd>
+          <dt>步骤</dt>
+          <dd><ol>
+            <li>删除 <code>minio_gateway.py:90-106</code>。</li>
+            <li>保留 <code>_list_object_names</code> 与 <code>remove_stale_images</code>。</li>
+            <li>检查 <code>DeleteObject</code> import 是否变为未使用（<code>remove_stale_images</code> 内部也会用到，需确认）。</li>
+          </ol></dd>
+          <dt>验证</dt>
+          <dd><code>pytest tests/unit/test_minio_stale_images.py tests/unit/test_minio_gateway.py -q</code>。</dd>
+        </dl>
+      </div>
+    </div>
+  </article>
+
+  <article class="card" data-tier="A" data-dim="dead" data-id="A4" id="A4">
+    <div class="card-hd">
+      <span class="card-id">A4</span>
+      <span class="card-t">ParamRecord — 定义后从未使用的 Pydantic 模型</span>
+      <span class="card-size">9 行</span>
+      <label class="pick"><input type="checkbox" data-pick="A4"><span>纳入</span></label>
+      <span class="card-chev">▶</span>
+    </div>
+    <div class="card-bd">
+      <div class="loc"><span class="fp">app/evolution/models.py</span><span class="fl">:90-98</span><span class="bdg b-a">E2 仅命中定义处</span></div>
+      <dl class="dl">
+        <dt>证据</dt>
+        <dd><code>grep -rn "ParamRecord" app/ tests/</code> 只命中 <span class="fp">models.py:90</span> 一行，即 <code>class ParamRecord(BaseModel):</code> 本身。</dd>
+        <dt>理由</dt>
+        <dd>
+          参数注册表的读写全程使用<strong>裸 dict</strong>：<code>repositories.set_param</code> 直接构造 <code>$set</code> 文档（<span class="fp">repositories.py:54-66</span>），
+          <code>param_registry.get_param</code> 直接取 <code>record["key"]</code> / <code>record.get("value")</code>。
+          这个模型从未参与序列化，属于「设计了但没用上」的残留。
+        </dd>
+      </dl>
+      <div class="more">
+        <dl class="dl">
+          <dt>影响面</dt>
+          <dd>无。删除不影响 <code>param_registry</code> 集合的任何读写路径。</dd>
+          <dt>步骤</dt>
+          <dd><ol>
+            <li>删除 <code>models.py:90-98</code>。</li>
+            <li>同步删除 <span class="fp">models.py:89</span> 的分隔注释 <code># ---- 参数注册表 param_registry ----</code>。</li>
+            <li>确认 <code>models.py</code> 顶部 <code>Any</code> 仍被 <code>MetricSnapshot.params_snapshot</code> 使用，不要误删 import。</li>
+          </ol></dd>
+          <dt>验证</dt>
+          <dd><code>pytest tests/unit/test_evolution_repository.py -q</code>（该测试覆盖 param 读写往返）。</dd>
+        </dl>
+      </div>
+    </div>
+  </article>
+
+  <article class="card" data-tier="A" data-dim="dead" data-id="A5" id="A5">
+    <div class="card-hd">
+      <span class="card-id">A5</span>
+      <span class="card-t">get_query_default_state — 与 create_query_default_state 完全重复</span>
+      <span class="card-size">5 行</span>
+      <label class="pick"><input type="checkbox" data-pick="A5"><span>纳入</span></label>
+      <span class="card-chev">▶</span>
+    </div>
+    <div class="card-bd">
+      <div class="loc"><span class="fp">app/process/query/agent/state.py</span><span class="fl">:112-116</span><span class="bdg b-a">E1 语义引用 0</span></div>
+      <dl class="dl">
+        <dt>证据</dt>
+        <dd>同文件 <span class="fl">:100-106</span> 的 <code>create_query_default_state(**overrides)</code> 实现为 <code>state = copy.deepcopy(query_graph_default_state); state.update(overrides); return state</code>。<code>get_query_default_state()</code> 实现为 <code>return copy.deepcopy(query_graph_default_state)</code>——<strong>前者在不传 overrides 时与后者完全等价</strong>。</dd>
+        <dt>理由</dt>
+        <dd>典型的重构残留：引入可覆盖版本后，旧的无参版本未清理。两个函数名语义接近（「创建默认状态」/「获取干净状态」），并存会让后来者不知道该用哪个。</dd>
+      </dl>
+      <div class="more">
+        <dl class="dl">
+          <dt>影响面</dt>
+          <dd>无调用方。全仓 <code>create_query_default_state</code> 被 <span class="fp">pipeline.py:47</span> 使用，<code>get_query_default_state</code> 无引用。</dd>
+          <dt>步骤</dt>
+          <dd><ol>
+            <li>删除 <code>state.py:112-116</code> 与 <span class="fl">:109-111</span> 的分隔注释块。</li>
+            <li>若担心外部脚本依赖，可先降级为私有别名 <code>_get_query_default_state = create_query_default_state</code> 过渡一个版本。</li>
+          </ol></dd>
+          <dt>验证</dt>
+          <dd><code>pytest tests/unit -q -k "query or state"</code>。</dd>
+        </dl>
+      </div>
+    </div>
+  </article>
+
+  <article class="card" data-tier="A" data-dim="dead" data-id="A6" id="A6">
+    <div class="card-hd">
+      <span class="card-id">A6</span>
+      <span class="card-t">HistoryRepository.update_item_names — 批量回填主体名，无调用方</span>
+      <span class="card-size">12 行</span>
+      <label class="pick"><input type="checkbox" data-pick="A6"><span>纳入</span></label>
+      <span class="card-chev">▶</span>
+    </div>
+    <div class="card-bd">
+      <div class="loc"><span class="fp">app/shared/clients/history_repository.py</span><span class="fl">:114-125</span><span class="bdg b-a">E2 仅命中定义处</span></div>
+      <dl class="dl">
+        <dt>证据</dt>
+        <dd>全仓仅 <span class="fp">history_repository.py:114</span> 一处命中，即定义本身。无测试引用。</dd>
+        <dt>理由</dt>
+        <dd>
+          它做的是「按 id 列表批量改写历史消息的 <code>item_names</code>」，典型用途是「主体名目录更新后回填旧数据」。
+          但当前链路里 <code>item_names</code> 在写入时即确定（<span class="fp">answer_service.py:120</span> 一带），没有回填需求。
+          这是个<strong>为假设中的场景预先写好、但从未接入</strong>的函数。
+        </dd>
+      </dl>
+      <div class="more">
+        <dl class="dl">
+          <dt>影响面</dt>
+          <dd>无。若将来真需要回填，重新实现成本低于维护一个无人调用的方法。</dd>
+          <dt>步骤</dt>
+          <dd><ol>
+            <li>删除 <code>history_repository.py:114-125</code>。</li>
+            <li>检查 <code>ObjectId</code> import 是否仍被 <code>get_answer</code> 等方法使用（是，保留）。</li>
+          </ol></dd>
+          <dt>验证</dt>
+          <dd><code>pytest tests/unit/test_query_history_limits.py -q</code>。</dd>
+        </dl>
+      </div>
+    </div>
+  </article>
+
+  <article class="card" data-tier="A" data-dim="dead" data-id="A7" id="A7">
+    <div class="card-hd">
+      <span class="card-id">A7</span>
+      <span class="card-t">task_count — 标注「供测试与运维观测」但无人使用</span>
+      <span class="card-size">4 行</span>
+      <label class="pick"><input type="checkbox" data-pick="A7"><span>纳入</span></label>
+      <span class="card-chev">▶</span>
+    </div>
+    <div class="card-bd">
+      <div class="loc"><span class="fp">app/shared/utils/task_state.py</span><span class="fl">:220-223</span><span class="bdg b-a">E2 仅命中定义处</span></div>
+      <dl class="dl">
+        <dt>证据</dt>
+        <dd>全仓仅 <span class="fp">task_state.py:220</span> 一处命中。docstring 写「供测试与运维观测」，但 <code>tests/</code> 下<strong>零引用</strong>，也没有任何运维脚本或健康检查调用它。</dd>
+        <dt>理由</dt>
+        <dd>docstring 声称的用途与实际使用情况不符。这类「声称被使用」的死代码比明显的死代码更危险——它会让读者误以为存在任务数监控。</dd>
+      </dl>
+      <div class="more">
+        <dl class="dl">
+          <dt>影响面</dt>
+          <dd>无。若确实需要任务数观测，应在 <code>/api/health</code> 或 <code>/api/evolution/status</code> 中显式暴露，而不是留一个无人调用的函数。</dd>
+          <dt>步骤</dt>
+          <dd><ol>
+            <li>删除 <code>task_state.py:220-223</code>。</li>
+            <li>若决定补监控，改为在健康检查里读 <code>len(_tasks)</code> 并返回。</li>
+          </ol></dd>
+          <dt>验证</dt>
+          <dd><code>pytest tests/unit/test_task_state.py -q</code>。</dd>
+        </dl>
+      </div>
+    </div>
+  </article>
+
+  <article class="card" data-tier="A" data-dim="dead" data-id="A8" id="A8">
+    <div class="card-hd">
+      <span class="card-id">A8</span>
+      <span class="card-t">QueryGraphState["prompt"] — 类型声明与默认值均无读写</span>
+      <span class="card-size">2 行</span>
+      <label class="pick"><input type="checkbox" data-pick="A8"><span>纳入</span></label>
+      <span class="card-chev">▶</span>
+    </div>
+    <div class="card-bd">
+      <div class="loc"><span class="fp">app/process/query/agent/state.py</span><span class="fl">:42, :81</span><span class="bdg b-a">E1 语义引用 0</span></div>
+      <dl class="dl">
+        <dt>证据</dt>
+        <dd>
+          <code>grep -rn '\["prompt"\]\|\.get("prompt")\|prompt=' app/process/query/</code> <strong>零命中</strong>。
+          <span class="fl">:42</span> 是 TypedDict 字段声明，<span class="fl">:81</span> 是 <code>query_graph_default_state</code> 里的默认值 <code>"prompt": ""</code>。两处都只有声明。
+        </dd>
+        <dt>理由</dt>
+        <dd>图状态里的 <code>prompt</code> 字段从未被任何节点写入或读取。提示词实际通过 <code>app/resources/prompts/*.prompt</code> 加载（见 <span class="fp">shared/runtime/prompts.py</span>），不经过图状态。</dd>
+      </dl>
+      <div class="more">
+        <dl class="dl">
+          <dt>影响面</dt>
+          <dd>无。<code>TypedDict</code> 是纯类型声明，删除字段不影响运行时；默认值字典删掉该键也不影响（无 <code>state["prompt"]</code> 访问）。</dd>
+          <dt>步骤</dt>
+          <dd><ol>
+            <li>删除 <span class="fl">:42</span> 的类型声明行。</li>
+            <li>删除 <span class="fl">:81</span> 的 <code>"prompt": ""</code> 默认值行。</li>
+          </ol></dd>
+          <dt>验证</dt>
+          <dd><code>pytest tests/unit -q -k "query"</code>。类型检查工具（如 mypy）会报未使用字段，可作为二次确认。</dd>
+        </dl>
+      </div>
+    </div>
+  </article>
+
+  <article class="card" data-tier="A" data-dim="dead" data-id="A9" id="A9">
+    <div class="card-hd">
+      <span class="card-id">A9</span>
+      <span class="card-t">MetricSnapshot 的三个恒零字段</span>
+      <span class="card-size">3 行</span>
+      <label class="pick"><input type="checkbox" data-pick="A9"><span>纳入</span></label>
+      <span class="card-chev">▶</span>
+    </div>
+    <div class="card-bd">
+      <div class="loc"><span class="fp">app/evolution/models.py</span><span class="fl">:78-80</span><span class="bdg b-a">E1 语义引用 0</span></div>
+      <dl class="dl">
+        <dt>证据</dt>
+        <dd>
+          <code>recall_k</code> / <code>precision</code> / <code>groundedness</code> 三个字段定义后，
+          <strong>唯一的构造点</strong> <span class="fp">online_eval/metrics.py:16-29</span> 只赋 <code>adopt_rate</code> / <code>gap_rate</code> / <code>params_snapshot</code>。
+          全仓 <code>grep recall_k</code> 只命中 <span class="fp">models.py:78</span>。
+        </dd>
+        <dt>理由</dt>
+        <dd>
+          写入 <code>k_metrics</code> 的每份快照里，这三个字段恒为 <code>0.0</code>。任何基于它们做的看板或告警都会显示 0，
+          读者无法区分「真的 0 分」与「从未计算」。真正的 <code>groundedness</code> 在 <span class="fp">answer_service.py:133</span> 单独计算并写入 <code>chat_message</code>，
+          <strong>与 <code>k_metrics</code> 完全无关</strong>。
+        </dd>
+      </dl>
+      <div class="more">
+        <dl class="dl">
+          <dt>影响面</dt>
+          <dd>
+            <strong>历史数据</strong>：已落库的 <code>k_metrics</code> 文档含这三个键。删字段只影响新写入的文档，旧文档仍有该键——
+            读取方（<code>latest_metrics</code>）返回原始 dict，不会因字段缺失报错。若要彻底一致，需一次性 <code>$unset</code> 历史文档。
+          </dd>
+          <dt>步骤</dt>
+          <dd><ol>
+            <li>删除 <code>models.py:78-80</code> 三行。</li>
+            <li>（可选）执行 <code>db.k_metrics.updateMany({}, {$unset: {recall_k:"", precision:"", groundedness:""}})</code> 对齐历史数据。</li>
+            <li>若产品需要真实接地性指标，改为在 <code>compute_snapshot</code> 里聚合 <code>chat_message.groundedness</code>，而不是保留空字段。</li>
+          </ol></dd>
+          <dt>验证</dt>
+          <dd><code>pytest tests/unit/test_evolution_loop_wiring.py -q</code>；手工调 <code>GET /api/evolution/status</code> 确认 <code>latest_metric</code> 无异常。</dd>
+        </dl>
+      </div>
+    </div>
+  </article>
+
+  <article class="card" data-tier="A" data-dim="dead" data-id="A10" id="A10">
+    <div class="card-hd">
+      <span class="card-id">A10</span>
+      <span class="card-t">groundedness_min / gray_enabled — 两项无消费者的配置</span>
+      <span class="card-size">4 行</span>
+      <label class="pick"><input type="checkbox" data-pick="A10"><span>纳入</span></label>
+      <span class="card-chev">▶</span>
+    </div>
+    <div class="card-bd">
+      <div class="loc"><span class="fp">app/shared/config/settings.py</span><span class="fl">:139-140, :315-316</span><span class="bdg b-a">E2 仅命中定义处</span></div>
+      <dl class="dl">
+        <dt>证据</dt>
+        <dd>
+          <code>grep -rn "groundedness_min\|gray_enabled" app/ tests/ --include=*.py</code> 共 4 处命中，<strong>全部在 settings.py</strong>：
+          <span class="fl">:139-140</span> 是 dataclass 字段声明，<span class="fl">:315-316</span> 是从环境变量构造。无任何业务代码读取。
+        </dd>
+        <dt>理由</dt>
+        <dd>
+          这是<strong>最危险的一类死配置：看起来能用</strong>。运维若改 <code>EVOLUTION_GROUNDEDNESS_MIN</code> 想「调高可信度门槛」、
+          或改 <code>EVOLUTION_GRAY_ENABLED</code> 想「开启灰度」，不会有任何效果，也不会有任何提示。
+          而 <code>.env</code> 里恰好写着 <code>EVOLUTION_GRAY_ENABLED=false</code>——进一步强化了「这个开关是有效的」的错觉。
+        </dd>
+      </dl>
+      <div class="more">
+        <dl class="dl">
+          <dt>影响面</dt>
+          <dd>
+            无功能影响。<strong>但要先确认没有外部部署脚本依赖这两个环境变量名</strong>——
+            若 CI/部署清单里设置了它们，删除后这些变量会变成无害的孤儿，不会报错。
+          </dd>
+          <dt>步骤</dt>
+          <dd><ol>
+            <li>删除 <span class="fl">:139-140</span> 两行字段声明。</li>
+            <li>删除 <span class="fl">:315-316</span> 两行构造代码。</li>
+            <li>删除 <code>.env</code> 中的 <code>EVOLUTION_GRAY_ENABLED</code> 行（<span class="fl">.env:76</span>）。</li>
+            <li>若确实需要灰度，实现为「按流量比例决定是否召回进化条目」，而不是留一个空开关。</li>
+          </ol></dd>
+          <dt>验证</dt>
+          <dd><code>pytest tests/unit/test_config_settings.py -q</code>。该测试用 <code>getattr(settings, name)</code> 遍历字段，删字段后需确认它不会因缺失而失败。</dd>
+        </dl>
+      </div>
+    </div>
+  </article>
+
+  <article class="card" data-tier="A" data-dim="dead" data-id="A11" id="A11">
+    <div class="card-hd">
+      <span class="card-id">A11</span>
+      <span class="card-t">_HASH_LEN — 声明后未被引用的常量</span>
+      <span class="card-size">1 行</span>
+      <label class="pick"><input type="checkbox" data-pick="A11"><span>纳入</span></label>
+      <span class="card-chev">▶</span>
+    </div>
+    <div class="card-bd">
+      <div class="loc"><span class="fp">app/rag/import_/ids.py</span><span class="fl">:19</span><span class="bdg b-a">E2 仅命中定义处</span></div>
+      <dl class="dl">
+        <dt>证据</dt>
+        <dd>
+          <code>_HASH_LEN = 40</code> 定义于 <span class="fl">:19</span>，全仓仅此一处。
+          同文件 <span class="fl">:22-24</span> 的 <code>_sha1</code> 直接用 <code>hashlib.sha1(...).hexdigest()</code>，未引用该常量。
+        </dd>
+        <dt>理由</dt>
+        <dd>常量本意是「sha1 十六进制长度」，但实现直接用 <code>hexdigest()</code>，长度由算法保证。保留它只会让人误以为长度可配置。</dd>
+      </dl>
+      <div class="more">
+        <dl class="dl">
+          <dt>影响面</dt>
+          <dd>无。<code>ids.py</code> 的 <code>_sha1</code> 与对外函数不受影响。</dd>
+          <dt>步骤</dt>
+          <dd><ol><li>删除 <span class="fl">:18-19</span>（注释 + 常量）。</li></ol></dd>
+          <dt>验证</dt>
+          <dd><code>pytest tests/unit/test_ids.py -q</code>。</dd>
+        </dl>
+      </div>
+    </div>
+  </article>
+
+  <div class="callout c-info">
+    <div class="ico">小结</div>
+    <div>
+      <span class="ttl">A 档 11 项的共同特征：都是「实现演进后的化石」。</span>
+      <p>
+        A1/A2/A3/A5 属于「新实现取代旧实现但旧代码未删」；A4/A6/A7/A8/A11 属于「为假设场景预先写好但从未接入」；
+        A9/A10 属于「设计了指标/开关但没有实现采集逻辑」。
+        三类都不是「写得差」，而是<strong>缺少一次收尾清理</strong>——这也是 267 行只占 2% 却值得单独处理的原因：
+        它们的边际维护成本远高于代码量。
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ §3 ============================================================ -->
+<section class="chapter" id="c3">
+  <div class="chapter-head"><span class="chapter-no">03</span><h2>B 档 · 需确认后移除</h2></div>
+
+  <p class="lede" style="font-size:15px">
+    6 项、约 <strong>2 186 行</strong>。与 A 档的区别是：它们在生产代码里确实无人调用，但<strong>存在非代码的调用方</strong>——
+    运维手工命令、CI 脚本、或产品尚未验收的能力。删除前必须先回答「谁在用」。
+  </p>
+
+  <article class="card" data-tier="B" data-dim="value" data-id="B1" id="B1">
+    <div class="card-hd">
+      <span class="card-id">B1</span>
+      <span class="card-t">app/rag_eval/ 整包 — 离线评测工具混在生产包内</span>
+      <span class="card-size">14 py / 2 143 行</span>
+      <label class="pick"><input type="checkbox" data-pick="B1"><span>纳入</span></label>
+      <span class="card-chev">▶</span>
+    </div>
+    <div class="card-bd">
+      <div class="loc"><span class="fp">app/rag_eval/</span><span class="fl">14 文件</span><span class="bdg b-b">E1 生产引用 0</span></div>
+      <dl class="dl">
+        <dt>证据</dt>
+        <dd>
+          <code>grep -rn "rag_eval" app/ --include=*.py | grep -v "^app/rag_eval/"</code> 只命中 <strong>2 处 docstring</strong>：
+          <span class="fp">reconcile.py:8</span>（「本仓 rag_eval/runner 已记录同一现象」）与 <span class="fp">section_splitter.py:237</span>（「与评估链路 rag_eval.split_dataset 共用」）。
+          <strong>零生产 import</strong>。调用方只有 8 个测试文件与 <code>python -m</code> CLI。
+        </dd>
+        <dt>理由</dt>
+        <dd>
+          它是离线评测工具，占 <code>app/</code> 全部代码的 <strong>17%</strong>（2 143 / 12 593），却不参与任何运行时路径。
+          更要紧的是它<strong>自身并未验收完成</strong>：两处验收门槛在当前产物下恒为 False。
+        </dd>
+      </dl>
+      <div class="more">
+        <dl class="dl">
+          <dt>半成品<br>证据</dt>
+          <dd>
+            <p><strong>① 意图验收门槛恒 False。</strong><span class="fp">full_flow.py:29</span>：<code>ready_for_acceptance = len(cases) &gt;= 200 and reviewed == len(cases)</code>。
+            产物 <code>artifacts/intent_trial_draft.json</code> 实测 <strong>200 条样本、reviewed = 0</strong>（每条 <code>annotation_status</code> 均非 <code>"reviewed"</code>）→ 门槛永远不成立。</p>
+            <p><strong>② 答案质量基线恒不可用。</strong><span class="fp">answer_quality.py:137</span>：<code>ready_for_baseline = manifest["ready_for_baseline"] and all(...)</code>。
+            产物 <code>answer_quality_draft.json</code> 实测 <strong>40 条、reviewed = 0</strong> → 无法产出基线，<code>comparison</code> 分支永不执行，只会写 <code>comparison_error: "incomplete_scoring"</code>。</p>
+            <p><strong>③ 依赖互锁。</strong><code>pyproject.toml</code> 的 <code>eval</code> 组钉死 <code>ragas==0.4.3</code> + <code>langchain-community==0.4.1</code>，注释自述「Ragas 0.4.3 imports legacy VertexAI modules removed in community 0.4.2」。未安装时相关测试直接 skip。</p>
+          </dd>
+          <dt>影响面</dt>
+          <dd>
+            <strong>删除对生产零影响。</strong>但会丢失离线评测能力——包括 <code>split_metrics</code>（切分质量）、<code>answer_quality</code>（答案质量）、<code>full_flow</code>（意图验收）三套评估。
+            这 8 个测试文件也需一并处理（删除或改指向新路径）。
+          </dd>
+          <dt>步骤</dt>
+          <dd><ol>
+            <li><strong>先决策</strong>：是否需要保留离线评测能力。若不需要 → 直接删；若需要 → 走第 2 步。</li>
+            <li>移到 <code>tools/eval/</code>（与 <code>app/</code> 平级），修改 8 个测试文件的 import 路径。</li>
+            <li>删除 <span class="fp">dataset.py:28-137</span> 与 <span class="fl">:163-262</span>（即 A1/A2）。</li>
+            <li>把 <code>eval</code> 依赖组改为可选 extra，<code>pyproject.toml</code> 的 <code>[project.optional-dependencies]</code> 下声明。</li>
+            <li>修正或删除 <code>artifacts/</code> 下 8 个 JSON——它们是「未复核的草稿」，容易被误当作已验收数据集。</li>
+          </ol></dd>
+          <dt>验证</dt>
+          <dd>
+            <code>pytest tests/unit -q</code> 全绿；<code>python -c "import app.api.http.query_server"</code> 可正常导入（确认生产包不再依赖 rag_eval）。
+          </dd>
+        </dl>
+        <div class="callout c-warn" style="margin:12px 0 0">
+          <div class="ico">建议</div>
+          <div>
+            <span class="ttl">不建议直接删除，建议「移出 app/ 包」。</span>
+            <p>
+              2 143 行的评测代码本身有复用价值（尤其是 <code>split_metrics</code> 的切分质量指标）。
+              问题不在于它存在，而在于它<strong>占着生产包的边界</strong>——让 <code>app/</code> 的体积虚高 17%，也让「生产依赖」的边界变得模糊。
+              移到 <code>tools/eval/</code> 后，生产包只剩真正的运行时依赖。
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </article>
+
+  <article class="card" data-tier="B" data-dim="dead" data-id="B2" id="B2">
+    <div class="card-hd">
+      <span class="card-id">B2</span>
+      <span class="card-t">schema_migration.py — 仅 README 提及的运维手工入口</span>
+      <span class="card-size">43 行</span>
+      <label class="pick"><input type="checkbox" data-pick="B2"><span>纳入</span></label>
+      <span class="card-chev">▶</span>
+    </div>
+    <div class="card-bd">
+      <div class="loc"><span class="fp">app/rag/import_/schema_migration.py</span><span class="fl">全文</span><span class="bdg b-b">E2 仅文档引用</span></div>
+      <dl class="dl">
+        <dt>证据</dt>
+        <dd>
+          <code>grep -rn "schema_migration" app/ tests/ README.md</code> 只命中 <span class="fp">README.md:447</span>：
+          「需显式调用 <code>app/rag/import_/schema_migration.py:migrate_chunk_schema(force=True)</code> 重建集合（<strong>会清空数据</strong>）」。
+          <strong>无任何代码 import 它</strong>，也无测试覆盖。
+        </dd>
+        <dt>理由</dt>
+        <dd>
+          它是「Milvus schema 变更后重建集合」的手工脚本。这类脚本的存在有合理性，但当前形态有问题：
+          ① 放在 <code>app/</code> 生产包内，会被打包进镜像；② 只能通过 <code>python -c</code> 手工调用，无参数校验、无 dry-run、无确认提示；
+          ③ 文档明说「会清空数据」，却没有二次确认机制。
+        </dd>
+      </dl>
+      <div class="more">
+        <dl class="dl">
+          <dt>影响面</dt>
+          <dd>
+            <strong>需确认</strong>：是否有运维 runbook 或 CI 脚本在调用它。若没有，可安全移除；
+            若有，应改为独立 CLI 工具而非包内模块。
+          </dd>
+          <dt>步骤</dt>
+          <dd><ol>
+            <li>先在团队内确认无 runbook 依赖（搜索内部文档 / CI 配置）。</li>
+            <li>若无人使用 → 删除文件，同步删除 <span class="fp">README.md:447</span> 的说明。</li>
+            <li>若仍需保留 → 移到 <code>tools/</code>，并加 <code>--yes</code> 确认参数与 <code>--dry-run</code>。</li>
+          </ol></dd>
+          <dt>验证</dt>
+          <dd><code>grep -rn "migrate_chunk_schema" .</code> 应为空。</dd>
+        </dl>
+      </div>
+    </div>
+  </article>
+
+  <article class="card" data-tier="B" data-dim="dead" data-id="B3" id="B3">
+    <div class="card-hd">
+      <span class="card-id">B3</span>
+      <span class="card-t">RagEvalTester 的两个未使用方法</span>
+      <span class="card-size">33 行</span>
+      <label class="pick"><input type="checkbox" data-pick="B3"><span>纳入</span></label>
+      <span class="card-chev">▶</span>
+    </div>
+    <div class="card-bd">
+      <div class="loc"><span class="fp">app/rag_eval/tester.py</span><span class="fl">:39, :57</span><span class="bdg b-b">E2 仅命中定义处</span></div>
+      <dl class="dl">
+        <dt>证据</dt>
+        <dd>
+          <code>run_insert_test_data</code>（<span class="fl">:39</span>）与 <code>run_eval</code>（<span class="fl">:57</span>）零调用。
+          同类方法 <code>run_answer_eval</code> 有测试覆盖，说明这个类仍在演进，但这两个方法没跟上。
+        </dd>
+        <dt>理由</dt>
+        <dd>与 B1 同属 rag_eval 包。若 B1 决定整体移出，这两项随包一起走；若 B1 保留原位置，这两个方法是包内死代码。</dd>
+      </dl>
+      <div class="more">
+        <dl class="dl">
+          <dt>影响面</dt>
+          <dd>低。<strong>唯一顾虑</strong>：如果 <code>RagEvalTester</code> 被当作对外 API 承诺（例如被外部脚本 import），删方法会造成 <code>AttributeError</code>。当前仓库内无此情况。</dd>
+          <dt>步骤</dt>
+          <dd><ol>
+            <li>与 B1 合并处理（同一次提交）。</li>
+            <li>若单独处理，先 <code>grep -rn "run_insert_test_data\|run_eval" .</code> 确认为空。</li>
+          </ol></dd>
+          <dt>验证</dt>
+          <dd><code>pytest tests/unit/test_answer_evaluation.py -q</code>。</dd>
+        </dl>
+      </div>
+    </div>
+  </article>
+
+  <article class="card" data-tier="B" data-dim="dead" data-id="B4" id="B4">
+    <div class="card-hd">
+      <span class="card-id">B4</span>
+      <span class="card-t">.env 中四个无代码引用的键</span>
+      <span class="card-size">4 行</span>
+      <label class="pick"><input type="checkbox" data-pick="B4"><span>纳入</span></label>
+      <span class="card-chev">▶</span>
+    </div>
+    <div class="card-bd">
+      <div class="loc"><span class="fp">.env</span><span class="fl">:2, :6, :18, :24</span><span class="bdg b-b">E2 仅命中 .env</span></div>
+      <dl class="dl">
+        <dt>证据</dt>
+        <dd>
+          <code>MINERU_MODEL_SOURCE</code>（<span class="fl">:2</span>）、<code>MD_ROOT_DIR</code>（<span class="fl">:6</span>）、
+          <code>ITEM_NAME_DIAG</code>（<span class="fl">:18</span>）、<code>EMBEDDING_DIM</code>（<span class="fl">:24</span>）——
+          在 <code>app/</code> 与 <code>tests/</code> 中<strong>均无读取点</strong>。
+        </dd>
+        <dt>理由</dt>
+        <dd>`.env` 里的死键会误导运维，让人以为改这些值有效。特别是 <code>EMBEDDING_DIM</code>——向量维度实际由模型决定（BGE-M3 = 1024），配错只会造成误解。</dd>
+      </dl>
+      <div class="more">
+        <dl class="dl">
+          <dt>影响面</dt>
+          <dd>
+            <strong>需确认</strong> <code>MINERU_MODEL_SOURCE</code>：MinerU 是外部 CLI 服务，这个变量可能被它自己的进程消费，而非本仓库代码。
+            其余三个可确认无外部消费者。
+          </dd>
+          <dt>步骤</dt>
+          <dd><ol>
+            <li>确认 <code>MINERU_MODEL_SOURCE</code> 是否传给 MinerU 服务（查部署脚本）。</li>
+            <li>删除 <code>MD_ROOT_DIR</code> / <code>ITEM_NAME_DIAG</code> / <code>EMBEDDING_DIM</code> 三行。</li>
+            <li>同步检查 <code>.env.example</code>（若存在）与 README 的配置章节。</li>
+          </ol></dd>
+          <dt>验证</dt>
+          <dd>启动服务，确认无 <code>KeyError</code>；<code>grep -rn "MD_ROOT_DIR\|ITEM_NAME_DIAG\|EMBEDDING_DIM" .</code> 为空。</dd>
+        </dl>
+      </div>
+    </div>
+  </article>
+
+  <article class="card" data-tier="B" data-dim="robust" data-id="B5" id="B5">
+    <div class="card-hd">
+      <span class="card-id">B5</span>
+      <span class="card-t">IMPORT_CHECKPOINT_ENABLED — 配置存在但路径不匹配，永不命中</span>
+      <span class="card-size">1 配置 + 20 行逻辑</span>
+      <label class="pick"><input type="checkbox" data-pick="B5"><span>纳入</span></label>
+      <span class="card-chev">▶</span>
+    </div>
+    <div class="card-bd">
+      <div class="loc"><span class="fp">app/shared/config/settings.py</span><span class="fl">:307</span> · <span class="fp">app/rag/import_/pdf_parse_service.py</span><span class="fl">:200-213</span><span class="bdg b-b">E4 运行时证据</span></div>
+      <dl class="dl">
+        <dt>证据</dt>
+        <dd>
+          <code>checkpoint_enabled</code> 默认 <code>True</code>，在 <span class="fp">pdf_parse_service.py:224</span> 被读取。
+          但复用函数 <span class="fp">:205</span> 查找的是 <code>local_dir_obj / f"{pdf_path_obj.stem}.md"</code>，
+          而实际产物在 <span class="fl">:182-197</span> 被解压到 <code>local_dir_obj / file_name</code>（<strong>一个目录</strong>），
+          Markdown 位于该目录内（<code>extract_dir/&lt;file_name&gt;.md</code>）。
+          <strong>查找路径与产物路径差一层目录</strong>，因此复用永远返回 <code>None</code>。
+        </dd>
+        <dt>理由</dt>
+        <dd>
+          这是一个「配置写着开启、代码也确实读了、但逻辑上永不成立」的空功能。
+          每次导入都会重新调用 MinerU 解析——对长文档来说这是<strong>数分钟级的重复开销</strong>。
+          比死代码更糟：它让人相信「已支持断点续传」。
+        </dd>
+      </dl>
+      <div class="more">
+        <dl class="dl">
+          <dt>影响面</dt>
+          <dd>
+            修好它会改变导入行为（命中复用时跳过 MinerU 调用）。需确认复用语义正确：
+            当前实现只比较 mtime，<strong>不校验内容是否同源</strong>——同名不同文件会错误复用。
+          </dd>
+          <dt>步骤</dt>
+          <dd><ol>
+            <li><strong>二选一决策</strong>：修 / 删。</li>
+            <li><strong>若修</strong>：把 <span class="fl">:205</span> 改为 <code>local_dir_obj / pdf_path_obj.stem / f"{pdf_path_obj.stem}.md"</code>，并补一条单测（构造目录结构后断言命中）。</li>
+            <li><strong>若删</strong>：删除 <code>_reuse_existing_markdown</code> 与 <span class="fl">:224</span> 的判断分支，同时删除 <code>checkpoint_enabled</code> 配置与 <code>.env</code> 中的键。</li>
+          </ol></dd>
+          <dt>验证</dt>
+          <dd>修复后：连续两次导入同一 PDF，第二次日志应出现「复用既有产物」，且不出现 MinerU 调用记录。</dd>
+        </dl>
+      </div>
+    </div>
+  </article>
+
+  <article class="card" data-tier="B" data-dim="dep" data-id="B6" id="B6">
+    <div class="card-hd">
+      <span class="card-id">B6</span>
+      <span class="card-t">文档治理 — 392 KB 文档与代码系统性脱节</span>
+      <span class="card-size">4 md + 1 html</span>
+      <label class="pick"><input type="checkbox" data-pick="B6"><span>纳入</span></label>
+      <span class="card-chev">▶</span>
+    </div>
+    <div class="card-bd">
+      <div class="loc"><span class="fp">docs/</span> · <span class="fp">README.md</span><span class="fl">392 KB</span><span class="bdg b-b">E4 运行时证据</span></div>
+      <dl class="dl">
+        <dt>证据</dt>
+        <dd>
+          10 处可证漂移，详见 <a href="#c8">§8 文档治理</a>。最典型的三条：
+          <span class="fp">README.md:11</span> 指向一个<strong>不存在</strong>的 <code>se_rag-技术讲解文档.html</code>；
+          <span class="fp">README.md:377</span> 写「58 个测试文件，458 passed」，实际 69 个文件；
+          <span class="fp">技术讲解文档.md:283-290</span> 的鉴权表整表过期（写「未要求管理令牌」，实际 5 个接口全部要求）。
+        </dd>
+        <dt>理由</dt>
+        <dd>
+          文档总量 392 KB，其中约 120 KB 是「逐节点源码走读 + 21 项风险清单」，与行号强耦合。
+          每次重构都会产生新漂移，维护成本随时间线性上升，而收益递减——因为读者无法判断哪段还可信。
+        </dd>
+      </dl>
+      <div class="more">
+        <dl class="dl">
+          <dt>影响面</dt>
+          <dd>无代码影响。<strong>但漂移的文档比没有文档更危险</strong>：它会让新成员基于错误信息做判断（例如以为接口无需鉴权）。</dd>
+          <dt>步骤</dt>
+          <dd><ol>
+            <li>保留 <code>README.md</code>（功能与快速开始）+ 一篇架构说明，其余归档。</li>
+            <li>把「21 项风险清单」逐条转成 issue，附 <code>文件:行号</code>，由代码跟踪而非文档跟踪。</li>
+            <li>鉴权表改为<strong>测试自动断言</strong>：一个参数化用例遍历所有路由，断言「是否要求 token」，文档表格由测试生成。</li>
+            <li>删除或重新生成 <code>README.md:11</code> 指向的失效链接。</li>
+          </ol></dd>
+          <dt>验证</dt>
+          <dd><code>grep -c "" docs/*.md</code> 行数下降；新增的路由鉴权测试可在 CI 中阻止再次漂移。</dd>
+        </dl>
+      </div>
+    </div>
+  </article>
+
+  <div class="callout c-warn">
+    <div class="ico">共性</div>
+    <div>
+      <span class="ttl">B 档六项的共同点：都缺一个「谁在用」的答案。</span>
+      <p>
+        B1 缺产品决策（要不要保留离线评测）、B2 缺运维确认（runbook 是否引用）、B4 缺部署确认（MinerU 是否读该变量）、
+        B5 缺技术决策（修还是删）。<strong>不要在没有答案的情况下删除</strong>——这六项的风险不在代码，在流程。
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ §4 ============================================================ -->
+<section class="chapter" id="c4">
+  <div class="chapter-head"><span class="chapter-no">04</span><h2>C 档 · 安全与健壮性重构</h2></div>
+
+  <p class="lede" style="font-size:15px">
+    11 项，全部<strong>在用且不可删</strong>。P0 三项涉及安全边界，P1 八项影响线上可用性。
+    与 A/B 档不同，这里的每一项都需要改代码逻辑，不能只做删除。
+  </p>
+
+  <section class="sec" id="s4-1">
+    <h3><span class="sn">4.1</span>P0 安全缺陷（3 项）</h3>
+
+    <div class="callout c-bad">
+      <div class="ico">共同特征</div>
+      <div>
+        <span class="ttl">三项都是「防护写好了，默认值把它关掉」。</span>
+        <p>
+          代码里都有正确的校验逻辑，但默认值或兜底分支让校验失效。这类问题的危险在于：
+          代码评审时看校验函数是合格的，只有把默认值和调用点放在一起看才会暴露。
+        </p>
+      </div>
+    </div>
+
+    <article class="card" data-tier="C" data-dim="sec" data-id="P0-1" id="C-P0-1">
+      <div class="card-hd">
+        <span class="card-id">P0-1</span>
+        <span class="card-t">管理员令牌硬编码进源码，fail-closed 被默认值架空</span>
+        <span class="card-size">1 行</span>
+        <label class="pick"><input type="checkbox" data-pick="P0-1"><span>纳入</span></label>
+        <span class="card-chev">▶</span>
+      </div>
+      <div class="card-bd">
+        <div class="loc"><span class="fp">app/shared/config/settings.py</span><span class="fl">:296</span><span class="bdg b-p0">P0</span></div>
+        <dl class="dl">
+          <dt>证据</dt>
+          <dd>
+            <code>admin_token=env_str("IMPORT_ADMIN_TOKEN", "evoadmin_15946edbb1ed4289ae8296dbaafa57b5aad9bf25bd72a51c")</code>——
+            默认值是<strong>一个完整可用的令牌</strong>，且与 <code>.env</code> 中的实际值完全相同。
+            <code>.env</code> 虽未被 git 跟踪（<code>.gitignore:127</code>），但该令牌<strong>已进入源码与提交历史</strong>。
+          </dd>
+          <dt>理由</dt>
+          <dd>
+            <span class="fp">import_.py:53-54</span> 的 fail-closed 校验是 <code>if not expected: raise 503</code>。
+            因为默认值永不为空，<strong>这条防线永远不会触发</strong>——「漏配即拒绝启动」被自己的默认值拆掉。
+            <code>tests/unit/test_import_upload_guard.py</code> 只能靠 monkeypatch 才能测到该分支，也印证了它在真实配置下不可达。
+          </dd>
+        </dl>
+        <div class="more">
+          <dl class="dl">
+            <dt>攻击路径</dt>
+            <dd>
+              <ol>
+                <li>拿到仓库（或任一历史版本）→ 读到默认令牌。</li>
+                <li>调 <code>POST /api/import/upload</code> 上传任意文档 → 写入线上知识库。</li>
+                <li>调 <code>POST /api/evolution/candidates/{id}/approve</code> → 把任意内容写进检索集合，<strong>所有用户都会召回</strong>。</li>
+                <li>更糟：同一个值同时是导入与审批两套后台的凭据（<code>.env</code> 中 <code>EVOLUTION_ADMIN_TOKEN</code> 与它相同），单点泄漏 = 全线失守。</li>
+              </ol>
+            </dd>
+            <dt>影响面</dt>
+            <dd>导入接口、审批接口、以及所有依赖 <code>IMPORT_ADMIN_TOKEN</code> 的部署配置。轮换令牌需要同步更新所有环境的 <code>.env</code>。</dd>
+            <dt>步骤</dt>
+            <dd><ol>
+              <li>把默认值改为 <code>""</code>：<code>env_str("IMPORT_ADMIN_TOKEN", "")</code>。</li>
+              <li>在 lifespan 中加启动校验：<code>APP_ENV=prod</code> 且令牌为空时 <code>raise RuntimeError</code>，拒绝启动。</li>
+              <li><strong>轮换该令牌</strong>（旧值已进历史，改代码不够）。</li>
+              <li><code>.env</code> 中导入与审批用<strong>两个不同的随机值</strong>，避免单点泄漏扩散。</li>
+              <li>清理 git 历史中的该字符串（<code>git filter-repo</code> 或 BFG），或明确接受「历史仍可读」并强制轮换。</li>
+            </ol></dd>
+            <dt>验证</dt>
+            <dd><code>pytest tests/unit/test_import_upload_guard.py tests/unit/test_trial_api.py -q</code>；清空 <code>IMPORT_ADMIN_TOKEN</code> 后启动，应拒绝启动而非静默放行。</dd>
+          </dl>
+        </div>
+      </div>
+    </article>
+
+    <article class="card" data-tier="C" data-dim="sec" data-id="P0-2" id="C-P0-2">
+      <div class="card-hd">
+        <span class="card-id">P0-2</span>
+        <span class="card-t">会话鉴权存在两条静默放行路径</span>
+        <span class="card-size">1 行 + 5 处调用</span>
+        <label class="pick"><input type="checkbox" data-pick="P0-2"><span>纳入</span></label>
+        <span class="card-chev">▶</span>
+      </div>
+      <div class="card-bd">
+        <div class="loc"><span class="fp">app/api/session_access.py</span><span class="fl">:35-36</span> · <span class="fp">query.py</span><span class="fl">:35,88,120,151</span> · <span class="fp">evolution.py</span><span class="fl">:58</span><span class="bdg b-p0">P0</span></div>
+        <dl class="dl">
+          <dt>证据</dt>
+          <dd>
+            <code>authorize_session</code> 第一行是 <code>if request is None or not settings.api.session_ownership_enabled: return</code>。
+            同时有 <strong>5 个路由</strong>把 <code>Request</code> 声明为可选：<code>query.py:35,88,120,151</code> 与 <code>evolution.py:58</code>，
+            写法均为 <code>request: Request = None</code>。
+          </dd>
+          <dt>理由</dt>
+          <dd>
+            两条放行路径都会让鉴权<strong>静默失效</strong>：
+            <br>① <code>SESSION_OWNERSHIP_ENABLED=false</code>（<span class="fp">settings.py:284</span> 支持该开关）一开，
+            <code>GET/DELETE /api/history/{session_id}</code>、<code>GET /api/stream/{session_id}</code>、<code>/api/query/status</code> 全部退化为
+            「知道 session_id 即可读/删他人对话」。历史里是真实业务问答（含报价、售后诉求），属横向越权。
+            <br>② <code>request is None</code> 是隐性 fail-open：任何新增路由忘写 <code>request</code> 参数就会静默无鉴权，
+            而现有 5 处正是用 <code>= None</code> 写法，<strong>给后来者做了错误示范</strong>。
+          </dd>
+        </dl>
+        <div class="more">
+          <dl class="dl">
+            <dt>影响面</dt>
+            <dd>所有会话级读写接口。<strong>关闭开关时无任何启动告警</strong>，运维无从察觉当前处于无鉴权状态。</dd>
+            <dt>步骤</dt>
+            <dd><ol>
+              <li>删除 <code>request is None</code> 分支（或改为 <code>raise ApiError(..., 500)</code> 暴露编程错误）。</li>
+              <li>5 处 <code>request: Request = None</code> 改为必填 <code>request: Request</code>。</li>
+              <li>开关关闭时在 lifespan 打 <code>logger.warning</code>，并在 <code>/api/health</code> 暴露该状态。</li>
+              <li>生产环境强制 <code>True</code>：与 P0-1 同样在启动时校验。</li>
+            </ol></dd>
+            <dt>验证</dt>
+            <dd><code>pytest tests/unit/test_trial_access.py tests/unit/test_api_routes_and_side_effects.py -q</code>；手工用两个不同 cookie 访问同一 session，应返回 404。</dd>
+          </dl>
+        </div>
+      </div>
+    </article>
+
+    <article class="card" data-tier="C" data-dim="sec" data-id="P0-3" id="C-P0-3">
+      <div class="card-hd">
+        <span class="card-id">P0-3</span>
+        <span class="card-t">MinIO 桶被设为匿名可读，对象键可枚举</span>
+        <span class="card-size">19 行</span>
+        <label class="pick"><input type="checkbox" data-pick="P0-3"><span>纳入</span></label>
+        <span class="card-chev">▶</span>
+      </div>
+      <div class="card-bd">
+        <div class="loc"><span class="fp">app/shared/clients/minio_gateway.py</span><span class="fl">:22-41</span><span class="bdg b-p0">P0</span></div>
+        <dl class="dl">
+          <dt>证据</dt>
+          <dd>
+            <code>_bucket_policy</code> 设置 <code>"Principal": {"AWS": ["*"]}</code> + <code>"Action": ["s3:GetObject"]</code> + <code>Resource: arn:aws:s3:::&lt;bucket&gt;/*</code>，
+            在 <span class="fl">:40</span> 通过 <code>set_bucket_policy</code> 应用。对象键规则在 <span class="fl">:79</span>：
+            <code>f"{self.image_dir}/{stem}/{image_name}"</code>，其中 <code>stem</code> 即文档标题（<span class="fp">enrich_markdown_images.py:198</span> 传入 <code>md_path_obj.stem</code>）。
+          </dd>
+          <dt>理由</dt>
+          <dd>
+            知识库内所有文档图片（说明书、政策截图）在<strong>无任何鉴权、无签名 URL</strong> 的情况下可被枚举下载。
+            <code>/api/import/*</code> 有令牌保护，但产出的图片没有——<strong>上传侧鉴权被存储侧策略绕过</strong>。
+            键名含文档标题，可预测性极高。
+          </dd>
+        </dl>
+        <div class="more">
+          <dl class="dl">
+            <dt>影响面</dt>
+            <dd>
+              前端图片加载方式（<code>chat.js</code> 直接使用 MinIO URL）、导入产出的历史图片、以及任何缓存了旧 URL 的地方。
+              改为预签名 URL 需要同步改前端渲染逻辑。
+            </dd>
+            <dt>步骤</dt>
+            <dd><ol>
+              <li><strong>短期</strong>：把对象键前缀从「文档标题」改为 <code>doc_id</code>（UUID），降低可枚举性——改一行，立即降低风险。</li>
+              <li><strong>中期</strong>：桶改私有（<code>set_bucket_policy</code> 传空策略），改用 <code>presigned_get_object</code>（短 TTL，如 15 分钟）。</li>
+              <li>或在网关加一层带鉴权的图片代理路由 <code>GET /api/images/{doc_id}/{name}</code>，由后端流式转发。</li>
+              <li>确认前端 <code>image_urls</code> 的消费方式后，同步改渲染逻辑。</li>
+            </ol></dd>
+            <dt>验证</dt>
+            <dd>匿名 <code>curl</code> 桶内对象应返回 403；前端图片仍能正常显示。</dd>
+          </dl>
+        </div>
+      </div>
+    </article>
+  </section>
+
+  <section class="sec" id="s4-2">
+    <h3><span class="sn">4.2</span>P1 稳定性缺陷（8 项）</h3>
+
+    <article class="card" data-tier="C" data-dim="robust" data-id="P1-1" id="C-P1-1">
+      <div class="card-hd">
+        <span class="card-id">P1-1</span>
+        <span class="card-t">Milvus 写入/删除 RPC 未传 timeout，与自身注释矛盾</span>
+        <span class="card-size">6 处调用</span>
+        <label class="pick"><input type="checkbox" data-pick="P1-1"><span>纳入</span></label>
+        <span class="card-chev">▶</span>
+      </div>
+      <div class="card-bd">
+        <div class="loc"><span class="fp">app/shared/clients/milvus_gateway.py</span><span class="fl">:107-109</span> · 6 个调用点<span class="bdg b-p1">P1</span></div>
+        <dl class="dl">
+          <dt>证据</dt>
+          <dd>
+            <span class="fp">milvus_gateway.py:107-109</span> 的注释明确写着「<code>timeout</code> 必须逐次传入……缺省为 <code>None</code> 时会一直等到服务端响应或出错」。
+            但只有 <code>hybrid_search</code> 与 <code>catalog.py:63</code> 传了。以下 6 处<strong>均未传</strong>：
+            <span class="fp">index_service.py:122</span>（upsert）、<span class="fl">:155</span>（delete）、
+            <span class="fp">item_name_service.py:113,118</span>（delete）、
+            <span class="fp">evolution/index/update.py:75</span>（upsert）、<span class="fl">:92</span>（delete）。
+          </dd>
+          <dt>理由</dt>
+          <dd>
+            Milvus 网络挂起时，导入线程<strong>永久阻塞</strong>，且仍持有 <code>_IMPORT_SLOTS</code> 信号量（<span class="fp">pipeline.py:67</span>），
+            导入通道被占满。审批侧 <code>approve()</code> 的 <code>upsert_item</code> 挂住会让审批接口（同步 def）一起挂死。
+          </dd>
+        </dl>
+        <div class="more">
+          <dl class="dl">
+            <dt>影响面</dt>
+            <dd>导入、审批、自进化三条链路。<strong>这类故障表现为「服务假死」而非报错</strong>，排查成本高。</dd>
+            <dt>步骤</dt>
+            <dd><ol>
+              <li>在 <code>MilvusGateway</code> 加统一包装：<code>def call(self, fn, **kw): return fn(timeout=self.timeout_seconds, **kw)</code>。</li>
+              <li>把 6 个调用点改为走该包装，禁止业务层直连 <code>milvus_client</code>。</li>
+              <li>加 lint 规则或 code review checklist：<code>grep "milvus_client\." app/ | grep -v gateway</code> 应为空。</li>
+            </ol></dd>
+            <dt>验证</dt>
+            <dd>断开 Milvus 网络后触发导入，应在 <code>timeout_seconds</code> 内失败并释放信号量，而非挂起。</dd>
+          </dl>
+        </div>
+      </div>
+    </article>
+
+    <article class="card" data-tier="C" data-dim="robust" data-id="P1-2" id="C-P1-2">
+      <div class="card-hd">
+        <span class="card-id">P1-2</span>
+        <span class="card-t">导入任务阻塞 anyio 线程池，可打满整个服务</span>
+        <span class="card-size">9 行</span>
+        <label class="pick"><input type="checkbox" data-pick="P1-2"><span>纳入</span></label>
+        <span class="card-chev">▶</span>
+      </div>
+      <div class="card-bd">
+        <div class="loc"><span class="fp">app/api/routers/import_.py</span><span class="fl">:164-172</span> · <span class="fp">pipeline.py</span><span class="fl">:67</span><span class="bdg b-p1">P1</span></div>
+        <dl class="dl">
+          <dt>证据</dt>
+          <dd>
+            <code>background_tasks.add_task(invoke_import_graph, ...)</code> 传入的是<strong>同步函数</strong>。
+            Starlette 用同一 anyio 线程池（默认 40 线程）执行同步 def 路由与同步 background task。
+            <code>pipeline.py:67</code> 的 <code>slots.acquire(timeout=...)</code> 默认等待 <strong>600 秒</strong>（<code>acquire_timeout_seconds</code>）。
+          </dd>
+          <dt>理由</dt>
+          <dd>
+            <code>max_concurrent_tasks=2</code>。第 3~42 个上传请求各占用一个线程空等 600 秒 →
+            40 个线程耗尽后<strong>所有同步接口（含 <code>/api/health</code>）全部无响应</strong>，服务表现为整体宕机。
+            攻击者只需有上传权限即可触发，无需其他能力。
+          </dd>
+        </dl>
+        <div class="more">
+          <dl class="dl">
+            <dt>影响面</dt>
+            <dd>整个查询服务的可用性。这是<strong>单点即可造成全站不可用</strong>的缺陷，优先级应高于其代码量。</dd>
+            <dt>步骤</dt>
+            <dd><ol>
+              <li><code>invoke_import_graph</code> 改为 <code>async def</code>，内部用 <code>await asyncio.to_thread(...)</code> 执行同步逻辑。</li>
+              <li>信号量换 <code>asyncio.Semaphore</code>，避免阻塞线程。</li>
+              <li>队列满时<strong>直接返回 429</strong>，而不是排队等 600 秒。</li>
+              <li><code>acquire_timeout_seconds</code> 默认降到 10 秒量级。</li>
+            </ol></dd>
+            <dt>验证</dt>
+            <dd>并发发起 50 个上传请求，<code>GET /api/health</code> 应仍能在 200ms 内返回。</dd>
+          </dl>
+        </div>
+      </div>
+    </article>
+
+    <article class="card" data-tier="C" data-dim="sec" data-id="P1-3" id="C-P1-3">
+      <div class="card-hd">
+        <span class="card-id">P1-3</span>
+        <span class="card-t">文件日志开启 diagnose=True，异常时打印全部局部变量</span>
+        <span class="card-size">2 行</span>
+        <label class="pick"><input type="checkbox" data-pick="P1-3"><span>纳入</span></label>
+        <span class="card-chev">▶</span>
+      </div>
+      <div class="card-bd">
+        <div class="loc"><span class="fp">app/shared/runtime/logger.py</span><span class="fl">:69-70</span><span class="bdg b-p1">P1</span></div>
+        <dl class="dl">
+          <dt>证据</dt>
+          <dd>文件 sink 配置 <code>backtrace=True, diagnose=True</code>。</dd>
+          <dt>理由</dt>
+          <dd>
+            任何 <code>logger.exception</code>（全项目 30+ 处）都会把当帧<strong>所有局部变量值</strong>写进 <code>logs/app_*.log</code>：
+            <code>settings.llm.api_key</code>、<code>_headers()</code> 里的 <code>Bearer</code> 令牌、文档正文、用户原始提问。
+            日志文件明文、无脱敏、无访问控制。这是<strong>凭据泄漏 + 数据泄漏</strong>的双重风险。
+          </dd>
+        </dl>
+        <div class="more">
+          <dl class="dl">
+            <dt>影响面</dt>
+            <dd>所有写日志的路径。改配置不影响功能，只影响日志详细度——<strong>改动成本最低、收益最高的一项</strong>。</dd>
+            <dt>步骤</dt>
+            <dd><ol>
+              <li><code>diagnose=False</code>（保留 <code>backtrace=True</code>，堆栈信息仍有价值）。</li>
+              <li>加 <code>logger.patch</code> 过滤器，对 <code>Authorization</code> / <code>api_key</code> / <code>token</code> 做正则脱敏。</li>
+              <li>清理已有的 <code>logs/*.log</code>（其中可能已含泄漏的凭据）。</li>
+            </ol></dd>
+            <dt>验证</dt>
+            <dd>故意触发一次 <code>logger.exception</code>，检查日志中不出现 api_key 明文。</dd>
+          </dl>
+        </div>
+      </div>
+    </article>
+
+    <article class="card" data-tier="C" data-dim="robust" data-id="P1-4" id="C-P1-4">
+      <div class="card-hd">
+        <span class="card-id">P1-4</span>
+        <span class="card-t">查询接口无速率限制，换 session_id 即可绕过并发保护</span>
+        <span class="card-size">—</span>
+        <label class="pick"><input type="checkbox" data-pick="P1-4"><span>纳入</span></label>
+        <span class="card-chev">▶</span>
+      </div>
+      <div class="card-bd">
+        <div class="loc"><span class="fp">app/api/routers/query.py</span><span class="fl">:34-44</span> · <span class="fp">lifecycle.py</span><span class="fl">:17-18</span><span class="bdg b-p1">P1</span></div>
+        <dl class="dl">
+          <dt>证据</dt>
+          <dd>
+            <code>query.py:34-44</code> 无任何限流/配额。<code>lifecycle.py:17-18</code> 的保护是
+            <code>if session_id in _active: raise ApiError("query_in_progress", ...)</code>——<strong>只按 session_id 串行</strong>，
+            而 <code>session_id</code> 由客户端任意指定（<span class="fp">query.py:41</span>）。
+          </dd>
+          <dt>理由</dt>
+          <dd>
+            攻击者每次用新 <code>session_id</code> 即可并发发起无限查询，每个请求触发 embedding + hybrid_search + rerank + LLM 流式生成。
+            既是<strong>成本炸弹</strong>（按 token 计费），也是 GPU/连接池打满手段。<code>reserve_query</code> 的 409 保护对「换 id」完全无效。
+          </dd>
+        </dl>
+        <div class="more">
+          <dl class="dl">
+            <dt>影响面</dt>
+            <dd>查询服务、模型服务、以及账单。<strong>需要选型</strong>：限流库（slowapi）或网关层限流。</dd>
+            <dt>步骤</dt>
+            <dd><ol>
+              <li>按 owner cookie / IP 做令牌桶（如 <code>slowapi</code>），先给一个宽松阈值（如 10 QPS/owner）。</li>
+              <li>单 owner 并发上限（如 3），超出返回 429。</li>
+              <li><code>session_id</code> 改为服务端生成，禁止客户端指定（需同步改前端）。</li>
+            </ol></dd>
+            <dt>验证</dt>
+            <dd>用同一 cookie 并发 20 个查询，应有部分返回 429；不同 cookie 互不影响。</dd>
+          </dl>
+        </div>
+      </div>
+    </article>
+
+    <article class="card" data-tier="C" data-dim="robust" data-id="P1-5" id="C-P1-5">
+      <div class="card-hd">
+        <span class="card-id">P1-5</span>
+        <span class="card-t">86 处 except Exception，其中 7 处完全静默</span>
+        <span class="card-size">7 处</span>
+        <label class="pick"><input type="checkbox" data-pick="P1-5"><span>纳入</span></label>
+        <span class="card-chev">▶</span>
+      </div>
+      <div class="card-bd">
+        <div class="loc"><span class="fp">app/</span> 全局<span class="fl">7 处</span><span class="bdg b-p1">P1</span></div>
+        <dl class="dl">
+          <dt>证据</dt>
+          <dd>
+            <code>grep -c "except Exception" app/</code> = <strong>86</strong>，裸 <code>except:</code> = <strong>0</strong>（这点做得好）。
+            其中 catch 体只有 <code>return</code> 且<strong>无任何日志</strong>的 7 处：
+            <span class="fp">import_.py:82</span>、<span class="fp">approval/service.py:52</span>、<span class="fp">candidate/generator.py:38</span>、
+            <span class="fp">gap/detector.py:52</span>、<span class="fp">tuning/controller.py:34</span>、<span class="fp">rag/query/config.py:61</span>、
+            <span class="fp">history_repository.py:47</span>。
+          </dd>
+          <dt>理由</dt>
+          <dd>
+            最危险的三处：
+            <br>① <span class="fp">history_repository.py:46-47</span>：<code>get_answer</code> 任何异常（含 ObjectId 解析、Mongo 抖动）都变成「答案不存在」，
+            <code>collector.py:44</code> 据此<strong>静默丢弃用户反馈</strong>，自进化缺口数据凭空消失且无日志可查。
+            <br>② <span class="fp">detector.py:51-52</span>：去重失败按「不重复」处理，Mongo 故障期间每轮都会为同一问题重复生成候选。
+            <br>③ <span class="fp">controller.py:33-34</span>：自调失败无日志，参数漂移无法归因。
+          </dd>
+        </dl>
+        <div class="more">
+          <dl class="dl">
+            <dt>影响面</dt>
+            <dd>「降级」与「静默」是两种不同的设计意图。降级是有意的（自进化不能拖垮主链路），静默是无意的（丢失了排查线索）。<strong>只需给这 7 处补日志，不改变降级行为</strong>。</dd>
+            <dt>步骤</dt>
+            <dd><ol>
+              <li>7 处补 <code>logger.warning(..., exc_info=True)</code>。</li>
+              <li>建立约定：catch 体必须有日志或明确的 <code># noqa: BLE001 - 原因</code> 注释（项目已有此习惯，只需覆盖这 7 处）。</li>
+              <li>加 CI 检查：catch 体无日志且无 noqa 注释时告警。</li>
+            </ol></dd>
+            <dt>验证</dt>
+            <dd>mock Mongo 抛异常，确认日志中出现对应 warning。</dd>
+          </dl>
+        </div>
+      </div>
+    </article>
+
+    <article class="card" data-tier="C" data-dim="robust" data-id="P1-6" id="C-P1-6">
+      <div class="card-hd">
+        <span class="card-id">P1-6</span>
+        <span class="card-t">进程内可变状态 + 单 worker 假设，只有查询服务有锁</span>
+        <span class="card-size">4 处</span>
+        <label class="pick"><input type="checkbox" data-pick="P1-6"><span>纳入</span></label>
+        <span class="card-chev">▶</span>
+      </div>
+      <div class="card-bd">
+        <div class="loc"><span class="fp">lifecycle.py:12</span> · <span class="fp">detector.py:23</span> · <span class="fp">scheduler.py:27-28</span> · <span class="fp">catalog.py:29</span><span class="bdg b-p1">P1</span></div>
+        <dl class="dl">
+          <dt>证据</dt>
+          <dd>
+            四处模块级可变状态：<code>lifecycle._active</code>（在途查询）、<code>detector._CURSOR</code>（扫描游标）、
+            <code>scheduler._LAST_METRIC_TS/_LAST_BACKTEST_TS</code>（调度进度）、<code>catalog._CACHE</code>（主体名目录）。
+            <code>SingleWorkerLease</code> 只在 <span class="fp">query_server.py:31</span> 使用，<strong>import_server.py 无任何等价保护</strong>。
+          </dd>
+          <dt>理由</dt>
+          <dd>
+            <code>--workers 2</code> 启动时：① <code>reserve_query</code> 的 409 互斥失效，同一会话可并发出两条回答；
+            ② 两个进程各自推进 <code>_CURSOR</code>，缺口漏扫或重扫；
+            ③ <code>catalog._CACHE</code> 的 <code>names</code>/<code>raws</code>/<code>ts</code> 在 <span class="fp">catalog.py:82-84</span> <strong>分三次赋值</strong>，
+            读线程可能拿到「新 names + 旧 raws」，主体名扩展召回错乱；
+            ④ 导入侧 <code>BoundedSemaphore</code>（<span class="fp">pipeline.py:34</span>）变成每进程 2，实际并发翻倍。
+          </dd>
+        </dl>
+        <div class="more">
+          <dl class="dl">
+            <dt>影响面</dt>
+            <dd>扩容能力。当前靠 <code>SingleWorkerLease</code> 把风险挡在门外，但这是<strong>部署约束而非代码保证</strong>。</dd>
+            <dt>步骤</dt>
+            <dd><ol>
+              <li><code>catalog._CACHE</code> 改为整体替换（<code>_CACHE = {...}</code> 单次赋值）或加锁——成本最低，先做。</li>
+              <li>把 <code>SingleWorkerLease</code> 抽成公共 lifespan 装饰器，两个 server 都用。</li>
+              <li><code>_CURSOR</code> 落 Mongo（可复用 <code>param_registry</code> 集合加一个 <code>_cursor</code> 键）。</li>
+              <li>若短期不扩容，把「必须单 worker」写进部署文档并在启动时校验。</li>
+            </ol></dd>
+            <dt>验证</dt>
+            <dd><code>uvicorn --workers 2</code> 启动，确认第二个进程被租约拒绝；或确认 <code>_CACHE</code> 读取不出现错乱。</dd>
+          </dl>
+        </div>
+      </div>
+    </article>
+
+    <article class="card" data-tier="C" data-dim="robust" data-id="P1-7" id="C-P1-7">
+      <div class="card-hd">
+        <span class="card-id">P1-7</span>
+        <span class="card-t">reject / remove_candidate 对不存在的 ID 返回成功，404 分支是死代码</span>
+        <span class="card-size">18 行</span>
+        <label class="pick"><input type="checkbox" data-pick="P1-7"><span>纳入</span></label>
+        <span class="card-chev">▶</span>
+      </div>
+      <div class="card-bd">
+        <div class="loc"><span class="fp">app/evolution/approval/service.py</span><span class="fl">:110-115, :155-156</span><span class="bdg b-p1">P1</span></div>
+        <dl class="dl">
+          <dt>证据</dt>
+          <dd>
+            <code>reject</code> 中 <code>update_one(...)</code> 后<strong>不检查 <code>matched_count</code></strong>，直接 <code>return True</code>；
+            <code>remove_candidate</code> 中 <code>delete_one(...)</code> 后同样直接 <code>return True</code>。
+            路由层 <span class="fp">evolution.py:127-128</span>、<span class="fl">:145-146</span> 的 <code>raise ApiError(..., 404)</code> <strong>永不触发</strong>。
+          </dd>
+          <dt>理由</dt>
+          <dd>
+            审批页对已删除/不存在的候选显示「已驳回 / 已下架」，实际什么都没发生；
+            <code>_mark_gap</code> 用空 <code>gap_id</code> 静默跳过，缺口状态永久残留。运维据此判断「处理完了」——<strong>这是最典型的「假成功」</strong>。
+          </dd>
+        </dl>
+        <div class="more">
+          <dl class="dl">
+            <dt>影响面</dt>
+            <dd>审批后台的操作反馈。<strong>与 D6（向量泄漏）相关</strong>：对 active 候选 reject 会返回成功但不下架向量，见 §6-D4 与上一份讲解页的偏差 6。</dd>
+            <dt>步骤</dt>
+            <dd><ol>
+              <li><code>reject</code>：<code>if result.matched_count == 0: return False</code>。</li>
+              <li><code>remove_candidate</code>：<code>if result.deleted_count == 0: return False</code>。</li>
+              <li>顺带修 <code>reject</code> 不校验原状态的问题：<code>active</code> 候选应先 <code>deactivate</code> 再改状态，否则向量泄漏。</li>
+            </ol></dd>
+            <dt>验证</dt>
+            <dd>对一个随机 ObjectId 调 reject/delete，应返回 404 而非 200。现有 <code>test_trial_api.py</code> 只测鉴权，需补该用例。</dd>
+          </dl>
+        </div>
+      </div>
+    </article>
+
+    <article class="card" data-tier="C" data-dim="robust" data-id="P1-8" id="C-P1-8">
+      <div class="card-hd">
+        <span class="card-id">P1-8</span>
+        <span class="card-t">param_registry 合并顺序反了，导致参数自调的观测数据全部失真</span>
+        <span class="card-size">1 行</span>
+        <label class="pick"><input type="checkbox" data-pick="P1-8"><span>纳入</span></label>
+        <span class="card-chev">▶</span>
+      </div>
+      <div class="card-bd">
+        <div class="loc"><span class="fp">app/evolution/tuning/param_registry.py</span><span class="fl">:57</span><span class="bdg b-p1">P1</span><span class="bdg b-no">本轮新发现</span></div>
+        <dl class="dl">
+          <dt>证据</dt>
+          <dd>
+            <code>return cached | dict(_FALLBACKS)</code>。Python 的 dict 合并运算符 <code>|</code> 语义是<strong>右侧优先</strong>：
+            键冲突时取右值。因此 <code>_FALLBACKS</code>（<code>RRF_K=60 / RRF_TOP=5 / RERANK_TOP_K=6</code>）
+            <strong>覆盖</strong>了 <code>cached</code> 中的注册表实际值。
+          </dd>
+          <dt>理由</dt>
+          <dd>
+            连锁后果是一条完整的失真链：
+            <ol>
+              <li><code>get_all_params()</code> 永远返回 60/5/6，与注册表真实值无关。</li>
+              <li><code>compute_snapshot</code>（<span class="fp">metrics.py:29</span>）把它写进 <code>params_snapshot</code>。</li>
+              <li><code>record_metric</code> 把这份失真快照写入 <code>k_metrics</code>。</li>
+              <li><code>controller</code> 的回退分支（<span class="fp">controller.py:64-72</span>）从 <code>k_metrics</code> 读 <code>params_snapshot</code> 做回滚——
+                读到的是 60/5/6，三个值都是合法 int 且在界内，<strong>回滚「成功」但等于重置为默认值</strong>，而不是回到上一个稳定版本。</li>
+            </ol>
+            关键区别：<code>get_param(key)</code>（单键读取）直接用 <code>_CACHE</code>，<strong>不受影响</strong>——
+            所以<strong>运行时行为是对的，只有观测与回滚是错的</strong>。这类「功能正常、数据失真」的缺陷最难发现。
+          </dd>
+        </dl>
+        <div class="more">
+          <dl class="dl">
+            <dt>影响面</dt>
+            <dd>
+              参数自调的<strong>可观测性与回滚正确性</strong>。<code>auto_tune_enabled</code> 当前默认 <code>False</code>，所以线上尚未暴露；
+              一旦开启自调，回退逻辑就会把参数重置为默认值而非历史稳定值。
+            </dd>
+            <dt>步骤</dt>
+            <dd><ol>
+              <li>改为 <code>return {**dict(_FALLBACKS), **cached}</code>——回退常量先铺底，注册表值覆盖。</li>
+              <li>补一条单测：写入 <code>RRF_K=90</code> 后，<code>get_all_params()["RRF_K"]</code> 应为 90 而非 60。</li>
+              <li>检查历史 <code>k_metrics</code> 中的 <code>params_snapshot</code> 是否全部为 60/5/6，若是则标注为「不可信历史」。</li>
+            </ol></dd>
+            <dt>验证</dt>
+            <dd><code>pytest tests/unit/test_evolution_loop_wiring.py -q</code>（该测试覆盖自调与回滚链路）。</dd>
+          </dl>
+        </div>
+      </div>
+    </article>
+  </section>
+</section>
+
+<!-- ============================================================ §5 ============================================================ -->
+<section class="chapter" id="c5">
+  <div class="chapter-head"><span class="chapter-no">05</span><h2>C 档 · 规范与可维护性</h2></div>
+
+  <p class="lede" style="font-size:15px">
+    12 项 P2 问题。与 P0/P1 不同，这些的<strong>修复路径明确、改动量小、不影响功能语义</strong>，
+    因此用表格呈现以便一次性扫读。每行都给了可直接落地的修法。
+  </p>
+
+  <div class="tw">
+    <table class="dense">
+      <thead>
+        <tr><th style="width:48px">ID</th><th style="width:200px">位置</th><th style="width:280px">问题与后果</th><th>修复</th></tr>
+      </thead>
+      <tbody>
+        <tr id="C-P2-1" data-tier="C" data-dim="norm">
+          <td><span class="card-id" style="background:var(--bad-bg);color:var(--bad)">P2-1</span></td>
+          <td><span class="fp">query_server.py:65-70</span><br><span class="fp">import_server.py:36-41</span></td>
+          <td>CORS <code>allow_origins=list(...) or ["*"]</code>、<code>allow_methods=["*"]</code>、<code>allow_headers=["*"]</code>。<code>.env:72</code> 已配白名单，但<strong>默认值仍是全开</strong>——任何漏配环境即全开。</td>
+          <td>默认改 <code>()</code>；<code>APP_ENV=prod</code> 时白名单为空则拒绝启动；<code>methods</code> 收窄到 <code>GET,POST,DELETE</code>。</td>
+        </tr>
+        <tr id="C-P2-2" data-tier="C" data-dim="norm"><td><span class="card-id" style="background:var(--bad-bg);color:var(--bad)">P2-2</span></td>
+          <td><span class="fp">import_.py:55</span><br><span class="fp">evolution.py:40</span></td>
+          <td>令牌比较用 <code>!=</code>，<strong>非常量时间</strong>，理论上可被计时攻击逐字节猜测。同项目 <span class="fp">session_access.py:52</span> 已正确使用 <code>hmac.compare_digest</code>，说明团队知道该做法但未统一。</td>
+          <td>两处统一改 <code>hmac.compare_digest(x_internal_token, expected)</code>。</td>
+        </tr>
+        <tr id="C-P2-3" data-tier="C" data-dim="norm"><td><span class="card-id" style="background:var(--bad-bg);color:var(--bad)">P2-3</span></td>
+          <td><span class="fp">evolution/schema.py:31-34</span><br><span class="fp">evolution/models.py:22-23</span></td>
+          <td><code>CandidateEditRequest.faq_question/faq_answer</code> 与 <code>FeedbackEvent.query/rewritten_query</code> <strong>无 <code>max_length</code></strong>。审批接口可写入任意大文本，Mongo 文档无上限，Milvus <code>faq_answer</code> 上限 65535 字符会被超长内容截断或报错。</td>
+          <td>加 <code>Field(max_length=...)</code>，与 <code>IssueUpdateRequest.resolution</code>（<span class="fl">:70</span> 已限 2000）保持一致：问题 512、答案 4096、query 1024。</td>
+        </tr>
+        <tr id="C-P2-4" data-tier="C" data-dim="norm"><td><span class="card-id" style="background:var(--bad-bg);color:var(--bad)">P2-4</span></td>
+          <td><span class="fp">app/</span> 全局</td>
+          <td>209 次日志调用中 <strong>164 次用 f-string</strong>（如 <span class="fp">chunk_search.py:131</span> 的 <code>logger.debug(f"...")</code>）。loguru 不支持 <code>%</code> 惰性参数，f-string 会在 <strong>INFO 级别下仍为每条 DEBUG 构造字符串</strong>——热路径上的无谓开销。</td>
+          <td>热路径 DEBUG 改 <code>logger.opt(lazy=True).debug("...", x=lambda: expensive())</code>；或统一改 <code>logger.debug("{}", x)</code> 依赖 loguru 的格式化。</td>
+        </tr>
+        <tr id="C-P2-5" data-tier="C" data-dim="norm"><td><span class="card-id" style="background:var(--bad-bg);color:var(--bad)">P2-5</span></td>
+          <td><span class="fp">settings.py:221</span><br><span class="fp">rag_eval/runner.py</span><br><span class="fp">item_name_confirm_service.py</span></td>
+          <td>超长函数/文件：<code>_build_settings</code> <strong>122 行</strong>（一个函数构造全部配置）；<code>runner.py</code> <strong>470 行</strong>（全项目最大文件）；<code>item_name_confirm_service.py</code> 349 行。单函数 &gt;80 行共 4 处。</td>
+          <td><code>_build_settings</code> 按域拆 <code>_build_llm()</code> / <code>_build_mongo()</code> 等；<code>runner.py</code> 按 stage 拆分（随 B1 移出时一并处理）。</td>
+        </tr>
+        <tr id="C-P2-6" data-tier="C" data-dim="norm"><td><span class="card-id" style="background:var(--bad-bg);color:var(--bad)">P2-6</span></td>
+          <td><span class="fp">chunk_search.py:94</span><br><span class="fp">sse_broker.py:26</span><br><span class="fp">index_service.py:53</span><br><span class="fp">session_access.py:30</span></td>
+          <td>魔法数字散落：<code>ranker_weights=(0.6, 0.4)</code>、<code>_BUFFER_SIZE=512</code>、<code>CHUNK_RECONCILE_LIMIT=16384</code>、<code>max_age=7*86400</code>。另 <code>limit=6</code> 在 <span class="fp">answer_service.py:65</span> 与 <span class="fp">intent_route_service.py:38</span> <strong>重复定义两份</strong>，改一处会不一致。</td>
+          <td>收敛到 <code>rag/query/config.py</code> 与 <code>shared/config</code>；<code>limit=6</code> 提为单一常量。</td>
+        </tr>
+        <tr id="C-P2-7" data-tier="C" data-dim="norm"><td><span class="card-id" style="background:var(--bad-bg);color:var(--bad)">P2-7</span></td>
+          <td><span class="fp">pages.py:47-48</span></td>
+          <td><code>max((path.stat().st_mtime for path in paths), default=0.0)</code>——<code>default</code> 只覆盖「空可迭代」，<strong>不覆盖异常</strong>。任一静态文件缺失则 <code>FileNotFoundError</code> → <code>/api/health</code> 返回 500。</td>
+          <td>改为 <code>max((p.stat().st_mtime for p in paths if p.exists()), default=0.0)</code>，或包 try/except 返回固定版本号。</td>
+        </tr>
+        <tr id="C-P2-8" data-tier="C" data-dim="norm"><td><span class="card-id" style="background:var(--bad-bg);color:var(--bad)">P2-8</span></td>
+          <td><span class="fp">shared/utils/paths.py:33</span></td>
+          <td><code>PROJECT_ROOT = get_project_root(".env")</code> 在<strong>模块导入期</strong>执行。纯环境变量部署（无 <code>.env</code> 文件）时 import 即 <code>FileNotFoundError</code>，服务无法启动。这与「配置全部走环境变量」的云原生部署方式冲突。</td>
+          <td>找不到时回退到包目录或 <code>os.getcwd()</code>，不抛异常；或改为惰性求值。</td>
+        </tr>
+        <tr id="C-P2-9" data-tier="C" data-dim="norm"><td><span class="card-id" style="background:var(--bad-bg);color:var(--bad)">P2-9</span></td>
+          <td><span class="fp">evolution/repositories.py:56-66</span></td>
+          <td><code>set_param</code> 先 <code>find_one</code> 取 <code>rev</code>，再 <code>update_one</code> 写 <code>rev+1</code>——<strong>读改写非原子</strong>。并发自调会丢更新，<code>rev</code> 无法作为缓存失效依据。</td>
+          <td>改用 <code>{"$inc": {"rev": 1}}</code>，一次原子操作完成。</td>
+        </tr>
+        <tr id="C-P2-10" data-tier="C" data-dim="norm"><td><span class="card-id" style="background:var(--bad-bg);color:var(--bad)">P2-10</span></td>
+          <td><span class="fp">query_schema.py:95</span><br><span class="fp">evolution/schema.py:20</span><br><span class="fp">models.py:92</span><br><span class="fp">query_metrics.py:31</span></td>
+          <td><code>Any</code> 滥用：<code>ts: Any</code>（应为 <code>float | None</code>）、<code>ParamRecord.value: Any</code>、<code>query_metrics.lock: Any</code>（应为 <code>threading.RLock</code>）。响应契约失去校验，前端拿到的类型不确定。</td>
+          <td>逐个替换为具体类型；<code>lock</code> 标 <code>threading.RLock</code> 或改用 <code>Protocol</code>。</td>
+        </tr>
+        <tr id="C-P2-11" data-tier="C" data-dim="norm"><td><span class="card-id" style="background:var(--bad-bg);color:var(--bad)">P2-11</span></td>
+          <td><span class="fp">api/routers/import_.py:151-158</span></td>
+          <td>每次上传在 <code>output/YYYYMMDD/task_id/</code> 落盘，<strong>全项目无任何清理机制</strong>（<code>grep rmtree</code> 仅命中 <code>pdf_parse_service.py:184</code> 的局部解压清理）。长期运行会占满磁盘。</td>
+          <td>导入成功后删源文件；或加 TTL 清理任务（如每天清 7 天前的目录）。</td>
+        </tr>
+        <tr id="C-P2-12" data-tier="C" data-dim="norm"><td><span class="card-id" style="background:var(--bad-bg);color:var(--bad)">P2-12</span></td>
+          <td><span class="fp">shared/utils/task_snapshot.py:23</span></td>
+          <td><code>_SNAPSHOT_DIR / f"{task_id}.json"</code>，<code>task_id</code> 来自 URL 路径且<strong>未校验字符集</strong>。Windows 下 <code>\</code> 不被路由的 <code>[^/]+</code> 拦截，<code>..\..\x</code> 可穿越读任意 <code>.json</code>。该模块<strong>零测试覆盖</strong>。</td>
+          <td>加 <code>re.fullmatch(r"[0-9a-f-]{36}", task_id)</code> 校验；或改用 <code>Path(task_id).name</code> 并断言无分隔符。</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout c-info">
+    <div class="ico">优先级</div>
+    <div>
+      <span class="ttl">P2 里最该先做的三项：P2-2、P2-7、P2-12。</span>
+      <p>
+        <strong>P2-2</strong> 是两行改动，把已有的正确做法统一过去；<strong>P2-7</strong> 是一个条件判断，避免健康检查 500；
+        <strong>P2-12</strong> 是安全边界问题，虽然需要上传权限才能触发，但成本极低。
+        其余九项可以随重构顺带处理，不必单独排期。
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ §6 ============================================================ -->
+<section class="chapter" id="c6">
+  <div class="chapter-head"><span class="chapter-no">06</span><h2>D 档 · 低价值特性</h2></div>
+
+  <p class="lede" style="font-size:15px">
+    6 组特性：<strong>在用、有业务含义，但维护成本高于收益</strong>。
+    与 A/B 档不同，这里不建议「删」——建议「收包 + 加单开关」或「合并口径」。
+    判断依据是<strong>成本量化</strong>：新增了几个集合、几个字段、几层耦合。
+  </p>
+
+  <article class="card" data-tier="D" data-dim="value" data-id="D1" id="D1">
+    <div class="card-hd">
+      <span class="card-id">D1</span>
+      <span class="card-t">业务标签 + 政策时效 — 为试用叙事加的字段，已贯穿五层</span>
+      <span class="card-size">business.py 63 行</span>
+      <label class="pick"><input type="checkbox" data-pick="D1"><span>纳入</span></label>
+      <span class="card-chev">▶</span>
+    </div>
+    <div class="card-bd">
+      <div class="loc"><span class="fp">app/rag/query/business.py</span><span class="fl">63 行</span><span class="bdg b-d">价值 中 / 成本 高</span></div>
+      <dl class="dl">
+        <dt>成本</dt>
+        <dd>
+          已贯穿五层：上传表单（<span class="fp">import_.py:140-146</span> 的 <code>document_kind/document_version/valid_until</code>）→
+          图状态（<span class="fp">state.py:31-33,52-54</span>）→ Milvus schema（<span class="fp">index_service.py:42-43,78</span>）→
+          作答分支（<span class="fp">answer_service.py:55,64</span>）→ 前端表单。任何一处改名都要同步五处。
+        </dd>
+        <dt>价值</dt>
+        <dd>对「导入 → 问答」主链路零贡献。它服务的是「政策类文档过期提醒」这一细分场景，只在 <span class="fp">docs/internal-trial.md:58-93</span> 的试用叙事里成立。</dd>
+      </dl>
+      <div class="more">
+        <dl class="dl">
+          <dt>建议</dt>
+          <dd>保留但收敛：把三个字段收进一个 <code>doc_meta: dict</code>，Milvus 侧只留一个 JSON 字符串字段，避免每次加字段都改 schema。不删除——它已经在生产数据里。</dd>
+          <dt>风险</dt>
+          <dd>删除会导致历史文档的 <code>valid_until</code> 失效，过期政策不再被降权。</dd>
+        </dl>
+      </div>
+    </div>
+  </article>
+
+  <article class="card" data-tier="D" data-dim="value" data-id="D2" id="D2">
+    <div class="card-hd">
+      <span class="card-id">D2</span>
+      <span class="card-t">人工待办（issues）— 与 k_gaps 语义重叠但服务对象不同</span>
+      <span class="card-size">72 行 + 2 接口</span>
+      <label class="pick"><input type="checkbox" data-pick="D2"><span>纳入</span></label>
+      <span class="card-chev">▶</span>
+    </div>
+    <div class="card-bd">
+      <div class="loc"><span class="fp">app/evolution/issues.py</span><span class="fl">72 行</span> · <span class="fp">evolution.py</span><span class="fl">:150-162</span><span class="bdg b-d">价值 中 / 成本 中</span></div>
+      <dl class="dl">
+        <dt>成本</dt>
+        <dd>1 个 Mongo 集合（<code>query_issues</code>）+ 2 个接口 + 审批页一个板块 + <code>trial_metrics</code> 依赖它的 <code>completed_at</code> 计算解决时长。</dd>
+        <dt>价值</dt>
+        <dd>
+          与 <code>k_gaps</code> 语义同为「没答好」，但<strong>服务对象不同</strong>：<code>k_gaps</code> 是给机器的候选生成队列（只有 strong 落库），
+          <code>query_issues</code> 是给人的客服工作队列（带负责人与处理结果）。这个区分是合理的，不建议合并。
+        </dd>
+      </dl>
+      <div class="more">
+        <dl class="dl">
+          <dt>建议</dt>
+          <dd>保留。但两者由同一条反馈触发（<span class="fp">collector.py:67-72</span>），应抽一个公共的「负反馈分发」函数，避免逻辑分叉。</dd>
+          <dt>风险</dt>
+          <dd>若删除，客服将失去「哪些问题没人处理」的视图；<code>trial_metrics.knowledge_completion_mean_hours</code> 会失效。</dd>
+        </dl>
+      </div>
+    </div>
+  </article>
+
+  <article class="card" data-tier="D" data-dim="value" data-id="D3" id="D3">
+    <div class="card-hd">
+      <span class="card-id">D3</span>
+      <span class="card-t">试用指标 — 两套采集代码服务一个临时报表</span>
+      <span class="card-size">53 + 144 行</span>
+      <label class="pick"><input type="checkbox" data-pick="D3"><span>纳入</span></label>
+      <span class="card-chev">▶</span>
+    </div>
+    <div class="card-bd">
+      <div class="loc"><span class="fp">app/evolution/trial_metrics.py</span><span class="fl">53 行</span> · <span class="fp">shared/runtime/query_metrics.py</span><span class="fl">144 行</span><span class="bdg b-d">价值 低 / 成本 高</span></div>
+      <dl class="dl">
+        <dt>成本</dt>
+        <dd>
+          2 个 Mongo 集合（<code>query_runs</code> / <code>query_feedback</code>）+ 5 个响应字段 + <code>LLM_MODEL_PRICES_JSON</code> 配置 + 每个查询多一次 <code>record_query</code> 写入。
+          <code>query_metrics.py</code> 144 行里大部分是 token 计费与延迟分位统计。
+        </dd>
+        <dt>价值</dt>
+        <dd>
+          只服务 <code>GET /api/evolution/trial-metrics</code> 一个接口，且是<strong>试用期专用</strong>（<span class="fp">docs/internal-trial.md</span> 明确其定位）。
+          <code>query_runs</code> 的唯一消费者就是 <code>trial_metrics.report()</code>。
+        </dd>
+      </dl>
+      <div class="more">
+        <dl class="dl">
+          <dt>建议</dt>
+          <dd>
+            收进 <code>app/trial/</code> 子包 + 单一开关 <code>TRIAL_METRICS_ENABLED</code>（默认 false）。
+            关闭时 <code>record_query</code> 直接返回，不写库——省掉每个查询一次 Mongo 写入。
+          </dd>
+          <dt>风险</dt>
+          <dd>关闭后失去「解决率 / 重复提问率 / 转人工率」三个试用汇报指标。需确认试用期是否结束。</dd>
+        </dl>
+      </div>
+    </div>
+  </article>
+
+  <article class="card" data-tier="D" data-dim="value" data-id="D4" id="D4">
+    <div class="card-hd">
+      <span class="card-id">D4</span>
+      <span class="card-t">指标双口径 — 同一个问题两个答案</span>
+      <span class="card-size">2 处定义</span>
+      <label class="pick"><input type="checkbox" data-pick="D4"><span>纳入</span></label>
+      <span class="card-chev">▶</span>
+    </div>
+    <div class="card-bd">
+      <div class="loc"><span class="fp">evolution/online_eval/metrics.py</span><span class="fl">:26-27</span> · <span class="fp">trial_metrics.py</span><span class="fl">:48</span><span class="bdg b-d">价值 负 / 成本 中</span></div>
+      <dl class="dl">
+        <dt>证据</dt>
+        <dd>
+          <code>adopt_rate = adopted / (adopted + rejected)</code>——<strong>分母只含明确反馈</strong>；
+          <code>resolution_rate = solved / total_rag_queries</code>——<strong>分母是全部 rag 提问</strong>。
+          两个数都叫「效果」，但口径不同，数值可能差一个数量级。
+        </dd>
+        <dt>理由</dt>
+        <dd>
+          前者衡量「有反馈的人里有多少满意」，后者衡量「所有提问里有多少被确认解决」。
+          两个都有意义，但<strong>并列展示时会被误读为矛盾</strong>。这是指标设计问题，不是实现 bug。
+        </dd>
+      </dl>
+      <div class="more">
+        <dl class="dl">
+          <dt>建议</dt>
+          <dd>保留两个数但<strong>改名并注明分母</strong>：<code>adopt_rate_of_feedback</code> / <code>resolution_rate_of_queries</code>。或统一为一个「解决率 + 反馈覆盖率」二元组。</dd>
+          <dt>风险</dt>
+          <dd>改名会影响看板与已有报表。建议在文档中先标注口径，下一版再改名。</dd>
+        </dl>
+      </div>
+    </div>
+  </article>
+
+  <article class="card" data-tier="D" data-dim="value" data-id="D5" id="D5">
+    <div class="card-hd">
+      <span class="card-id">D5</span>
+      <span class="card-t">联网检索无开关 — MCP 不可达时每问白等 35 秒</span>
+      <span class="card-size">1 个节点</span>
+      <label class="pick"><input type="checkbox" data-pick="D5"><span>纳入</span></label>
+      <span class="card-chev">▶</span>
+    </div>
+    <div class="card-bd">
+      <div class="loc"><span class="fp">process/query/agent/main_graph.py</span><span class="fl">:54</span> · <span class="fp">web_search_service.py</span><span class="fl">:16,37</span><span class="bdg b-d">价值 负 / 成本 低</span></div>
+      <dl class="dl">
+        <dt>证据</dt>
+        <dd>
+          <code>after_node_item_name_confirm</code> 在主体确认后<strong>无条件</strong>返回三路并行：
+          <code>return "node_search_embedding", "node_search_embedding_hyde", "node_web_search_mcp"</code>。
+          全文 <code>settings</code> 中<strong>没有任何 WEB_SEARCH 开关</strong>。
+          <code>web_search_service.py:16</code> <code>_MCP_TIMEOUT_MARGIN_SECONDS = 5</code>，
+          默认 <code>MCP_TIMEOUT_SECONDS=30</code> → 单次最多等 <strong>35 秒</strong>，且 <code>max_retry_attempts=3</code>。
+        </dd>
+        <dt>理由</dt>
+        <dd>
+          HyDE、闲聊都有开关，唯独联网没有。MCP 服务不可达时，每个查询都要等到超时才降级——用户体验表现为「回答变慢 35 秒」，而日志里只有一条 warning。
+        </dd>
+      </dl>
+      <div class="more">
+        <dl class="dl">
+          <dt>建议</dt>
+          <dd>加 <code>WEB_SEARCH_ENABLED</code>（默认 true）与 <code>WEB_SEARCH_TIMEOUT_SECONDS</code>（默认 8）；在 <code>after_node_item_name_confirm</code> 里按开关决定是否返回该分支。</dd>
+          <dt>风险</dt>
+          <dd>关闭后失去「知识库没有时联网兜底」的能力。建议保留默认开启，但允许运维快速关闭。</dd>
+        </dl>
+      </div>
+    </div>
+  </article>
+
+  <article class="card" data-tier="D" data-dim="value" data-id="D6" id="D6">
+    <div class="card-hd">
+      <span class="card-id">D6</span>
+      <span class="card-t">评测四套实现 — 同一件事四种做法</span>
+      <span class="card-size">4 处</span>
+      <label class="pick"><input type="checkbox" data-pick="D6"><span>纳入</span></label>
+      <span class="card-chev">▶</span>
+    </div>
+    <div class="card-bd">
+      <div class="loc"><span class="fp">rag_eval/runner.py</span> · <span class="fp">rag_eval/answer_quality.py</span> · <span class="fp">rag_eval/full_flow.py</span> · <span class="fp">evolution/online_eval/grounding.py</span><span class="bdg b-d">价值 低 / 成本 中</span></div>
+      <dl class="dl">
+        <dt>证据</dt>
+        <dd>
+          四套独立的评测实现：<code>runner.py</code>（470 行，批量问答评测）、<code>answer_quality.py</code>（答案质量打分）、
+          <code>full_flow.py</code>（意图验收）、<code>grounding.py</code>（在线接地性）。
+          前三套在 <code>rag_eval</code> 包内（离线），第四套在生产链路（在线）。
+        </dd>
+        <dt>理由</dt>
+        <dd>
+          四套各自实现了「调用模型 → 解析 JSON → 打分 → 落盘」的流程，但共享的只有 <code>parse_json_object</code>。
+          在线与离线的评测口径也不一致（<code>grounding</code> 只看答案对证据的支持度，<code>answer_quality</code> 还看参考一致性）。
+        </dd>
+      </dl>
+      <div class="more">
+        <dl class="dl">
+          <dt>建议</dt>
+          <dd>随 B1 一起处理：移出 <code>app/</code> 后，把三套离线评测合并为一个 <code>evaluate(mode=...)</code> 入口，共享打分器与落盘逻辑。在线 <code>grounding</code> 保持独立（它有实时性要求）。</dd>
+          <dt>风险</dt>
+          <dd>合并会改变现有报告格式（<code>schema_version</code> 字段），历史报告不可直接对比。</dd>
+        </dl>
+      </div>
+    </div>
+  </article>
+
+  <div class="callout c-warn">
+    <div class="ico">判断</div>
+    <div>
+      <span class="ttl">D 档六组里，只有 D3 和 D5 建议实际动手。</span>
+      <p>
+        <strong>D3</strong>（试用指标）收益明确：加一个开关就能省掉每查询一次 Mongo 写入，且试用期结束后可整体下线。
+        <strong>D5</strong>（联网开关）是运维刚需：MCP 不可达时不至于每问等 35 秒。
+        D1/D2 建议保留（业务价值真实），D4/D6 建议随 B1 一并处理，不必单独排期。
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ §7 ============================================================ -->
+<section class="chapter" id="c7">
+  <div class="chapter-head"><span class="chapter-no">07</span><h2>依赖治理</h2></div>
+
+  <p class="lede" style="font-size:15px">
+    <code>pyproject.toml</code> 声明了 20 个直接依赖 + 2 个依赖组。其中 <strong>2 个零直接 import、1 组重复声明、3 个重量级但窄用</strong>。
+    依赖治理的收益不在代码行数，在<strong>镜像体积与启动时间</strong>。
+  </p>
+
+  <div class="tw">
+    <table class="dense">
+      <thead>
+        <tr><th style="width:50px">ID</th><th style="width:168px">依赖</th><th style="width:104px">判定</th><th style="width:250px">证据</th><th>建议</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="card-id" style="background:#f0f2f5;color:#46505c">E1</span></td>
+          <td><code>langchain&gt;=1.2.13</code></td>
+          <td><span class="bdg b-no">可直接移除</span></td>
+          <td><code>grep "^import langchain\|^from langchain import"</code> 零命中。实际只用到 <code>langchain-core</code> / <code>langchain-openai</code> / <code>langchain-text-splitters</code>，它们是独立包。</td>
+          <td>删除该行。三个子包已各自声明。</td>
+        </tr>
+        <tr>
+          <td><span class="card-id" style="background:#f0f2f5;color:#46505c">E2</span></td>
+          <td><code>numpy&gt;=2.4.3</code></td>
+          <td><span class="bdg b-no">可直接移除</span></td>
+          <td><code>grep "^import numpy\|^from numpy"</code> 零命中。它作为 pymilvus / torch 的传递依赖会被自动安装。</td>
+          <td>删除该行（若需版本约束，用 <code>[tool.uv] override-dependencies</code>）。</td>
+        </tr>
+        <tr>
+          <td><span class="card-id" style="background:#f0f2f5;color:#46505c">E3</span></td>
+          <td><code>pymilvus[model]</code> +<br><code>pymilvus-model</code></td>
+          <td><span class="bdg b-no">重复声明</span></td>
+          <td><code>[model]</code> extra 安装的就是 <code>pymilvus-model</code>，<code>uv.lock</code> 中只有一条记录。</td>
+          <td>保留 <code>pymilvus[model]</code> 一行即可。</td>
+        </tr>
+        <tr>
+          <td><span class="card-id" style="background:#f0f2f5;color:#46505c">E4</span></td>
+          <td><code>flagembedding</code> +<br><code>torch</code> +<br><code>transformers</code></td>
+          <td><span class="bdg b-no">可合并</span></td>
+          <td>三者的唯一用途是 <span class="fp">reranker.py:17-26</span> 的 <code>FlagReranker</code>。而 BGE-M3 嵌入走 <code>pymilvus.model</code>（<span class="fp">embedding.py:7</span>）——<strong>两套模型栈叠同一批权重</strong>。<code>pymilvus-model</code> 自带 <code>BGERerank</code>，功能覆盖。</td>
+          <td>改用 <code>pymilvus.model.reranker.BGERerankFunction</code>，移除三个依赖。预计减少镜像 2~3 GB（torch 是大头）。<strong>需先验证重排分数与现网一致</strong>。</td>
+        </tr>
+        <tr>
+          <td><span class="card-id" style="background:#f0f2f5;color:#46505c">E5</span></td>
+          <td><code>openai-agents</code></td>
+          <td><span class="bdg b-d">窄用</span></td>
+          <td>仅 <span class="fp">web_search_service.py:7</span> 用于 MCP 客户端（<code>MCPServerStreamableHttp</code>）。</td>
+          <td>保留。若 D5 决定下线联网检索，可一并移除。</td>
+        </tr>
+        <tr>
+          <td><span class="card-id" style="background:#f0f2f5;color:#46505c">E6</span></td>
+          <td><code>ragas==0.4.3</code> +<br><code>langchain-community==0.4.1</code></td>
+          <td><span class="bdg b-d">版本互锁</span></td>
+          <td><code>pyproject.toml</code> 注释自述「Ragas 0.4.3 imports legacy VertexAI modules removed in community 0.4.2」——两个版本必须成对升级，否则 import 失败。</td>
+          <td>随 B1 一起处理：若保留评测能力，改为可选 extra 并锁死组合；若下线评测，直接删除 <code>eval</code> 组。</td>
+        </tr>
+        <tr>
+          <td><span class="card-id" style="background:#f0f2f5;color:#46505c">E7</span></td>
+          <td><code>beautifulsoup4</code></td>
+          <td><span class="bdg b-d">窄用</span></td>
+          <td>仅 <span class="fp">content_list.py:20</span> 用于解析 HTML 表格。</td>
+          <td>保留。替代方案（lxml）收益不明显。</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout c-info">
+    <div class="ico">收益估算</div>
+    <div>
+      <span class="ttl">E4 是唯一有显著体积收益的一项。</span>
+      <p>
+        E1/E2/E3 只减少声明噪音，不减少实际安装量（传递依赖仍在）。
+        <strong>E4 移除 torch + transformers + FlagEmbedding</strong> 可减少镜像 2~3 GB，冷启动时间也明显下降（不必加载两套模型运行时）。
+        但它是本次审计中<strong>风险最高的一项</strong>——重排分数若有细微差异，会改变答案引用顺序。建议单独排期并做 A/B 对比。
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ §8 ============================================================ -->
+<section class="chapter" id="c8">
+  <div class="chapter-head"><span class="chapter-no">08</span><h2>文档治理</h2></div>
+
+  <p class="lede" style="font-size:15px">
+    <code>docs/</code> 共 392 KB（4 篇 md + 1 篇 HTML），<code>README.md</code> 35 KB。
+    逐条比对后确认 <strong>10 处可证漂移</strong>。漂移的危害不是「不准确」，而是<strong>让读者基于错误信息做判断</strong>。
+  </p>
+
+  <div class="tw">
+    <table class="dense">
+      <thead>
+        <tr><th style="width:40px" class="t-c">#</th><th style="width:210px">文档位置</th><th style="width:260px">文档说法</th><th>实际情况</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="t-c">1</td>
+          <td><span class="fp">README.md:11</span></td>
+          <td>指向 <code>docs/se_rag-技术讲解文档.html</code></td>
+          <td>该文件<strong>已从工作区删除</strong>（<code>git status</code> 显示 <code>D</code>，仍被 git 跟踪），磁盘上不存在。README 的链接已失效。</td>
+        </tr>
+        <tr>
+          <td class="t-c">2</td>
+          <td><span class="fp">README.md:58</span></td>
+          <td>「rag_eval 7 文件 / 1402 行」</td>
+          <td>实际 <strong>14 个 py / 2 143 行</strong>（已翻倍）。</td>
+        </tr>
+        <tr>
+          <td class="t-c">3</td>
+          <td><span class="fp">README.md:377</span></td>
+          <td>「58 个测试文件，458 passed」</td>
+          <td>实际 <strong>69 个测试文件</strong>；<span class="fp">superpowers/plans:34</span> 又写「501 passed」。三处数字互斥。</td>
+        </tr>
+        <tr>
+          <td class="t-c">4</td>
+          <td><span class="fp">README.md:352-355</span></td>
+          <td>只给「审批写操作」标 Token</td>
+          <td><code>/candidates</code>、<code>/status</code>、<code>/issues</code>、<code>/trial-metrics</code> <strong>全部要求</strong>（<span class="fp">evolution.py:65,82,150,156,165</span>）。</td>
+        </tr>
+        <tr>
+          <td class="t-c">5</td>
+          <td><span class="fp">技术讲解文档.md:283-290</span></td>
+          <td>鉴权表写「无会话所有者校验 / 未要求管理令牌」</td>
+          <td><code>query.py:42,96,115,122,153</code> <strong>全部调用 <code>authorize_session</code></strong>。整表过期。</td>
+        </tr>
+        <tr>
+          <td class="t-c">6</td>
+          <td><span class="fp">技术讲解文档.md:421-427</span><br><span class="fp">架构评估.md:143,208</span></td>
+          <td>F01 结论：会话归属未实现</td>
+          <td>已由 <span class="fp">session_access.py:34-57</span> 实现（Cookie + owner_hash + <code>hmac.compare_digest</code>）。</td>
+        </tr>
+        <tr>
+          <td class="t-c">7</td>
+          <td><span class="fp">技术讲解文档.md:626</span></td>
+          <td>F11 列为缺陷：<code>groundedness</code> 存 None 会报错</td>
+          <td>已修复，<span class="fp">history_repository.py:94</span> 原样存 None。缺陷清单未同步。</td>
+        </tr>
+        <tr>
+          <td class="t-c">8</td>
+          <td><span class="fp">技术讲解文档.md:561</span></td>
+          <td>引用 <code>settings.py:272</code> 作为默认令牌位置</td>
+          <td>实际在 <strong><code>:296</code></strong>。行号漂移 24 行。</td>
+        </tr>
+        <tr>
+          <td class="t-c">9</td>
+          <td><span class="fp">README.md</span> 4.5 接口表</td>
+          <td>缺 <code>/issues</code>、<code>/trial-metrics</code></td>
+          <td>两个接口已上线（<span class="fp">evolution.py:150,165</span>），<span class="fp">internal-trial.md:75-93</span> 有描述但 README 完全缺席。</td>
+        </tr>
+        <tr>
+          <td class="t-c">10</td>
+          <td><span class="fp">README.md</span> 上传章节</td>
+          <td>未提及 <code>document_kind</code> / <code>valid_until</code></td>
+          <td><span class="fp">import_.py:140-146</span> 已新增这两个表单字段（见 D1）。</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3><span class="sn">8.1</span>漂移的根因</h3>
+  <p>
+    不是「文档写得不好」，而是<strong>文档与代码之间没有约束机制</strong>。
+    三篇长文档都采用「逐节点源码走读 + 行号引用」的写法，
+    这种写法<strong>天然与重构冲突</strong>：任何一次文件移动都会让几十处行号失效，而没有任何测试会发现。
+  </p>
+
+  <div class="tw">
+    <table class="tight">
+      <thead><tr><th style="width:190px">文档</th><th class="t-num" style="width:66px">体积</th><th style="width:160px">维护成本</th><th>建议</th></tr></thead>
+      <tbody>
+        <tr><td><code>README.md</code></td><td class="t-num">35 KB</td><td>中（功能描述随代码变）</td><td><strong>保留并作为唯一权威</strong>。修正上表 1/2/3/4/9/10 六条。</td></tr>
+        <tr><td><code>se_rag-技术讲解文档.md</code></td><td class="t-num">76 KB</td><td><strong>高</strong>（大量行号引用）</td><td>压缩为一篇「架构说明」（约 15 KB），删掉逐节点走读与已修复的缺陷清单。</td></tr>
+        <tr><td><code>se_rag-企业级架构评估.md</code></td><td class="t-num">48 KB</td><td>高（21 项风险清单）</td><td>风险清单<strong>逐条转 issue</strong>，文档只保留评估结论。</td></tr>
+        <tr><td><code>internal-trial.md</code></td><td class="t-num">8 KB</td><td>低（试用期文档，已接近过期）</td><td>试用结束后归档。</td></tr>
+        <tr><td><code>answer-evaluation.md</code></td><td class="t-num">8 KB</td><td>低</td><td>随 B1 移出 <code>app/</code> 后一并移到 <code>tools/eval/README.md</code>。</td></tr>
+        <tr><td><code>se_rag-代码审计与清理报告.html</code></td><td class="t-num">250 KB</td><td><strong>一次性</strong></td><td>本报告是<strong>快照式审计</strong>，不建议长期维护。执行完清理后归档。</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout c-ok">
+    <div class="ico">建议</div>
+    <div>
+      <span class="ttl">把「鉴权表」变成测试，是唯一能阻止再次漂移的做法。</span>
+      <p>
+        写一个参数化用例遍历所有路由，断言「该路由是否要求 token」，输出表格。
+        这样文档里的鉴权表由测试生成，代码改了测试就红——<strong>把文档约束变成代码约束</strong>。
+        同理，接口清单也可以用 <code>app.routes</code> 自动生成。
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ §9 ============================================================ -->
+<section class="chapter" id="c9">
+  <div class="chapter-head"><span class="chapter-no">09</span><h2>分批执行路线图</h2></div>
+
+  <p class="lede" style="font-size:15px">
+    按<strong>风险递增、依赖递增</strong>排四批。每批都可独立发布、独立回滚。
+    第 1 批是「建立信心」——全是零风险改动，跑通后团队会对后续批次更有把握。
+  </p>
+
+  <div class="phase">
+    <div class="phase-tag"><span class="p-n">PHASE</span><span class="p-t">1</span></div>
+    <div class="phase-bd">
+      <h4>零风险清理与止血</h4>
+      <div class="meta">A 档 11 项 + P0-1 + P1-3 + P2-2 ｜ 约 267 行删除 ｜ 无前置依赖</div>
+      <ul>
+        <li><strong>删除</strong> A1~A11 共 11 个零引用符号（267 行）。</li>
+        <li><strong>改默认值</strong> P0-1：<code>IMPORT_ADMIN_TOKEN</code> 默认改空 + 生产环境启动校验 + <strong>轮换令牌</strong>。</li>
+        <li><strong>改配置</strong> P1-3：<code>diagnose=False</code>，并清理已泄漏的 <code>logs/*.log</code>。</li>
+        <li><strong>改两行</strong> P2-2：令牌比较统一 <code>hmac.compare_digest</code>。</li>
+      </ul>
+      <div class="cmd">pytest tests/unit -q          # 应全绿
+python -c "import app.api.http.query_server"   # 导入自检</div>
+      <p class="small" style="margin:8px 0 0"><strong>回滚</strong>：单次提交，<code>git revert</code> 即可。无数据变更。</p>
+    </div>
+  </div>
+
+  <div class="phase">
+    <div class="phase-tag"><span class="p-n">PHASE</span><span class="p-t">2</span></div>
+    <div class="phase-bd">
+      <h4>鉴权与正确性</h4>
+      <div class="meta">P0-2 + P1-7 + P1-8 + P2-9 ｜ 前置：第 1 批</div>
+      <ul>
+        <li><strong>删分支</strong> P0-2：去掉 <code>request is None</code> 放行，5 处路由改必填 <code>Request</code>。</li>
+        <li><strong>加校验</strong> P1-7：<code>reject</code> / <code>remove_candidate</code> 检查 <code>matched_count</code> / <code>deleted_count</code>。</li>
+        <li><strong>改一行</strong> P1-8：<code>{**dict(_FALLBACKS), **cached}</code>，恢复参数自调的可观测性。</li>
+        <li><strong>改一行</strong> P2-9：<code>rev</code> 用 <code>$inc</code> 原子自增。</li>
+      </ul>
+      <div class="cmd">pytest tests/unit/test_trial_access.py tests/unit/test_evolution_loop_wiring.py -q
+# 手工：两个不同 cookie 访问同一 session，应 404
+# 手工：审批页对一个已删除的候选点「驳回」，应提示 404</div>
+      <p class="small" style="margin:8px 0 0"><strong>回滚</strong>：P0-2 会影响前端调用方式，需与前端同步发布。</p>
+    </div>
+  </div>
+
+  <div class="phase">
+    <div class="phase-tag"><span class="p-n">PHASE</span><span class="p-t">3</span></div>
+    <div class="phase-bd">
+      <h4>可用性加固</h4>
+      <div class="meta">P1-1 + P1-2 + P1-4 + P1-5 + P2-7 + P2-12 ｜ 前置：第 2 批</div>
+      <ul>
+        <li><strong>统一超时</strong> P1-1：Milvus 加 <code>_call</code> 包装，6 个调用点改造。</li>
+        <li><strong>解阻塞</strong> P1-2：导入改 <code>async def</code> + <code>asyncio.to_thread</code>，队列满返回 429。</li>
+        <li><strong>加限流</strong> P1-4：按 owner cookie 令牌桶，单 owner 并发上限。</li>
+        <li><strong>补日志</strong> P1-5：7 处静默 except 加 <code>logger.warning(..., exc_info=True)</code>。</li>
+        <li><strong>修边界</strong> P2-7（stat 异常）+ P2-12（task_id 校验）。</li>
+      </ul>
+      <div class="cmd">pytest tests/unit -q
+# 压测：并发 50 个上传，/api/health 应 200ms 内返回
+# 故障注入：断开 Milvus，导入应在 timeout 内失败而非挂起</div>
+      <p class="small" style="margin:8px 0 0"><strong>回滚</strong>：P1-2 与 P1-4 改变请求处理模型，建议灰度发布。P1-1 若超时设得过短会导致大批量导入失败，需按实测调整。</p>
+    </div>
+  </div>
+
+  <div class="phase">
+    <div class="phase-tag"><span class="p-n">PHASE</span><span class="p-t">4</span></div>
+    <div class="phase-bd">
+      <h4>架构收敛（需产品决策）</h4>
+      <div class="meta">B1 + B5 + D3 + D5 + E4 + §8 文档收敛 ｜ 前置：产品/运维确认</div>
+      <ul>
+        <li><strong>移出</strong> B1：<code>app/rag_eval/</code> → <code>tools/eval/</code>，同步改 8 个测试文件的 import。</li>
+        <li><strong>二选一</strong> B5：修断点续传的路径，或删除该功能与配置。</li>
+        <li><strong>加开关</strong> D3 试用指标 + D5 联网检索。</li>
+        <li><strong>合并模型栈</strong> E4：<code>pymilvus-model</code> 的 <code>BGERerank</code> 替代 <code>FlagEmbedding</code>，移除 torch/transformers。<strong>需 A/B 验证重排分数</strong>。</li>
+        <li><strong>文档收敛</strong>：README 修正 6 条漂移；技术讲解压缩为架构说明；风险清单转 issue。</li>
+      </ul>
+      <div class="cmd">pytest tests/unit -q &amp;&amp; pytest -m e2e -q   # 需真实存储
+# E4 需对比：同一批 query 的重排顺序与分数差异</div>
+      <p class="small" style="margin:8px 0 0"><strong>回滚</strong>：B1 是纯移动，可 revert；E4 涉及模型替换，需保留旧实现开关一个版本。</p>
+    </div>
+  </div>
+
+  <div class="callout c-info">
+    <div class="ico">节奏</div>
+    <div>
+      <span class="ttl">第 1 批建议本周内完成，第 2 批下周，第 3/4 批按排期。</span>
+      <p>
+        第 1 批全是「改默认值 + 删死代码」，单次提交可在半小时内完成，却消掉了本报告里最严重的两个安全项之一（P0-1）与最高频的日志泄漏（P1-3）。
+        <strong>先做这批的投入产出比最高</strong>。
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ §10 ============================================================ -->
+<section class="chapter" id="c10">
+  <div class="chapter-head"><span class="chapter-no">10</span><h2>风险矩阵与自查清单</h2></div>
+
+  <section class="sec">
+    <h3><span class="sn">10.1</span>影响面矩阵</h3>
+    <p>纵轴是改动类型，横轴是受影响模块。<strong>红色格</strong>表示该组合需要额外验证或灰度发布。</p>
+    <div class="tw">
+      <table class="matrix">
+        <thead>
+          <tr>
+            <th style="width:150px;text-align:left">改动类型 ＼ 影响模块</th>
+            <th>导入</th><th>查询</th><th>自进化</th><th>前端</th><th>存储</th><th>部署</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="lbl">删除死代码（A 档）</td>
+            <td class="mx-lo">无</td><td class="mx-lo">无</td><td class="mx-lo">无</td><td class="mx-lo">无</td><td class="mx-lo">无</td><td class="mx-lo">无</td>
+          </tr>
+          <tr>
+            <td class="lbl">改默认值（P0-1 令牌）</td>
+            <td class="mx-hi">需轮换</td><td class="mx-lo">无</td><td class="mx-hi">同令牌</td><td class="mx-lo">无</td><td class="mx-lo">无</td><td class="mx-hi">所有环境</td>
+          </tr>
+          <tr>
+            <td class="lbl">改鉴权（P0-2）</td>
+            <td class="mx-lo">无</td><td class="mx-md">需回归</td><td class="mx-lo">无</td><td class="mx-hi">调用方式</td><td class="mx-md">query_sessions</td><td class="mx-lo">无</td>
+          </tr>
+          <tr>
+            <td class="lbl">改存储策略（P0-3）</td>
+            <td class="mx-md">上传路径</td><td class="mx-md">图片加载</td><td class="mx-lo">无</td><td class="mx-hi">渲染逻辑</td><td class="mx-hi">历史对象</td><td class="mx-md">桶策略</td>
+          </tr>
+          <tr>
+            <td class="lbl">加超时（P1-1）</td>
+            <td class="mx-md">大批量导入</td><td class="mx-lo">无</td><td class="mx-md">审批写库</td><td class="mx-lo">无</td><td class="mx-lo">无</td><td class="mx-lo">无</td>
+          </tr>
+          <tr>
+            <td class="lbl">改线程模型（P1-2）</td>
+            <td class="mx-hi">全链路</td><td class="mx-md">线程池竞争</td><td class="mx-lo">无</td><td class="mx-lo">无</td><td class="mx-lo">无</td><td class="mx-md">并发参数</td>
+          </tr>
+          <tr>
+            <td class="lbl">加限流（P1-4）</td>
+            <td class="mx-lo">无</td><td class="mx-hi">所有用户</td><td class="mx-lo">无</td><td class="mx-hi">429 处理</td><td class="mx-lo">无</td><td class="mx-md">阈值调参</td>
+          </tr>
+          <tr>
+            <td class="lbl">改指标口径（D4）</td>
+            <td class="mx-lo">无</td><td class="mx-lo">无</td><td class="mx-md">看板</td><td class="mx-lo">无</td><td class="mx-md">历史数据</td><td class="mx-lo">无</td>
+          </tr>
+          <tr>
+            <td class="lbl">移出 rag_eval（B1）</td>
+            <td class="mx-lo">无</td><td class="mx-lo">无</td><td class="mx-lo">无</td><td class="mx-lo">无</td><td class="mx-lo">无</td><td class="mx-md">CI 路径</td>
+          </tr>
+          <tr>
+            <td class="lbl">换模型栈（E4）</td>
+            <td class="mx-lo">无</td><td class="mx-hi">重排结果</td><td class="mx-lo">无</td><td class="mx-lo">无</td><td class="mx-lo">无</td><td class="mx-hi">镜像重建</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h3><span class="sn">10.2</span>不可逆操作警示</h3>
+    <div class="callout c-bad">
+      <div class="ico">警告</div>
+      <div>
+        <span class="ttl">以下三项会影响已落库数据，必须先在测试环境验证。</span>
+        <ol style="margin:8px 0 0;padding-left:20px">
+          <li><strong>A9 删除 <code>MetricSnapshot</code> 三个字段</strong>：新写入的 <code>k_metrics</code> 文档不再含 <code>recall_k</code>/<code>precision</code>/<code>groundedness</code>，
+            而历史文档仍有。读取方（<code>latest_metrics</code>）返回原始 dict 不会报错，但任何假设字段存在的下游代码会 <code>KeyError</code>。
+            <strong>建议先 <code>$unset</code> 历史文档再删字段</strong>。</li>
+          <li><strong>A10 删除两个死配置</strong>：无数据影响，但需确认 CI/部署清单未引用这两个环境变量名。</li>
+          <li><strong>B5 修断点续传路径</strong>：修好后导入行为会变（命中复用时跳过 MinerU）。当前实现只比 mtime 不校验内容同源，
+            <strong>同名不同文件会错误复用</strong>。修路径的同时必须加内容校验（如文件大小或哈希）。</li>
+        </ol>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h3><span class="sn">10.3</span>自查清单</h3>
+    <p>24 项，分三组。勾选状态保存在浏览器本地。全部勾选说明你已完整掌握这份审计并具备执行条件。</p>
+
+    <div class="cl-wrap">
+      <div class="cl-top">
+        <div class="cl-prog">
+          <div class="cl-prog-track"><div class="cl-prog-bar" id="clBar"></div></div>
+          <div class="cl-prog-txt"><b id="clNum">0</b> / <span id="clTotal">24</span> 项已确认　·　<span id="clPct">0%</span></div>
+        </div>
+        <button class="cl-reset" id="clReset">重置全部</button>
+      </div>
+
+      <div class="cl-group" data-group="A">
+        <h4><span class="gdot"></span>第一组 · 审计完整性<span class="gcount"><span data-gc="A">0</span>/8</span></h4>
+        <label class="ck"><input type="checkbox" data-ck="a1"><span class="ck-txt">能说出为什么「grep 有命中」不等于「在调用」，并举出 <code>build_import_chunks</code> 的例子。<a class="ref" href="#c1">→ §1.1</a></span></label>
+        <label class="ck"><input type="checkbox" data-ck="a2"><span class="ck-txt">能列出 6 类「语义引用为 0 但确实在用」的反例模式。<a class="ref" href="#c1">→ §1.1</a></span></label>
+        <label class="ck"><input type="checkbox" data-ck="a3"><span class="ck-txt">能说明 A/B/C/D 四档的判定规则差异，以及为什么 B 档不能直接删。<a class="ref" href="#c1">→ §1.2</a></span></label>
+        <label class="ck"><input type="checkbox" data-ck="a4"><span class="ck-txt">能复述 267 行可删代码的构成（哪几类「化石」）。<a class="ref" href="#c2">→ §2 小结</a></span></label>
+        <label class="ck"><input type="checkbox" data-ck="a5"><span class="ck-txt">能解释 <code>rag_eval</code> 为什么是「架构错位」而不是「死代码」。<a class="ref" href="#B1">→ B1</a></span></label>
+        <label class="ck"><input type="checkbox" data-ck="a6"><span class="ck-txt">能说出 <code>rag_eval</code> 两处验收门槛恒为 False 的具体原因与产物数据。<a class="ref" href="#B1">→ B1</a></span></label>
+        <label class="ck"><input type="checkbox" data-ck="a7"><span class="ck-txt">能指出 10 处文档漂移中任意 5 处，并说明漂移的根因。<a class="ref" href="#c8">→ §8</a></span></label>
+        <label class="ck"><input type="checkbox" data-ck="a8"><span class="ck-txt">能解释为什么依赖治理里只有 E4 有显著收益。<a class="ref" href="#c7">→ §7</a></span></label>
+      </div>
+
+      <div class="cl-group" data-group="B">
+        <h4><span class="gdot" style="background:var(--bad)"></span>第二组 · 缺陷理解<span class="gcount"><span data-gc="B">0</span>/8</span></h4>
+        <label class="ck"><input type="checkbox" data-ck="b1"><span class="ck-txt">能说明 P0-1 为什么让 fail-closed 失效（默认值永不为空）。<a class="ref" href="#C-P0-1">→ P0-1</a></span></label>
+        <label class="ck"><input type="checkbox" data-ck="b2"><span class="ck-txt">能列出 P0-2 的两条静默放行路径，并指出 5 个可选 Request 的路由。<a class="ref" href="#C-P0-2">→ P0-2</a></span></label>
+        <label class="ck"><input type="checkbox" data-ck="b3"><span class="ck-txt">能解释 P0-3 的对象键为什么可枚举，以及「上传鉴权被存储策略绕过」的含义。<a class="ref" href="#C-P0-3">→ P0-3</a></span></label>
+        <label class="ck"><input type="checkbox" data-ck="b4"><span class="ck-txt">能说明 P1-2 如何用「上传权限」打满整个服务的线程池。<a class="ref" href="#C-P1-2">→ P1-2</a></span></label>
+        <label class="ck"><input type="checkbox" data-ck="b5"><span class="ck-txt">能指出 P1-3 泄漏了哪三类信息（凭据 / 文档正文 / 用户提问）。<a class="ref" href="#C-P1-3">→ P1-3</a></span></label>
+        <label class="ck"><input type="checkbox" data-ck="b6"><span class="ck-txt">能解释 P1-8 的 dict 合并语义，以及为什么「运行时对、观测错」。<a class="ref" href="#C-P1-8">→ P1-8</a></span></label>
+        <label class="ck"><input type="checkbox" data-ck="b7"><span class="ck-txt">能说明 P1-7 的「假成功」如何导致运维误判，以及它和向量泄漏的关系。<a class="ref" href="#C-P1-7">→ P1-7</a></span></label>
+        <label class="ck"><input type="checkbox" data-ck="b8"><span class="ck-txt">能说出 P2 里最该先做的三项及理由。<a class="ref" href="#c5">→ §5 优先级</a></span></label>
+      </div>
+
+      <div class="cl-group" data-group="C">
+        <h4><span class="gdot" style="background:var(--warn)"></span>第三组 · 执行条件<span class="gcount"><span data-gc="C">0</span>/8</span></h4>
+        <label class="ck"><input type="checkbox" data-ck="c1"><span class="ck-txt">已确认 A 档 11 项无外部脚本 import（跑过 §1.4 的复验脚本）。<a class="ref" href="#c1">→ §1.4</a></span></label>
+        <label class="ck"><input type="checkbox" data-ck="c2"><span class="ck-txt">已轮换 <code>IMPORT_ADMIN_TOKEN</code>，并确认导入与审批使用不同值。<a class="ref" href="#C-P0-1">→ P0-1</a></span></label>
+        <label class="ck"><input type="checkbox" data-ck="c3"><span class="ck-txt">已清理 <code>logs/*.log</code> 中可能泄漏的凭据。<a class="ref" href="#C-P1-3">→ P1-3</a></span></label>
+        <label class="ck"><input type="checkbox" data-ck="c4"><span class="ck-txt">已确认 <code>SESSION_OWNERSHIP_ENABLED</code> 在所有环境为 true（或已接受风险）。<a class="ref" href="#C-P0-2">→ P0-2</a></span></label>
+        <label class="ck"><input type="checkbox" data-ck="c5"><span class="ck-txt">已确认无 runbook / CI 引用 <code>schema_migration</code>。<a class="ref" href="#B2">→ B2</a></span></label>
+        <label class="ck"><input type="checkbox" data-ck="c6"><span class="ck-txt">已确认 <code>MINERU_MODEL_SOURCE</code> 是否被外部 MinerU 进程消费。<a class="ref" href="#B4">→ B4</a></span></label>
+        <label class="ck"><input type="checkbox" data-ck="c7"><span class="ck-txt">已就 B5（断点续传：修还是删）与 B1（rag_eval 去留）做出决策。<a class="ref" href="#c3">→ §3</a></span></label>
+        <label class="ck"><input type="checkbox" data-ck="c8"><span class="ck-txt">已确认第 1 批可独立发布，且回滚路径（<code>git revert</code>）可用。<a class="ref" href="#c9">→ §9</a></span></label>
+      </div>
+    </div>
+  </section>
+</section>
+
+<footer class="foot">
+  <p>
+    <strong>审计范围</strong>　<code>app/</code> 161 个 Python 文件（12 593 行）、<code>tests/</code> 69 个文件（7 246 行）、
+    4 个前端 JS（1 566 行）、<code>settings.py</code> 全部配置字段、<code>pyproject.toml</code> 全部依赖、<code>docs/</code> 与 README。
+  </p>
+  <p>
+    <strong>方法</strong>　AST 语义引用计数（排除 docstring 与注释）+ 配置字段双重检查（属性访问 + 裸名）+ 防误删反例核对（6 类）。
+    所有 <code>文件:行号</code> 均为当前 HEAD 实测，可用 §1.4 的命令复验。
+  </p>
+  <p>
+    <strong>声明</strong>　本报告<strong>未修改任何项目代码</strong>，只做只读分析。
+    所有删除与重构建议均需由你决定执行时机；执行前请按 §9 的批次顺序与 §10.2 的不可逆警示操作。
+  </p>
+</footer>
+
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ========== 1. 代码块行号 ========== */
+  var rawStore = new WeakMap();
+  document.querySelectorAll('.code pre').forEach(function (pre) {
+    var code = pre.querySelector('code');
+    if (!code) return;
+    var start = parseInt(pre.getAttribute('data-start') || '1', 10);
+    var raw = code.textContent.replace(/\n+$/, '');
+    rawStore.set(pre, raw);
+    var lines = raw.split('\n');
+    code.textContent = '';
+    lines.forEach(function (line, i) {
+      var span = document.createElement('span');
+      span.className = 'cl';
+      span.setAttribute('data-n', String(start + i));
+      span.textContent = line.length ? line : '\u00a0';
+      code.appendChild(span);
+    });
+  });
+
+  /* ========== 2. 复制按钮 ========== */
+  document.querySelectorAll('.code .copy').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var fig = btn.closest('.code');
+      var pre = fig && fig.querySelector('pre');
+      var text = pre ? (rawStore.get(pre) || pre.textContent) : '';
+      var done = function () {
+        btn.textContent = '已复制'; btn.classList.add('done');
+        setTimeout(function () { btn.textContent = '复制'; btn.classList.remove('done'); }, 1600);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done).catch(fallback);
+      } else { fallback(); }
+      function fallback() {
+        var ta = document.createElement('textarea');
+        ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+        document.body.appendChild(ta); ta.select();
+        try { document.execCommand('copy'); done(); } catch (e) {}
+        document.body.removeChild(ta);
+      }
+    });
+  });
+
+  /* ========== 3. 卡片折叠（点标题区，但不含勾选框） ========== */
+  document.querySelectorAll('.card-hd').forEach(function (hd) {
+    hd.setAttribute('role', 'button');
+    hd.setAttribute('tabindex', '0');
+    var toggle = function (e) {
+      if (e && e.target && e.target.closest && e.target.closest('.pick')) return;
+      var card = hd.closest('.card');
+      if (card) card.classList.toggle('open');
+    };
+    hd.addEventListener('click', toggle);
+    hd.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(e); }
+    });
+  });
+
+  /* ========== 4. 筛选 ========== */
+  var cards = Array.prototype.slice.call(document.querySelectorAll('.card, tr[data-tier]'));
+  var chipsTier = Array.prototype.slice.call(document.querySelectorAll('[data-ftier]'));
+  var chipsDim = Array.prototype.slice.call(document.querySelectorAll('[data-fdim]'));
+  var searchEl = document.getElementById('fSearch');
+  var visEl = document.getElementById('fVisible');
+  var state = { tier: 'all', dim: 'all', q: '' };
+
+  function apply() {
+    var n = 0;
+    cards.forEach(function (c) {
+      var okTier = state.tier === 'all' || c.getAttribute('data-tier') === state.tier;
+      var okDim = state.dim === 'all' || (c.getAttribute('data-dim') || '') === state.dim;
+      var okQ = !state.q || (c.textContent || '').toLowerCase().indexOf(state.q) !== -1;
+      var show = okTier && okDim && okQ;
+      c.classList.toggle('hide', !show);
+      if (show) n++;
+    });
+    if (visEl) visEl.textContent = String(n);
+  }
+
+  chipsTier.forEach(function (ch) {
+    ch.addEventListener('click', function () {
+      chipsTier.forEach(function (x) { x.classList.remove('on'); });
+      ch.classList.add('on');
+      state.tier = ch.getAttribute('data-ftier');
+      apply();
+    });
+  });
+
+  chipsDim.forEach(function (ch) {
+    ch.addEventListener('click', function () {
+      chipsDim.forEach(function (x) { x.classList.remove('on'); });
+      ch.classList.add('on');
+      state.dim = ch.getAttribute('data-fdim');
+      apply();
+    });
+  });
+
+  if (searchEl) {
+    searchEl.addEventListener('input', function () {
+      state.q = (searchEl.value || '').trim().toLowerCase();
+      apply();
+    });
+  }
+
+  /* ========== 5. 侧栏滚动高亮 ========== */
+  var tocLinks = Array.prototype.slice.call(document.querySelectorAll('#toc a'));
+  var targets = tocLinks.map(function (a) {
+    return document.getElementById(a.getAttribute('href').slice(1));
+  }).filter(Boolean);
+
+  if ('IntersectionObserver' in window && targets.length) {
+    var visible = new Map();
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (en) {
+        visible.set(en.target.id, en.isIntersecting ? en.boundingClientRect.top : null);
+      });
+      var best = null, bestTop = Infinity;
+      targets.forEach(function (t) {
+        var top = visible.get(t.id);
+        if (typeof top === 'number' && top >= -140 && top < bestTop) { bestTop = top; best = t.id; }
+      });
+      if (!best) return;
+      tocLinks.forEach(function (a) {
+        a.classList.toggle('active', a.getAttribute('href') === '#' + best);
+      });
+    }, { rootMargin: '-100px 0px -62% 0px', threshold: [0, 1] });
+    targets.forEach(function (t) { io.observe(t); });
+  }
+
+  /* ========== 6. 阅读进度条 ========== */
+  var bar = document.getElementById('readbar');
+  var onScroll = function () {
+    var h = document.documentElement;
+    var max = h.scrollHeight - h.clientHeight;
+    var p = max > 0 ? (h.scrollTop || document.body.scrollTop) / max : 0;
+    if (bar) bar.style.width = Math.min(100, Math.max(0, p * 100)) + '%';
+  };
+  window.addEventListener('scroll', onScroll, { passive: true });
+  window.addEventListener('resize', onScroll);
+  onScroll();
+
+  /* ========== 7. 执行清单（卡片勾选 + 自查清单） ========== */
+  var PICK_KEY = 'se_rag_audit_picks_v1';
+  var CHECK_KEY = 'se_rag_audit_checklist_v1';
+  var picks = Array.prototype.slice.call(document.querySelectorAll('[data-pick]'));
+  var boxes = Array.prototype.slice.call(document.querySelectorAll('.ck input[type="checkbox"]'));
+
+  function load(key) {
+    try { return JSON.parse(localStorage.getItem(key) || '{}') || {}; } catch (e) { return {}; }
+  }
+  function save(key, obj) {
+    try { localStorage.setItem(key, JSON.stringify(obj)); } catch (e) {}
+  }
+
+  var savedPicks = load(PICK_KEY);
+  picks.forEach(function (p) {
+    if (savedPicks[p.getAttribute('data-pick')]) p.checked = true;
+    p.addEventListener('change', function () {
+      savedPicks[p.getAttribute('data-pick')] = p.checked;
+      save(PICK_KEY, savedPicks);
+    });
+  });
+
+  var savedChecks = load(CHECK_KEY);
+  var barEl = document.getElementById('clBar');
+  var numEl = document.getElementById('clNum');
+  var pctEl = document.getElementById('clPct');
+  var totalEl = document.getElementById('clTotal');
+
+  boxes.forEach(function (b) {
+    if (savedChecks[b.getAttribute('data-ck')]) b.checked = true;
+  });
+
+  function refresh() {
+    var done = 0, perGroup = {};
+    boxes.forEach(function (b) {
+      var g = b.closest('.cl-group');
+      var key = g ? g.getAttribute('data-group') : '';
+      perGroup[key] = perGroup[key] || { done: 0, all: 0 };
+      perGroup[key].all++;
+      if (b.checked) { done++; perGroup[key].done++; }
+    });
+    var pct = boxes.length ? Math.round(done / boxes.length * 100) : 0;
+    if (barEl) barEl.style.width = pct + '%';
+    if (numEl) numEl.textContent = String(done);
+    if (pctEl) pctEl.textContent = pct + '%';
+    if (totalEl) totalEl.textContent = String(boxes.length);
+    Object.keys(perGroup).forEach(function (k) {
+      var el = document.querySelector('[data-gc="' + k + '"]');
+      if (el) el.textContent = String(perGroup[k].done);
+    });
+  }
+
+  boxes.forEach(function (b) {
+    b.addEventListener('change', function () {
+      savedChecks[b.getAttribute('data-ck')] = b.checked;
+      save(CHECK_KEY, savedChecks);
+      refresh();
+    });
+  });
+
+  var reset = document.getElementById('clReset');
+  if (reset) {
+    reset.addEventListener('click', function () {
+      savedChecks = {};
+      try { localStorage.removeItem(CHECK_KEY); } catch (e) {}
+      boxes.forEach(function (b) { b.checked = false; });
+      refresh();
+    });
+  }
+  refresh();
+
+  /* ========== 8. Esc 折叠全部 ========== */
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') {
+      document.querySelectorAll('.card.open').forEach(function (c) { c.classList.remove('open'); });
+    }
+  });
+
+  /* ========== 9. 初始展开前两张卡片 ========== */
+  cards.slice(0, 2).forEach(function (c) { c.classList.add('open'); });
+
+  apply();
+})();
+</script>
+
+</main>
+</div>
+</body>
+</html>

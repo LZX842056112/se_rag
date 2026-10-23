@@ -133,6 +133,9 @@ def record_query(metrics: QueryMetrics, state: dict, status: str, query: str):
         "business_tag": state.get("business_tag", ""),
         "handoff": bool(state.get("handoff_required")),
         "query_hash": hashlib.sha256("".join(query.lower().split()).encode()).hexdigest(),
+        "query_mode": state.get('query_mode', 'legacy'),
+        "agentic_stop_reason": state.get('agentic_stop_reason', ''),
+        "agentic_metrics": state.get('agentic_metrics', {}),
     })
     try:
         get_collection(settings.mongo.query_runs_collection).update_one(

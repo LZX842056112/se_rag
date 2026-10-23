@@ -31,6 +31,8 @@ class CandidateApproveRequest(BaseModel):
 class CandidateEditRequest(BaseModel):
     faq_question: Optional[str] = None
     faq_answer: Optional[str] = None
+    source_refs: Optional[list[str]] = None
+    item_names: Optional[list[str]] = None
     reason: str = ""
 
 

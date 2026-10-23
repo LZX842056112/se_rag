@@ -55,6 +55,10 @@ def test_refusal_answer_becomes_need_info(fake_mongo, monkeypatch):
 
 
 def test_informative_answer_becomes_draft(fake_mongo, monkeypatch):
+    from app.evolution import governance
+    source = {"chunk_id": "chunk-1", "doc_id": "manual", "document_version": "v1",
+              "item_name": "Broker HAK 180", "content": "HAK 180 的额定工作温度为 0~40 摄氏度。"}
+    monkeypatch.setattr(governance, "resolve_source", lambda ref: source)
     monkeypatch.setattr(generator_module, "_call_llm", lambda *_a, **_k: {
         "faq_question": "HAK 180 的额定工作温度是多少？",
         "faq_answer": "HAK 180 的额定工作温度为 0~40 摄氏度。",
@@ -62,7 +66,7 @@ def test_informative_answer_becomes_draft(fake_mongo, monkeypatch):
     })
     candidate = generator_module.generate_candidate(
         _gap("HAK 180 的额定工作温度是多少？"),
-        context_docs=[{"text": "HAK 180 的额定工作温度为 0~40 摄氏度。"}],
+        context_docs=[source],
     )
     assert candidate is not None
     assert candidate.status == "draft"

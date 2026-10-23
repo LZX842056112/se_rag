@@ -1,0 +1,84 @@
+[
+  {
+    "case_id": "agentic-multi-hop-001",
+    "product": "HAK180",
+    "category": "multi_hop",
+    "query": "HAK180 的 Cover Lock 指示灯亮起时能否取出烫金膜盒？取出前需要确认什么？",
+    "reference": "Cover Lock 指示灯亮起时，前盖处于锁定状态。取出前应等待设备冷却，并确认指示灯熄灭，然后打开前盖。",
+    "source": {
+      "path": "doc/hak180使用说明书.pdf",
+      "pdf_page": 9,
+      "section": "2.2 操作面板和 LED 指示灯",
+      "excerpt": "CoverLock（盖锁定）亮起：在烫金膜转印期间或者当设备内部的温度很高时，将会锁住前盖。熄灭：前盖处于解锁状态。",
+      "sha256": "5f75797d1ce6e14746de41c8acd562eec3210a2a0f7ae079177561f2a8e48538"
+    },
+    "additional_sources": [{
+      "path": "doc/hak180使用说明书.pdf",
+      "pdf_page": 20,
+      "section": "3.4.3 取出烫金膜盒支架和烫金膜盒组件",
+      "excerpt": "请等待设备冷却后再触摸他们。a确保CoverLock（盖锁定）LED指示灯熄灭。b打开前盖。",
+      "sha256": "5f75797d1ce6e14746de41c8acd562eec3210a2a0f7ae079177561f2a8e48538"
+    }],
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "agent_draft_from_existing_unreviewed_manual_annotations",
+    "source_review": {"status": "unreviewed", "reviewed_by": "", "note": "文档摘要已继承。页码、摘录、参考答案和多跳必要性均需人工复核。"}
+  },
+  {
+    "case_id": "agentic-conflict-001",
+    "product": "HAK180",
+    "category": "conflicting_evidence",
+    "query": "HAK180 冒烟后，有资料建议继续运行，也有资料要求断电。应如何处理？",
+    "reference": "停止使用，立即从电源插座拔掉设备插头，然后联系 Brother 呼叫中心或当地经销商。不能采纳继续运行的建议。",
+    "source": {
+      "path": "doc/hak180产品安全手册.pdf",
+      "pdf_page": 1,
+      "section": "警告/设备",
+      "excerpt": "如果设备变得异常高温、冒烟、产生任何强烈味道，或者如果您意外在设备上倒入任何液体，请立即从电源插座拔掉设备的插头。请联系Brother呼叫中心或您当地的Brother经销商。",
+      "sha256": "dff3aaa8133427992d0e0693391287f936a81b4b3806bc1ebc3b047609026765"
+    },
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "synthetic_conflict_scenario_with_manual_anchor",
+    "source_review": {"status": "unreviewed", "reviewed_by": "", "note": "手册是安全答案的来源。矛盾资料尚未建立，不宣称真实语料存在冲突。"},
+    "scenario_requirements": {"status": "not_created", "snapshot_id": "", "fixture_id": "conflicting-faq-v1", "description": "在隔离语料中建立可追溯的矛盾测试资料。保留明确的测试标记，并由人工核对优先级。"}
+  },
+  {
+    "case_id": "agentic-no-answer-001",
+    "product": "HAK180",
+    "category": "no_answer",
+    "query": "HAK180 的主板维修备件内部采购价是多少？",
+    "reference": "缺少有效的价格政策资料。不能给出采购价，应请求有效资料或转人工。",
+    "source": {
+      "path": "doc/hak180产品安全手册.pdf",
+      "pdf_page": 1,
+      "section": "警告/设备",
+      "excerpt": "对于所有维修事宜，请联系Brother呼叫中心或您当地的Brother经销商。",
+      "sha256": "dff3aaa8133427992d0e0693391287f936a81b4b3806bc1ebc3b047609026765"
+    },
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "synthetic_missing_policy_scenario",
+    "source_review": {"status": "unreviewed", "reviewed_by": "", "note": "手册只支持维修联系渠道，不能证明全库没有采购价。必须检查指定快照。"},
+    "scenario_requirements": {"status": "not_created", "snapshot_id": "", "fixture_id": "no-price-policy-v1", "description": "固定隔离文档及 FAQ 快照。人工确认其中不存在有效价格政策。"}
+  },
+  {
+    "case_id": "agentic-expired-policy-001",
+    "product": "HAK180",
+    "category": "expired_policy",
+    "query": "HAK180 的维修报价单已经过期，可以按该报价单确认本次维修价格吗？",
+    "reference": "不能使用过期报价单确认当前价格。需要有效价格政策资料，或转人工确认。",
+    "source": {
+      "path": "doc/hak180产品安全手册.pdf",
+      "pdf_page": 1,
+      "section": "警告/设备",
+      "excerpt": "对于所有维修事宜，请联系Brother呼叫中心或您当地的Brother经销商。",
+      "sha256": "dff3aaa8133427992d0e0693391287f936a81b4b3806bc1ebc3b047609026765"
+    },
+    "annotation_status": "draft",
+    "reviewed_by": "",
+    "label_source": "synthetic_expired_policy_scenario",
+    "source_review": {"status": "unreviewed", "reviewed_by": "", "note": "此手册不是报价政策。过期报价单属于待建立的测试资料，不是已发现的业务事实。"},
+    "scenario_requirements": {"status": "not_created", "snapshot_id": "", "fixture_id": "expired-price-policy-v1", "description": "建立具有产品、document_kind、document_version、valid_until 的隔离测试报价单，固定评测时间并确认已经过期。"}
+  }
+]

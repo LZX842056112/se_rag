@@ -42,6 +42,7 @@ class GapSignal(BaseModel):
 
 
 class KnowledgeGap(BaseModel):
+    gap_kind: str = "retrieval_miss"
     gap_id: str | None = None   # Mongo 主键（生成候选时透传给候选，用于回写缺口状态）
     session_id: str
     query: str = ""
@@ -58,6 +59,13 @@ class KnowledgeGap(BaseModel):
 
 # ---------------- 知识候选 k_candidates ----------------
 class KnowledgeCandidate(BaseModel):
+    schema_version: int = 1
+    gap_kind: str = "knowledge_missing"
+    source_versions: list[dict[str, Any]] = Field(default_factory=list)
+    content_version: int = 1
+    publication_status: str = "draft"
+    index_version: str = ""
+    content_sha256: str = ""
     faq_question: str
     faq_answer: str
     source_refs: list[str] = Field(default_factory=list)  # 来源 chunk_id / 文档

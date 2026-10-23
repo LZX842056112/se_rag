@@ -16,6 +16,11 @@ class LLMProvider:
     def chat(self, model_name: str | None = None, json_mode: bool = False, *, timeout_seconds: float | None = None, max_retries: int | None = None) -> ChatOpenAI:
         """获取对话模型；``model_name`` 为空时使用配置中的默认模型。"""
         options = {}
+        from app.rag.agentic.deadline import remaining
+        available = remaining()
+        if available is not None:
+            timeout_seconds = min(available, timeout_seconds or settings.import_.llm_timeout_seconds)
+            max_retries = 0
         if timeout_seconds is not None:
             options["timeout_seconds"] = timeout_seconds
         if max_retries is not None:

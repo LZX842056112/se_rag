@@ -34,7 +34,8 @@ def compute_snapshot(window_hours: int = 24) -> MetricSnapshot:
 
 def record_metric(snapshot: MetricSnapshot | None = None) -> None:
     """把指标快照写入 ``k_metrics``（自进化关闭时不写）。"""
-    if not settings.evolution.enabled:
+    from app.evolution.flags import writes_enabled
+    if not writes_enabled():
         return
     snapshot = snapshot or compute_snapshot()
     try:

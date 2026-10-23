@@ -25,6 +25,14 @@ class QueryGraphState(TypedDict):
     issue_type: str
     issue_id: str
     metrics: dict
+    agentic_trace: list
+    evidence_manifest: list
+    agentic_metrics: dict
+    agentic_stop_reason: str
+    agentic_verified: bool
+    query_mode: str
+    agentic_revalidation: list
+    agentic_diagnostics: dict
 
     # 检索过程中的中间数据
     embedding_chunks: list  # 普通向量检索回来的切片
@@ -72,6 +80,14 @@ query_graph_default_state: QueryGraphState = {
     "handoff_required": False,
     "issue_type": "",
     "issue_id": "",
+    "agentic_trace": [],
+    "evidence_manifest": [],
+    "agentic_metrics": {},
+    "agentic_stop_reason": "",
+    "agentic_verified": False,
+    "query_mode": "legacy",
+    "agentic_revalidation": [],
+    "agentic_diagnostics": {},
     "embedding_chunks": [],
     "hyde_embedding_chunks": [],
     "web_search_docs": [],

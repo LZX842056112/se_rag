@@ -8,6 +8,8 @@
 """
 from __future__ import annotations
 
+import math
+
 from langchain_core.messages import HumanMessage
 
 from app.shared.models import llm_providers
@@ -21,8 +23,6 @@ _PROMPT = (
     "仅输出 JSON，禁止多余文字，格式 {{\"groundedness\": float(0~1), \"unsupported\": [\"句子\"]}}。\n"
     "证据片段：\n{context}\n\n答案：\n{answer}"
 )
-_EVIDENCE_CHAR_LIMIT = 500
-_ANSWER_CHAR_LIMIT = 4000
 
 
 def compute_groundedness(answer: str, evidence_texts: list[str]) -> float | None:
@@ -30,11 +30,15 @@ def compute_groundedness(answer: str, evidence_texts: list[str]) -> float | None
     if not answer or not evidence_texts:
         return None
     try:
-        context = "\n".join(f"- {text[:_EVIDENCE_CHAR_LIMIT]}" for text in evidence_texts)
-        prompt = _PROMPT.format(context=context, answer=answer[:_ANSWER_CHAR_LIMIT])
+        context = "\n".join(f"- {text}" for text in evidence_texts)
+        prompt = _PROMPT.format(context=context, answer=answer)
         response = llm_providers.chat(json_mode=True).invoke([HumanMessage(content=prompt)])
         parsed = parse_json_object(response.content)
-        return max(0.0, min(1.0, float(parsed.get("groundedness", 0.0))))
+        raw = parsed.get("groundedness")
+        if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+            return None
+        score = float(raw)
+        return score if math.isfinite(score) and 0 <= score <= 1 else None
     except Exception as exc:  # noqa: BLE001 - 评估失败不影响主链路
         mark_degraded("grounding_error")
         logger.warning(f"groundedness 评估失败，标记为未评估：{exc}")

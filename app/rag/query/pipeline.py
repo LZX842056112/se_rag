@@ -1,5 +1,6 @@
 """查询链路编排：执行 LangGraph 查询图，维护任务进度并推送 SSE 事件。"""
 from __future__ import annotations
+import time
 
 from app.evolution.feedback.collector import flush_session_signals
 from app.evolution.issues import register_unresolved
@@ -12,6 +13,7 @@ from app.shared.config import settings
 from app.shared.clients.history_repository import history_repository
 from app.shared.runtime.logger import logger
 from app.shared.runtime.query_metrics import QueryMetrics, current_metrics, record_query
+from app.rag.agentic.deadline import bounded_query
 from app.shared.utils.sse_broker import SSEEvent, publish
 from app.shared.utils.task_state import (
     TASK_STATUS_COMPLETED,
@@ -22,6 +24,7 @@ from app.shared.utils.task_state import (
 )
 
 
+@bounded_query
 def invoke_query_graph(
     session_id: str,
     original_query: str,
@@ -39,6 +42,11 @@ def invoke_query_graph(
     turn_id = turn_id or reserve_query(session_id, original_query)
     metrics = QueryMetrics(session_id, turn_id)
     metrics_token = current_metrics.set(metrics)
+    from app.rag.agentic.budget import selected_mode
+    from app.rag.agentic.deadline import query_deadline
+    use_agentic = selected_mode(session_id, mode=settings.agentic.mode,
+                                percent=settings.agentic.gray_percent) == 'agentic'
+    deadline_token = query_deadline.set((query_deadline.get() or time.monotonic() + settings.agentic.timeout_seconds) if use_agentic else None)
     final_state = {}
     final_status = "failed"
     try:
@@ -58,6 +66,8 @@ def invoke_query_graph(
         final_state = result_state
         final_status = "completed"
         result_state["metrics"] = metrics.document(result_state.get("intent", "rag"), "completed")
+        if result_state.get('agentic_metrics'):
+            result_state['metrics']['agentic'] = result_state['agentic_metrics']
         update_task_status(session_id, TASK_STATUS_COMPLETED, push_queue=is_stream)
 
         # 收尾事件不分流式与否：非流式页面刷新后同样靠通道里的 final 续上答案
@@ -87,7 +97,8 @@ def invoke_query_graph(
         # 闲聊轮显式排除：闲聊无检索过程，其回答不代表知识缺口；
         # 双保险是 chitchat_answer.prompt 已禁输出「无法作答」类兜底话术，
         # 防止 is_no_answer 误命中把闲聊记进 fb_events。
-        if settings.evolution.enabled and (result_state or {}).get("intent") != "chitchat":
+        from app.evolution.flags import writes_enabled
+        if writes_enabled() and (result_state or {}).get("intent") != "chitchat":
             try:
                 flush_session_signals(result_state)
             except Exception as exc:  # noqa: BLE001
@@ -109,4 +120,5 @@ def invoke_query_graph(
             record_query(metrics, final_state or {}, final_status, original_query)
         finally:
             current_metrics.reset(metrics_token)
+            query_deadline.reset(deadline_token)
             release_query(session_id, turn_id)

@@ -17,6 +17,7 @@ import time
 from app.evolution.backtest.runner import run_backtest
 from app.evolution.candidate.generator import generate_candidate
 from app.evolution.gap.detector import scan_unresolved_feedbacks
+from app.evolution.flags import writes_enabled
 from app.evolution.online_eval.metrics import compute_snapshot, record_metric
 from app.evolution.tuning.controller import adjust_step
 from app.rag.query.embedding_search_service import search_by_milvus
@@ -28,18 +29,18 @@ _LAST_METRIC_TS = 0.0
 _LAST_BACKTEST_TS = 0.0
 
 
-def _build_context(query: str) -> list[dict[str, str]]:
+def _build_context(query: str, item_names: list[str] | None = None) -> list[dict[str, str]]:
     """对缺口查询做一次轻量全库检索取参考片段；零命中/异常一律回退空（由 LLM 据问题提炼）。"""
     try:
         if not query:
             return []
-        hits = search_by_milvus(item_names=[], rewritten_query=query) or []
+        hits = search_by_milvus(item_names=item_names or [], rewritten_query=query) or []
         docs: list[dict[str, str]] = []
         for hit in hits:
             entity = hit.get("entity", {}) if isinstance(hit, dict) else {}
             content = entity.get("content") or ""
             if content:
-                docs.append({"text": str(content)})
+                docs.append({**entity, "text": str(content)})
         return docs
     except Exception as exc:  # noqa: BLE001
         logger.warning(f"候选生成上下文检索失败，回退空：{exc}")
@@ -49,7 +50,7 @@ def _build_context(query: str) -> list[dict[str, str]]:
 def run_scan_and_generate_once() -> dict[str, int]:
     """单轮调度：扫描未解决反馈，对 strong 缺口生成候选；任何异常不外抛。"""
     result = {"scanned": 0, "generated": 0, "skipped": 0, "failed": 0}
-    if not settings.evolution.enabled:
+    if not writes_enabled():
         return result
     try:
         gaps = scan_unresolved_feedbacks(batch=settings.evolution.scan_batch)
@@ -58,7 +59,10 @@ def run_scan_and_generate_once() -> dict[str, int]:
             if gap.status != "candidate":
                 result["skipped"] += 1
                 continue
-            context = _build_context(gap.transcript_slice or gap.session_id) \
+            if gap.gap_kind != "knowledge_missing":
+                result["skipped"] += 1
+                continue
+            context = _build_context(gap.query or gap.transcript_slice, gap.item_names) \
                 if settings.evolution.gen_context_enabled else []
             try:
                 candidate = generate_candidate(gap.document(), context)
@@ -77,7 +81,7 @@ def run_scan_and_generate_once() -> dict[str, int]:
 
 def run_metrics_and_tuning_once() -> dict[str, object]:
     """指标快照落库 + 参数自调（同一份快照，避免重复计算与自比自）。"""
-    if not settings.evolution.enabled:
+    if not writes_enabled():
         return {"recorded": False, "tuned": False}
     snapshot = compute_snapshot()
     record_metric(snapshot)
@@ -100,7 +104,7 @@ def run_metrics_and_tuning_once() -> dict[str, object]:
 def run_backtest_once() -> dict[str, object]:
     """回测观察窗内的已入库条目，不达标自动下架。"""
     cfg = settings.evolution
-    if not cfg.enabled or not cfg.backtest_enabled:
+    if not writes_enabled() or not cfg.backtest_enabled:
         return {"backtested": 0, "removed": 0}
     results = run_backtest()
     removed = [r.evo_doc_id for r in results if r.verdict == "remove"]
@@ -153,6 +157,8 @@ async def evolution_scheduler_loop(interval_seconds: float) -> None:
     """后台循环：按间隔执行单轮扫描+生成；被取消时正常结束。"""
     while True:
         try:
+            from app.evolution.governance import run_publication_tasks
+            await asyncio.to_thread(run_publication_tasks)
             result = await asyncio.to_thread(run_evolution_cycle_once)
             logger.info(f"调度执行完成：{result}")
         except Exception as exc:  # noqa: BLE001

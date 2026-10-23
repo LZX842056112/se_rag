@@ -5,6 +5,7 @@ import time
 from dataclasses import dataclass
 
 from app.evolution.index.update import deactivate
+from app.evolution.flags import writes_enabled
 from app.evolution.repositories import evolution_repo
 from app.shared.config import settings
 from app.shared.runtime.logger import logger
@@ -36,7 +37,7 @@ def _active_items() -> list[dict]:
 
 def run_backtest(window_days: int | None = None) -> list[BacktestResult]:
     """对每个 active 候选统计观察窗内命中与采纳，输出判定并执行止损下架。"""
-    if not settings.evolution.enabled:
+    if not writes_enabled():
         return []
     cfg = settings.evolution
     window_days = window_days or cfg.observe_window_days
@@ -79,7 +80,8 @@ def run_backtest(window_days: int | None = None) -> list[BacktestResult]:
             result.verdict = "hold"  # 被引用但多为中立，继续观察避免误杀
 
         if result.verdict == "remove":
-            if deactivate(evo_id):
+            from app.evolution.governance import revoke_candidate
+            if revoke_candidate(str(candidate["_id"]), "backtest failed"):
                 try:
                     evolution_repo.k_candidates.update_one(
                         {"evo_doc_id": evo_id},

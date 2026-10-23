@@ -133,7 +133,8 @@ def reject_candidate(candidate_id: str, req: CandidateApproveRequest) -> OkRespo
              dependencies=[Depends(require_admin_token)])
 def edit_candidate(candidate_id: str, req: CandidateEditRequest) -> OkResponse:
     """编辑候选内容（问题/答案）。"""
-    if not approval_service.edit(candidate_id, faq_question=req.faq_question, faq_answer=req.faq_answer):
+    if not approval_service.edit(candidate_id, faq_question=req.faq_question, faq_answer=req.faq_answer,
+                                 source_refs=req.source_refs, item_names=req.item_names):
         raise ApiError("edit_failed", "编辑失败或没有实际改动", status_code=400)
     return OkResponse(code=200, message="edited")
 

@@ -64,6 +64,21 @@ def _patch(monkeypatch, client: _FakeMilvus) -> None:
     # 隔离父块与对账，聚焦子块写入顺序
     monkeypatch.setattr(index_service, "index_parent_chunks", lambda state: 0)
     monkeypatch.setattr(index_service, "reconcile_after_import", lambda state: {})
+    from app.evolution import governance
+    monkeypatch.setattr(governance, 'invalidate_document', lambda doc_id: 0)
+
+
+def test_source_dependents_are_revoked_before_replacement(monkeypatch):
+    from app.evolution import governance, flags
+    client = _FakeMilvus()
+    _patch(monkeypatch, client)
+    monkeypatch.setattr(flags, 'writes_enabled', lambda: True)
+    monkeypatch.setattr(governance, 'invalidate_document',
+                        lambda doc_id: client.calls.append(('invalidate', doc_id)))
+    state = {'file_title': 'manual', 'embeddings_content': [_row('a')], 'parent_chunks': []}
+    index_service.index_chunks(state)
+    assert client.calls[0] == ('invalidate', 'd1')
+    assert state['document_version']
 
 
 def test_writes_new_before_deleting_old(monkeypatch):

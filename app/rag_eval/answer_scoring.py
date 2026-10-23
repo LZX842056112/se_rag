@@ -1,4 +1,4 @@
-"""Score saved answers. Missing measurements are null, never invented zeros."""
+"""对已保存的答案打分。缺失的指标为 null，绝不臆造为 0。"""
 from __future__ import annotations
 
 import asyncio
@@ -115,6 +115,8 @@ def compare_baseline(report: dict, baseline: dict) -> dict:
     for key in ("dataset_sha256", "documents", "scoring_config"):
         if key not in report or report[key] != baseline.get(key):
             raise ValueError(f"基线不兼容：{key} 不一致")
+    if report.get("approved_faq") != baseline.get("approved_faq"):
+        raise ValueError("基线不兼容：approved_faq 不一致")
     if not report.get("ready_for_baseline") or not baseline.get("ready_for_baseline"):
         raise ValueError("仅已复核且完整评分的报告可以作为可信基线")
     comparison = {}

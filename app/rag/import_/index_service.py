@@ -173,7 +173,21 @@ def index_chunks(state: dict) -> dict:
     metadata = {"document_kind": state.get("document_kind", "manual"),
                 "document_version": state.get("document_version", ""),
                 "valid_until": state.get("valid_until", 0.0)}
+    if not metadata['document_version']:
+        import hashlib
+        import json
+        metadata['document_version'] = hashlib.sha256(json.dumps(
+            [{k: v for k, v in row.items() if k not in ('dense_vector', 'sparse_vector')}
+             for row in embeddings_content], ensure_ascii=False, sort_keys=True, default=str).encode()).hexdigest()
+        state['document_version'] = metadata['document_version']
     rows = _align_to_schema([{**row, **metadata} for row in embeddings_content])
+    # 在替换其来源之前，先撤销派生事实。若失败则保持
+    # 撤销状态，直到审核人员重新校验；过期事实绝不能泄漏。
+    from app.evolution.governance import invalidate_document
+    from app.evolution.flags import recall_enabled, writes_enabled
+    if recall_enabled() or writes_enabled():
+        for source_doc_id in {str(row.get('doc_id')) for row in rows if row.get('doc_id')}:
+            invalidate_document(source_doc_id)
     new_ids = {str(row["chunk_id"]) for row in rows}
 
     # 1) 先写：分批 upsert

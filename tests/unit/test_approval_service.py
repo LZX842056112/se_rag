@@ -28,6 +28,11 @@ def upsert_ok(monkeypatch):
         return True
 
     monkeypatch.setattr(approval_service, "upsert_item", _upsert)
+    from app.evolution import governance
+    monkeypatch.setattr(governance, "index_upsert", _upsert)
+    monkeypatch.setattr(governance, "resolve_source", lambda ref: {
+        "chunk_id": ref, "doc_id": "manual", "document_version": "v1",
+        "item_name": "HAK 180", "content": "配对码默认为 0000，可在设置中修改。配对码默认为 0000。"})
     return called
 
 
@@ -36,6 +41,8 @@ def _insert(db, **overrides) -> str:
         "faq_question": "HAK 180 的蓝牙配对码是多少？",
         "faq_answer": "配对码默认为 0000。",
         "status": "draft",
+        "item_names": ["HAK 180"],
+        "source_refs": ["chunk1"],
     }
     payload.update(overrides)
     result = db[settings.mongo.k_candidates_collection].insert_one(payload)

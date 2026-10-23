@@ -14,6 +14,7 @@ from typing import Any, Optional
 from pymilvus import AnnSearchRequest, DataType, MilvusClient, WeightedRanker
 
 from app.shared.config import settings
+from app.rag.agentic.deadline import bounded_timeout
 from app.shared.runtime.logger import logger
 
 _milvus_client: Optional[MilvusClient] = None
@@ -28,7 +29,7 @@ def get_milvus_client() -> Optional[MilvusClient]:
             if not uri:
                 logger.error("Milvus 客户端连接失败：缺少 MILVUS_URL 环境变量配置")
                 return None
-            _milvus_client = MilvusClient(uri=uri, timeout=settings.milvus.timeout_seconds)
+            _milvus_client = MilvusClient(uri=uri, timeout=bounded_timeout(settings.milvus.timeout_seconds))
             logger.info("Milvus 客户端连接成功")
         return _milvus_client
     except Exception as exc:  # noqa: BLE001
@@ -119,7 +120,7 @@ def hybrid_search(client, collection_name, reqs, ranker_weights=(0.5, 0.5), norm
             limit=limit,
             output_fields=output_fields if output_fields is not None else ["item_name"],
             search_params=search_params,
-            timeout=settings.milvus.timeout_seconds,
+            timeout=bounded_timeout(settings.milvus.timeout_seconds),
         )
         logger.debug(f"Milvus 混合搜索完成，集合[{collection_name}]命中{len(res[0]) if res else 0}条")
         return res

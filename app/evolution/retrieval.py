@@ -9,6 +9,7 @@ from typing import Any
 from app.rag.item_name.catalog import expand_item_names
 from app.rag.item_name.config import GLOBAL_ITEM_NAME
 from app.evolution.quality import looks_like_non_answer
+from app.evolution.flags import recall_enabled
 from app.shared.clients.milvus_gateway import eq_expr, in_expr, milvus_gateway
 from app.shared.config import settings
 from app.shared.models import llm_providers
@@ -25,7 +26,7 @@ _EVOLUTION_OUTPUT_FIELDS = [
 ]
 
 
-def _format(milvus_list: list[dict]) -> list[dict[str, Any]]:
+def _format(milvus_list: list[dict], *, enforce_governance: bool = False) -> list[dict[str, Any]]:
     """把 Milvus 原始命中格式化为与知识库 chunk 同构的结构。
 
     历史数据里可能残留「未提及…建议联系官方」这类没有事实的条目（修复前误批入库的），
@@ -34,7 +35,17 @@ def _format(milvus_list: list[dict]) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     for item in milvus_list or []:
         entity = item.get("entity", {}) or {}
-        answer = entity.get("faq_answer")
+        from app.evolution.governance import is_retrievable
+        from app.evolution.repositories import evolution_repo
+        record = {}
+        if enforce_governance:
+            try:
+                record = evolution_repo.k_candidates.find_one({"evo_doc_id": entity.get("evo_doc_id")})
+                if not is_retrievable(record):
+                    continue
+            except Exception:
+                continue
+        answer = record.get("faq_answer") if enforce_governance else entity.get("faq_answer")
         if looks_like_non_answer(answer):
             logger.warning(
                 f"跳过无事实的进化条目 {entity.get('evo_doc_id')}："
@@ -44,15 +55,20 @@ def _format(milvus_list: list[dict]) -> list[dict[str, Any]]:
         items.append({
             "chunk_id": entity.get("evo_doc_id"),
             "score": item.get("distance", 0.0),
-            "title": entity.get("faq_question"),
+            "title": record.get("faq_question") if enforce_governance else entity.get("faq_question"),
             "file_title": "__evolution__",
             "parent_title": "",
             "part": 0,
-            "item_name": entity.get("item_name"),
+            "item_name": ",".join(record.get("item_names") or []) if enforce_governance else entity.get("item_name"),
             "content": answer,
             "source": "evolution",
             "type": "milvus",
             "url": "",
+            "approval_status": record.get("publication_status"),
+            "source_version": record.get("content_sha256"),
+            "document_version": str(record.get("content_version")),
+            "source_versions": record.get("source_versions"),
+            "index_version": record.get("index_version"),
         })
     return items
 
@@ -74,7 +90,7 @@ def _search(rewritten_query: str, expr: str, limit: int, embedding: dict[str, li
         limit=limit,
         output_fields=_EVOLUTION_OUTPUT_FIELDS,
     )
-    return _format(milvus_result[0] if milvus_result else [])
+    return _format(milvus_result[0] if milvus_result else [], enforce_governance=True)
 
 
 def search_evolution_items(
@@ -87,7 +103,7 @@ def search_evolution_items(
 
     :param embedding: 已算好的查询向量（与知识库检索共用，避免重复编码）
     """
-    if not rewritten_query:
+    if not rewritten_query or not recall_enabled():
         return []
     try:
         if not milvus_gateway.milvus_client.has_collection(
@@ -103,6 +119,7 @@ def search_evolution_items(
             names = expand_item_names(item_names)
             expr = f"{active_expr} and ({in_expr('item_name', names)} or {eq_expr('item_name', GLOBAL_ITEM_NAME)})"
             hits = _search(rewritten_query, expr, limit, embedding)
+            hits = [h for h in hits if name_equivalent(h.get("item_name"), item_names, global_item=GLOBAL_ITEM_NAME)]
             if hits:
                 return hits
             # 目录不可用等兜底：放开主体过滤重查，再按 token 前缀等价在本地裁决，

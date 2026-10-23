@@ -54,6 +54,7 @@ def init_logger():
             format=LOG_FORMAT,
             colorize=True,
             enqueue=True,
+            diagnose=False,
         )
 
     if LOG_FILE_ENABLE:
@@ -67,7 +68,7 @@ def init_logger():
             encoding="utf-8",
             enqueue=True,
             backtrace=True,
-            diagnose=True,
+            diagnose=False,
         )
     return _loguru_logger
 

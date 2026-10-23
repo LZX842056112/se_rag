@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from app.evolution.models import MetricSnapshot
+from app.evolution.flags import writes_enabled
 from app.evolution.online_eval.metrics import compute_snapshot
 from app.evolution.repositories import evolution_repo
 from app.evolution.tuning import param_registry
@@ -41,7 +42,7 @@ def adjust_step(snapshot: MetricSnapshot | None = None) -> bool:
 
     ``snapshot`` 由调度器传入（与写库的是同一份）；不传时自行计算，保持函数可独立调用。
     """
-    if not settings.evolution.enabled or not settings.evolution.auto_tune_enabled:
+    if not writes_enabled() or not settings.evolution.auto_tune_enabled:
         return False
     snapshot = snapshot or compute_snapshot()
     baseline = _baseline_adopt_rate(snapshot.ts)

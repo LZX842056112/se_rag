@@ -13,6 +13,14 @@ from app.process.query.agent.nodes.node_search_embedding_hyde import node_search
 from app.process.query.agent.nodes.node_web_search_mcp import node_web_search_mcp
 from app.process.query.agent.state import QueryGraphState
 from app.shared.runtime.logger import logger
+from app.shared.config import settings
+from app.rag.agentic.budget import selected_mode
+
+
+def node_agentic(state):
+    from app.rag.agentic.controller import run_agentic
+    state['query_mode'] = 'agentic'
+    return run_agentic(state)
 
 query_graph_builder = StateGraph(QueryGraphState)
 
@@ -27,6 +35,7 @@ query_graph_builder.add_node(node_rrf)
 query_graph_builder.add_node(node_rerank)
 query_graph_builder.add_node(node_parent_expand)
 query_graph_builder.add_node(node_answer_output)
+query_graph_builder.add_node(node_agentic)
 
 # 2. 入口节点：意图识别
 query_graph_builder.set_entry_point("node_intent_route")
@@ -50,6 +59,9 @@ query_graph_builder.add_conditional_edges("node_intent_route", after_node_intent
 def after_node_item_name_confirm(state: QueryGraphState):
     """路由：主体已确认则并行三路召回；未确认（state.answer 已就绪）直接作答。"""
     if not state.get("answer"):
+        if selected_mode(state.get('session_id', ''), mode=settings.agentic.mode,
+                         percent=settings.agentic.gray_percent) == 'agentic':
+            return 'node_agentic'
         logger.info(f"主体已确认：{state.get('item_names')}，进入多路召回")
         return "node_search_embedding", "node_search_embedding_hyde", "node_web_search_mcp"
     logger.info("主体未确认，直接进入作答节点（反问/兜底话术）")
@@ -61,6 +73,7 @@ query_graph_builder.add_conditional_edges("node_item_name_confirm", after_node_i
     "node_search_embedding_hyde": "node_search_embedding_hyde",
     "node_web_search_mcp": "node_web_search_mcp",
     "node_answer_output": "node_answer_output",
+    "node_agentic": "node_agentic",
 })
 
 # 3. 静态边
@@ -73,5 +86,6 @@ query_graph_builder.add_edge("node_parent_expand", "node_answer_output")
 # 闲聊分支：作答后直接结束，不经过检索链路任何节点
 query_graph_builder.add_edge("node_chitchat_answer", END)
 query_graph_builder.add_edge("node_answer_output", END)
+query_graph_builder.add_edge("node_agentic", END)
 
 query_app = query_graph_builder.compile()

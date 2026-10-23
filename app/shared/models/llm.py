@@ -12,6 +12,19 @@ _DEFAULT_TEMPERATURE = 0.1
 _llm_client_cache: dict[tuple, ChatOpenAI] = {}
 
 
+def _request_client(client: ChatOpenAI, timeout_seconds: float, max_retries: int) -> ChatOpenAI:
+    """共享缓存的传输层，但把请求截止时间排除在缓存键之外。"""
+    if timeout_seconds == client.request_timeout and max_retries == client.max_retries:
+        return client
+    sync = client.root_client.with_options(timeout=timeout_seconds, max_retries=max_retries)
+    async_ = client.root_async_client.with_options(timeout=timeout_seconds, max_retries=max_retries)
+    return client.model_copy(update={
+        "root_client": sync, "client": sync.chat.completions,
+        "root_async_client": async_, "async_client": async_.chat.completions,
+        "request_timeout": timeout_seconds, "max_retries": max_retries,
+    })
+
+
 def get_llm_client(model: str | None = None, json_mode: bool = False, *, timeout_seconds: float | None = None, max_retries: int | None = None) -> ChatOpenAI:
     """获取 ChatOpenAI 客户端（带进程内缓存）。
 
@@ -21,9 +34,11 @@ def get_llm_client(model: str | None = None, json_mode: bool = False, *, timeout
     target_model = model or settings.llm.llm_model or _DEFAULT_LLM_MODEL
     timeout_seconds = settings.import_.llm_timeout_seconds if timeout_seconds is None else timeout_seconds
     max_retries = settings.import_.llm_max_retries if max_retries is None else max_retries
-    cache_key = (target_model, json_mode, timeout_seconds, max_retries)
+    # 只有稳定且已配置的设置才拥有传输层。每次查询的剩余时限几乎都不同，
+    # 不能让其累积出无界的客户端缓存。
+    cache_key = (target_model, json_mode, settings.import_.llm_timeout_seconds, settings.import_.llm_max_retries)
     if cache_key in _llm_client_cache:
-        return _llm_client_cache[cache_key]
+        return _request_client(_llm_client_cache[cache_key], timeout_seconds, max_retries)
 
     if not settings.llm.api_key:
         raise ValueError("配置缺失：请在 .env 中配置 OPENAI_API_KEY（大模型 API 密钥）")
@@ -46,12 +61,12 @@ def get_llm_client(model: str | None = None, json_mode: bool = False, *, timeout
             extra_body=extra_body,
             model_kwargs=model_kwargs,
             # 单次调用超时与 SDK 内建重试：模型服务挂起时不再无限等待
-            timeout=timeout_seconds,
-            max_retries=max_retries,
+            timeout=settings.import_.llm_timeout_seconds,
+            max_retries=settings.import_.llm_max_retries,
         )
     except LangChainException as exc:
         raise RuntimeError(f"模型【{target_model}】初始化失败（LangChain 层）：{exc}") from exc
 
     _llm_client_cache[cache_key] = client
     logger.info(f"LLM 客户端已初始化并缓存：model={target_model}, json_mode={json_mode}")
-    return client
+    return _request_client(client, timeout_seconds, max_retries)

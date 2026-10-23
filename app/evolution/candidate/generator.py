@@ -6,6 +6,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage
 
 from app.evolution.candidate.pii import sanitize_candidate
+from app.evolution.flags import writes_enabled
 from app.evolution.models import KnowledgeCandidate
 from app.evolution.quality import looks_like_non_answer
 from app.evolution.repositories import evolution_repo
@@ -70,10 +71,13 @@ def generate_candidate(gap: dict[str, Any], context_docs: list[dict[str, Any]]) 
     - 生成的答案疑似「无信息」结论 → 同样登记 ``need_info``（管理员补充后才是 draft）；
     - PII 命中 / 问题重复 → 以 ``rejected`` 落库留痕。
     """
+    if not writes_enabled() or gap.get("gap_kind", "knowledge_missing") != "knowledge_missing":
+        return None
     question = gap.get("query") or gap.get("session_id", "")
     snippet = gap.get("transcript_slice") or question
     context = "\n".join(
-        str(doc.get("text") or doc.get("content") or "")[:300] for doc in context_docs[-5:]
+        f"[{doc.get('chunk_id') or doc.get('evidence_id')}] " + str(doc.get("text") or doc.get("content") or "")[:300]
+        for doc in context_docs[-5:]
     )
     item_names = list(gap.get("item_names") or [])
 
@@ -95,10 +99,25 @@ def generate_candidate(gap: dict[str, Any], context_docs: list[dict[str, Any]]) 
                 return _store_need_info(faq_question, item_names,
                                         "生成答案未包含事实（疑似“无信息”结论）",
                                         str(gap.get("gap_id") or "") or None)
+            from app.evolution.governance import validate_sources
+            # 只有本轮实际读取到的 ID 才能成为候选的来源。
+            allowed = {str(d.get("chunk_id") or d.get("evidence_id")): d for d in context_docs[-5:]
+                       if d.get("chunk_id") or d.get("evidence_id")}
+            refs = list(dict.fromkeys(str(ref) for ref in (raw.get("source_refs") or [])))
+            if not refs or any(ref not in allowed for ref in refs):
+                return _store_need_info(question, item_names, "来源 ID 不在本轮上下文中", gap.get("gap_id"))
+            versions = [{"chunk_id": ref, "doc_id": allowed[ref].get("doc_id"),
+                         "document_version": allowed[ref].get("document_version")} for ref in refs]
+            try:
+                validated = validate_sources({"source_refs": refs, "source_versions": versions,
+                                              "item_names": item_names}, check_support=False)
+            except Exception:
+                return _store_need_info(question, item_names, "来源产品或版本未通过校验", gap.get("gap_id"))
             candidate = KnowledgeCandidate(
                 faq_question=faq_question,
                 faq_answer=faq_answer,
-                source_refs=[str(ref) for ref in (raw.get("source_refs") or [])],
+                source_refs=refs,
+                source_versions=validated,
                 item_names=item_names,
                 status="rejected" if has_pii else "draft",
                 reason="PII detected" if has_pii else "",

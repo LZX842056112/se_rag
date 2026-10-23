@@ -8,6 +8,7 @@ import time
 from typing import Any
 
 from app.evolution.models import GapSignal, KnowledgeGap
+from app.evolution.flags import writes_enabled
 from app.evolution.repositories import evolution_repo
 from app.shared.config import settings
 from app.shared.runtime.logger import logger
@@ -83,6 +84,7 @@ def detect_and_classify(fb_doc: dict[str, Any], transcript_slice: str = "") -> K
 
     grade, confidence = grade_signals(signals)
     return KnowledgeGap(
+        gap_kind=classify_gap(fb_doc),
         session_id=fb_doc.get("session_id", ""),
         query=fb_doc.get("query", ""),
         item_names=list(fb_doc.get("item_names") or []),
@@ -98,7 +100,7 @@ def scan_unresolved_feedbacks(batch: int = 50) -> list[KnowledgeGap]:
 
     按 ``ts`` 升序 + 游标推进：每轮最多消费 ``batch`` 条，**不饿死**更早的未解决信号。
     """
-    if not settings.evolution.enabled:
+    if not writes_enabled():
         return []
     gaps: list[KnowledgeGap] = []
     try:
@@ -136,3 +138,16 @@ def scan_unresolved_feedbacks(batch: int = 50) -> list[KnowledgeGap]:
     except Exception as exc:  # noqa: BLE001
         logger.warning(f"缺口扫描失败：{exc}")
     return gaps
+
+
+def classify_gap(event: dict[str, Any]) -> str:
+    """要判为知识缺失，必须存在明确的来源缺失。"""
+    if event.get("gap_kind") in {"retrieval_miss", "reading_miss", "generation_error", "knowledge_missing"}:
+        return event["gap_kind"]
+    if event.get("source_answer_exists") is False:
+        return "knowledge_missing"
+    if event.get("evidence_sufficient") is True:
+        return "generation_error"
+    if event.get("read_chunk_ids") or event.get("cited_chunk_ids"):
+        return "reading_miss"
+    return "retrieval_miss"

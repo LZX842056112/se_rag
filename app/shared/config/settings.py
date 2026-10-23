@@ -9,7 +9,7 @@
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from app.shared.config.common import env_bool, env_float, env_int, env_str
 
@@ -156,7 +156,27 @@ class EvolutionSettings:
     backtest_enabled: bool  # 回测开关（EVOLUTION_BACKTEST_ENABLED）
     backtest_interval_hours: int  # 回测周期（小时，EVOLUTION_BACKTEST_INTERVAL_HOURS）
     backtest_min_hits: int  # 回测下架门槛（EVOLUTION_BACKTEST_MIN_HITS）
-    auto_tune_enabled: bool = False
+    auto_tune_enabled: bool = False  # 参数自动调优开关（EVOLUTION_AUTO_TUNE_ENABLED）
+    recall_enabled: bool | None = None  # 已审批条目召回开关，None 表示跟随 enabled（EVOLUTION_RECALL_ENABLED）
+    write_enabled: bool | None = None  # 知识写入开关，None 表示跟随 enabled（EVOLUTION_WRITE_ENABLED）
+
+
+@dataclass
+class AgenticSettings:
+    """Agentic RAG 检索编排的运行时参数。"""
+
+    mode: str = 'legacy'  # 检索模式：legacy / agentic（RAG_MODE）
+    policy_version: str = 'agentic-v1'  # Agentic 策略版本（RAG_POLICY_VERSION）
+    gray_percent: int = 0  # 灰度放量比例 0-100（RAG_GRAY_PERCENT）
+    decision_model: str = ''  # 决策/路由所用模型名，空则复用对话模型（AGENT_LLM_MODEL）
+    max_tool_calls: int = 4  # 单轮最大工具调用次数（AGENT_MAX_TOOL_CALLS）
+    max_web_calls: int = 1  # 联网检索工具最大调用数（AGENT_MAX_WEB_CALLS）
+    max_repairs: int = 1  # 检索失败后最大修复重试轮数（0/1，AGENT_MAX_REPAIRS）
+    max_context_tokens: int = 8000  # 上下文窗口上限（token，AGENT_MAX_CONTEXT_TOKENS）
+    timeout_seconds: float = 60  # 单次 Agentic 执行超时（秒，AGENT_TIMEOUT_SECONDS）
+    keyword_scan_limit: int = 500  # 关键词扫描命中条数上限（AGENT_KEYWORD_SCAN_LIMIT）
+    neighbor_window: int = 1  # 邻近切片扩窗数（AGENT_NEIGHBOR_WINDOW）
+    tokenizer_path: str = ''  # 分词器路径，用于 token 预算裁剪（AGENT_TOKENIZER_PATH）
 
 
 @dataclass
@@ -216,6 +236,7 @@ class Settings:
     evolution: EvolutionSettings
     runtime: RuntimeSettings
     evaluation: EvaluationSettings
+    agentic: AgenticSettings = field(default_factory=AgenticSettings)
 
 
 def _build_settings() -> Settings:
@@ -307,6 +328,8 @@ def _build_settings() -> Settings:
             checkpoint_enabled=env_bool("IMPORT_CHECKPOINT_ENABLED", True),  # 断点续传，默认开启
         ),
         evolution=EvolutionSettings(
+            recall_enabled=env_bool('EVOLUTION_RECALL_ENABLED') if env_str('EVOLUTION_RECALL_ENABLED') else None,  # 召回开关，未设置则跟随 enabled
+            write_enabled=env_bool('EVOLUTION_WRITE_ENABLED') if env_str('EVOLUTION_WRITE_ENABLED') else None,  # 写入开关，未设置则跟随 enabled
             enabled=env_bool("EVOLUTION_ENABLED", False),  # 自进化总开关，默认关闭
             auto_tune_enabled=env_bool("EVOLUTION_AUTO_TUNE_ENABLED", False),  # 参数自动调优，默认关闭
             collection=env_str("EVOLUTION_COLLECTION", "kb_evolution_items"),  # 自进化集合，默认 kb_evolution_items
@@ -338,6 +361,20 @@ def _build_settings() -> Settings:
             model_prices_json=env_str("LLM_MODEL_PRICES_JSON", "{}"),  # 模型单价 JSON，默认空
             intent_timeout_seconds=max(0.05, min(2.0, env_float("INTENT_TIMEOUT_SECONDS", 2.0))),  # 意图识别超时（秒），默认 2.0
             default_issue_owner=env_str("DEFAULT_ISSUE_OWNER", ""),  # 问题默认负责人，默认空
+        ),
+        agentic=AgenticSettings(
+            mode=env_str('RAG_MODE', 'legacy'),  # 检索模式，默认 legacy
+            policy_version=env_str('RAG_POLICY_VERSION', 'agentic-v1'),  # 策略版本，默认 agentic-v1
+            gray_percent=max(0, min(100, env_int('RAG_GRAY_PERCENT', 0))),  # 灰度放量比例 0-100，默认 0
+            decision_model=env_str('AGENT_LLM_MODEL', ''),  # 决策模型名，默认空（复用对话模型）
+            max_tool_calls=max(1, env_int('AGENT_MAX_TOOL_CALLS', 4)),  # 最大工具调用次数，默认 4
+            max_web_calls=max(0, env_int('AGENT_MAX_WEB_CALLS', 1)),  # 联网检索最大调用数，默认 1
+            max_repairs=max(0, min(1, env_int('AGENT_MAX_REPAIRS', 1))),  # 修复重试轮数，默认 1
+            max_context_tokens=max(1, env_int('AGENT_MAX_CONTEXT_TOKENS', 8000)),  # 上下文上限 token，默认 8000
+            timeout_seconds=max(.05, env_float('AGENT_TIMEOUT_SECONDS', 60)),  # 执行超时（秒），默认 60
+            keyword_scan_limit=max(1, env_int('AGENT_KEYWORD_SCAN_LIMIT', 500)),  # 关键词扫描上限，默认 500
+            neighbor_window=max(0, min(2, env_int('AGENT_NEIGHBOR_WINDOW', 1))),  # 邻近扩窗数，默认 1
+            tokenizer_path=env_str('AGENT_TOKENIZER_PATH', ''),  # 分词器路径，默认空
         ),
     )
 

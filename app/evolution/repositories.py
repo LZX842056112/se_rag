@@ -19,6 +19,11 @@ class EvolutionRepository:
     """自进化各集合的访问入口（懒加载，不在导入期建立连接）。"""
 
     @property
+    def publication_tasks(self):
+        """可恢复的任务使用 Mongo 的唯一主键来实现幂等。"""
+        return get_collection(settings.mongo.k_candidates_collection + "_publication_tasks")
+
+    @property
     def query_feedback(self):
         return get_collection(settings.mongo.query_feedback_collection)
 

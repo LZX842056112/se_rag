@@ -1,4 +1,4 @@
-"""Source-backed answer cases. Validation uses only the Python standard library."""
+"""基于来源的答案样本。校验只依赖 Python 标准库。"""
 from __future__ import annotations
 
 from collections import Counter
@@ -20,7 +20,7 @@ def load_answer_cases(path: Path | str = DEFAULT_CASES) -> list[dict]:
 
 
 def validate_answer_cases(cases: list[dict], *, project_root: Path = PROJECT_ROOT) -> dict:
-    """Verify annotations and source bytes without loading models or databases."""
+    """校验注解与来源字节，而不加载模型或数据库。"""
     if not isinstance(cases, list) or not cases:
         raise ValueError("答案题库必须是非空列表")
     ids: set[str] = set()
@@ -51,6 +51,14 @@ def validate_answer_cases(cases: list[dict], *, project_root: Path = PROJECT_ROO
         if status == "reviewed":
             if not case.get("reviewed_by", "").strip() or not has_reference:
                 raise ValueError("已复核样本必须填写复核人和参考答案")
+            review = case.get("source_review")
+            if review is not None and (not isinstance(review, dict) or review.get("status") != "reviewed"
+                                       or not str(review.get("reviewed_by", "")).strip()):
+                raise ValueError("扩展题的来源必须由人复核")
+            fixture = case.get("scenario_requirements")
+            if fixture is not None and (not isinstance(fixture, dict) or fixture.get("status") != "verified"
+                                        or not fixture.get("snapshot_id")):
+                raise ValueError("扩展题的测试夹具必须绑定已验证快照")
             reviewed += 1
         source = case.get("source")
         if not isinstance(source, dict):
@@ -71,6 +79,13 @@ def validate_answer_cases(cases: list[dict], *, project_root: Path = PROJECT_ROO
                 documents[name] = hashlib.file_digest(stream, "sha256").hexdigest()
         if source["sha256"] != documents[name]:
             raise ValueError(f"来源文档已变化，请重新核对参考答案：{name}")
+        additional = case.get("additional_sources", [])
+        if not isinstance(additional, list):
+            raise ValueError("additional_sources 必须是出处列表")
+        for extra in additional:
+            candidate = {**case, "source": extra, "additional_sources": []}
+            checked = validate_answer_cases([candidate], project_root=root)
+            documents.update(checked["documents"])
     return {
         "case_count": len(cases), "reviewed_count": reviewed, "reference_count": references,
         "categories": dict(Counter(c["category"] for c in cases)),

@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 from pathlib import Path
+import re
 import subprocess
 
 from app.rag_eval.answer_collection import collect_answers, require_isolated_resources
@@ -21,6 +22,14 @@ def validate_snapshots(snapshot: dict, cases: list[dict], manifest: dict) -> Non
             raise ValueError(f"快照与题库不一致：{key}")
     if not isinstance(snapshot.get("generation"), dict) or not snapshot["generation"].get("revision"):
         raise ValueError("快照缺少生成版本")
+    generation = snapshot["generation"]
+    faq = generation.get("approved_faq")
+    resources = generation.get("resources") or {}
+    if resources.get("evolution_collection") or (faq or {}).get("enabled"):
+        if (not isinstance(faq, dict) or not faq.get("enabled") or not faq.get("index_version")
+                or any(not re.fullmatch(r"[0-9a-f]{64}", str(faq.get(key, "")))
+                       for key in ("content_sha256", "approval_sha256"))):
+            raise ValueError("启用 FAQ 的快照必须保留真实 FAQ 内容和审批摘要及索引版本")
     validate_snapshot_rows(cases, snapshot.get("results"))
 
 
@@ -48,7 +57,13 @@ def _collect_real(cases):
     from app.shared.clients.mongo import close_mongo_client
     from app.rag.query.pipeline import invoke_query_graph
     try:
-        return collect_answers(cases, invoke_query_graph), resources
+        if "evolution_collection" in resources:
+            from app.rag_eval.agentic_comparison import capture_faq_snapshot
+            resources["approved_faq"] = capture_faq_snapshot(settings)
+        rows = collect_answers(cases, invoke_query_graph)
+        if "approved_faq" in resources and capture_faq_snapshot(settings) != resources["approved_faq"]:
+            raise ValueError("评测期间已审批 FAQ 内容发生变化")
+        return rows, resources
     finally:
         close_mongo_client()
 
@@ -83,7 +98,7 @@ def run_answer_eval(cases_path: Path | str = DEFAULT_CASES,
                     allow_external: bool = False, snapshots_path: Path | str | None = None,
                     baseline_path: Path | str | None = None, allow_unreviewed: bool = False,
                     limit: int | None = None, project_root: Path = PROJECT_ROOT) -> dict:
-    """Validate or run a batch; snapshots allow scoring without querying again."""
+    """校验或运行一批任务；快照允许在无需再次查询的情况下打分。"""
     cases = load_answer_cases(cases_path)
     if limit is not None:
         if type(limit) is not int or limit < 1:
@@ -120,6 +135,8 @@ def run_answer_eval(cases_path: Path | str = DEFAULT_CASES,
             rows, resources = _collect_real(cases)
             generation = {**_revision(project_root), "answer_model": settings.llm.llm_model or "qwen3-32b",
                           "resources": resources}
+            if "approved_faq" in resources:
+                generation["approved_faq"] = resources["approved_faq"]
             snapshot = {"schema_version": 1, "dataset_sha256": manifest["dataset_sha256"],
                         "documents": manifest["documents"], "generation": generation, "results": rows}
             _write_json(snapshot_output, snapshot)
@@ -132,6 +149,7 @@ def run_answer_eval(cases_path: Path | str = DEFAULT_CASES,
     report.update(schema_version=1, mode="answer_quality", dataset=manifest,
                   dataset_sha256=manifest["dataset_sha256"], documents=manifest["documents"],
                   generation=snapshot["generation"], evaluator=_revision(project_root), scoring_config=scoring_config,
+                  approved_faq=snapshot["generation"].get("approved_faq"),
                   same_answer_and_judge_model=snapshot["generation"].get("answer_model") == config.model,
                   snapshots_path=str(Path(snapshots_path or snapshot_output).resolve()),
                   ready_for_baseline=manifest["ready_for_baseline"] and all(

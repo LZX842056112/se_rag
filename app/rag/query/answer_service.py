@@ -59,6 +59,17 @@ def load_answer_prompt(state: QueryGraphState) -> str:
             f"置信度: {doc.get('score')}{page_text}{background_text},内容:{doc.get('text')}\n"
         )
     state["answer_contexts"] = contexts
+    from app.rag.agentic.evidence import doc_to_evidence
+    import hashlib
+    manifest = []
+    for doc, context in zip(state.get('reranked_docs', []), contexts):
+        actual = dict(doc)
+        if state.get('business_tag') in ('pricing', 'after_sales'):
+            actual.pop('parent_content', None)
+        ref = doc_to_evidence(actual).model_dump()
+        ref['context_sha256'] = hashlib.sha256(context.encode()).hexdigest()
+        manifest.append(ref)
+    state['evidence_manifest'] = manifest
     item_names = f"{','.join(state.get('item_names', []))}"
     history_text = ("本轮只使用当前有效的业务政策，不使用历史回答中的价格或承诺。"
                     if state.get("business_tag") in ("pricing", "after_sales")
@@ -128,8 +139,13 @@ def backfill_evolution_outputs(state: QueryGraphState) -> QueryGraphState:
         "evolution_hit": bool(evolution_ids),
         "web_hit": bool(web_docs),
     }
-    if settings.evolution.enabled and reranked_docs:
-        evidence = [str(d.get("text") or "") for d in reranked_docs]
+    if state.get('query_mode') == 'agentic':
+        state['retrieval_signals']['no_retrieval'] = not any(
+            step.get('evidence_ids') for step in state.get('agentic_trace', []) if step.get('tool'))
+    if state.get('agentic_verified'):
+        pass  # 有界控制器已校验最终的草稿。
+    elif settings.evolution.enabled and reranked_docs:
+        evidence = state.get('answer_contexts') or [str(d.get("text") or "") for d in reranked_docs]
         state["groundedness"] = compute_groundedness(state.get("answer", ""), evidence)
     else:
         # 未开启自进化时不做接地性评估 → None（前端显示「未评估」，不误报 0%）
@@ -170,6 +186,8 @@ def save_answer_message_history(state: QueryGraphState) -> None:
 def generate_answer(state: QueryGraphState) -> QueryGraphState:
     """答案生成服务入口。"""
     state["answer_contexts"] = []
+    state['evidence_manifest'] = []
+    state['evidence_manifest'] = []
     apply_business_policy(state)
     if not state_exists_answer(state):
         answer_prompt_text = load_answer_prompt(state)

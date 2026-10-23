@@ -20,6 +20,7 @@ from app.api.routers import health as health_router
 from app.api.routers import pages as pages_router
 from app.api.routers import query as query_router
 from app.evolution.scheduler import evolution_scheduler_loop
+from app.evolution.flags import writes_enabled
 from app.shared.clients.mongo import ensure_indexes
 from app.shared.config import settings
 from app.shared.runtime.logger import logger
@@ -33,7 +34,7 @@ async def lifespan(_app: FastAPI):
     try:
         ensure_indexes()
         scheduler_task = None
-        if settings.evolution.enabled and settings.evolution.scheduler_enabled:
+        if writes_enabled() and settings.evolution.scheduler_enabled:
             scheduler_task = asyncio.create_task(
                 evolution_scheduler_loop(settings.evolution.schedule_interval_minutes * 60.0)
             )
