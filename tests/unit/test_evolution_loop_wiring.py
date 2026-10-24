@@ -141,3 +141,11 @@ def test_adjust_step_does_nothing_without_baseline(fake_mongo, evolution_on):
         gap_rate = 0.0
 
     assert controller.adjust_step(_Snapshot()) is False
+
+
+def test_metric_param_snapshot_records_effective_registry_values(fake_mongo, evolution_on):
+    param_registry.set_param('RRF_K', 90, updated_by='manual')
+    param_registry.set_param('RRF_TOP', 8, updated_by='manual')
+    snapshot = param_registry.get_all_params()
+    assert snapshot['RRF_K'] == param_registry.get_param('RRF_K') == 90
+    assert snapshot['RRF_TOP'] == param_registry.get_param('RRF_TOP') == 8

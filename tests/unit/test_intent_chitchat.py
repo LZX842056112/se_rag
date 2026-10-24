@@ -115,6 +115,40 @@ def test_rewrite_hint_short_circuits_to_rag(monkeypatch):
     assert intent_svc.route_intent(state)["intent"] == "rag"
 
 
+@pytest.mark.parametrize("query", ["你好", "你好！", "  您好～  ", "在吗？", "谢谢", "Hello!"])
+def test_plain_greeting_does_not_depend_on_classifier_or_history(monkeypatch, query):
+    """纯寒暄不应因分类模型超时而进入产品检索。"""
+    monkeypatch.setattr(intent_svc, "CHITCHAT_ENABLED", True)
+    monkeypatch.setattr(intent_svc, "call_llm_classify_intent", _boom)
+    monkeypatch.setattr(intent_svc, "build_chat_history_context", _boom)
+    state = create_query_default_state(session_id="greeting", original_query=query)
+    assert intent_svc.route_intent(state)["intent"] == "chitchat"
+
+
+@pytest.mark.parametrize("query", ["你好，HAK180的功率是多少？", "谢谢，请问烫金机参数？", "它呢？"])
+def test_mixed_greeting_and_product_followup_still_use_rag(monkeypatch, query):
+    monkeypatch.setattr(intent_svc, "CHITCHAT_ENABLED", True)
+    monkeypatch.setattr(intent_svc, "build_chat_history_context", lambda *a, **kw: "HAK180")
+    _stub_llm(monkeypatch, content='{"intent":"rag"}')
+    state = create_query_default_state(session_id="product", original_query=query)
+    assert intent_svc.route_intent(state)["intent"] == "rag"
+
+
+def test_greeting_runs_real_query_graph_without_product_lookup(monkeypatch):
+    """使用真实图接线，只替换外部模型和消息存储。"""
+    monkeypatch.setattr(intent_svc, "CHITCHAT_ENABLED", True)
+    monkeypatch.setattr(intent_svc, "call_llm_classify_intent", _boom)
+    _stub_llm(monkeypatch, content="你好，我在。")
+    saved = _saved_messages(monkeypatch)
+    state = create_query_default_state(session_id="hello-graph", original_query="你好")
+    result = main_graph.query_app.invoke(state)
+    assert result["intent"] == "chitchat"
+    assert result["answer"] == "你好，我在。"
+    assert result["item_names"] == [] and result["citations"] == []
+    assert [message["role"] for message in saved] == ["user", "assistant"]
+    assert all(message["intent"] == "chitchat" for message in saved)
+
+
 @pytest.mark.parametrize("payload,expected", [
     ('{"intent": "chitchat"}', "chitchat"),
     ('{"intent": "rag"}', "rag"),

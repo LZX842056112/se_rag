@@ -35,6 +35,51 @@ def _fb_docs(fake_mongo) -> list[dict]:
     return list(fake_mongo[settings.mongo.fb_events_collection].find({}))
 
 
+@pytest.mark.parametrize('first,second', [({'thumbs': 1}, {'resolved': True}), ({'resolved': False}, {'thumbs': -1})])
+def test_feedback_dimensions_are_merged_without_losing_previous_choice(fake_mongo, monkeypatch, first, second):
+    from app.evolution.feedback import collector
+    from app.evolution import issues
+    monkeypatch.setattr(issues, 'get_collection', lambda name: fake_mongo[name])
+    monkeypatch.setattr(settings.evolution, 'enabled', True)
+    monkeypatch.setattr(settings.evolution, 'write_enabled', True)
+    monkeypatch.setattr(collector.history_repository, 'get_answer', lambda *args: {
+        'intent': 'rag', 'query': '功率是多少', 'item_names': ['A'], 'citations': [],
+    })
+    for patch in (first, second, second):
+        record_feedback(FeedbackEvent(session_id='s', answer_id='answer-merged', **patch))
+    explicit = fake_mongo[settings.mongo.query_feedback_collection].find_one({'answer_id': 'answer-merged'})
+    signal = fake_mongo[settings.mongo.fb_events_collection].find_one({'answer_id': 'answer-merged'})
+    expected = {**first, **second}
+    assert explicit['thumbs'] == expected['thumbs']
+    assert explicit['resolved'] == expected['resolved']
+    assert explicit['adopt'] == expected['resolved']
+    assert signal['thumbs'] == expected['thumbs']
+    assert signal['adopt'] == expected['resolved']
+    assert len(_fb_docs(fake_mongo)) == 1
+
+
+def test_simultaneous_first_feedback_upserts_share_one_persistent_event(fake_mongo, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+    from app.evolution.feedback import collector
+    collection = fake_mongo[settings.mongo.fb_events_collection]
+    barrier = Barrier(2)
+    class FirstUpsertRace:
+        def update_one(self, query, update, *, upsert=False):
+            if upsert:
+                barrier.wait(timeout=3)
+                return collection.insert_one({**query, **update.get('$setOnInsert', {}), **update['$set']})
+            return collection.update_one(query, update, upsert=False)
+    monkeypatch.setattr(collector, 'evolution_repo', type('Repo', (), {'fb_events': FirstUpsertRace()})())
+    events = [FeedbackEvent(session_id='race', answer_id='a', thumbs=1),
+              FeedbackEvent(session_id='race', answer_id='a', resolved=True, adopt=True)]
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        list(pool.map(lambda event: collector._emit(event, explicit=True), events))
+    assert collection.count_documents({}) == 1
+    row = collection.find_one()
+    assert row['thumbs'] == 1 and row['adopt'] is True
+
+
 def test_backfill_normalizes_numeric_cited_ids(monkeypatch):
     """数值主键必须被归一化为 str，且自进化 id 单独归集。"""
     monkeypatch.setattr(settings.evolution, "enabled", False)

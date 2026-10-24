@@ -267,3 +267,23 @@ def test_restart_repairs_approval_to_task_crash_window(db, monkeypatch):
     assert g.is_retrievable(repositories.evolution_repo.k_candidates.find_one({"_id": cid}))
 
 
+def test_document_fingerprint_remains_compatible_with_legacy_approved_entries(db):
+    cid = candidate(db)
+    assert g.approve_candidate(str(cid))[0]
+    doc = repositories.evolution_repo.k_candidates.find_one({"_id": cid})
+    assert g.content_hash({**doc, "knowledge_origin": "document"}) == doc["content_sha256"]
+    assert g.is_retrievable(doc)
+
+
+def test_generator_cannot_promote_itself_to_manual_knowledge(db, monkeypatch):
+    from app.evolution.candidate import generator
+    monkeypatch.setattr(generator, "_call_llm", lambda *args: {
+        "faq_question": "Voltage?", "faq_answer": "The voltage is 220 V.", "source_refs": [],
+        "knowledge_origin": "manual", "manual_edited_at": time.time(), "approved_at": time.time(),
+    })
+    item = generator.generate_candidate({"query": "Voltage?", "item_names": ["A"], "gap_kind": "knowledge_missing"},
+                                        [{"chunk_id": "chunk1", "content": "The voltage is 220 V."}])
+    assert item.status == "need_info" and item.knowledge_origin == "document"
+    assert item.manual_edited_at is None and item.approved_at is None
+
+

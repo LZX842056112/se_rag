@@ -71,12 +71,16 @@ def upsert_item(evo_doc_id: str, item: KnowledgeCandidate) -> bool:
             "source_version": item.content_sha256,
             "document_version": str(item.content_version),
             "publication_status": item.publication_status,
+            "knowledge_origin": item.knowledge_origin,
             "index_version": item.index_version,
             "source_versions": item.source_versions,
             "file_title": "__evolution__",
             "dense_vector": embedding["dense"][0],
             "sparse_vector": embedding["sparse"][0],
         }
+        if item.knowledge_origin == "manual":
+            row.update(manual_edited_at=item.manual_edited_at, approved_at=item.approved_at,
+                       approved_content_sha256=item.approved_content_sha256)
         milvus_gateway.milvus_client.upsert(
             collection_name=milvus_gateway.evolution_collection_name, data=[row]
         )

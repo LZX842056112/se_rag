@@ -54,7 +54,7 @@ def get_all_params() -> dict[str, Any]:
     with _LOCK:
         _reload()
         cached = {key: value[0] for key, value in list(_CACHE.items())}
-    return cached | dict(_FALLBACKS)
+    return dict(_FALLBACKS) | cached
 
 
 def set_param(key: str, value: Any, updated_by: str = "metric") -> None:

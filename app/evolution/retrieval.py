@@ -68,6 +68,7 @@ def _format(milvus_list: list[dict], *, enforce_governance: bool = False) -> lis
             "source_version": record.get("content_sha256"),
             "document_version": str(record.get("content_version")),
             "source_versions": record.get("source_versions"),
+            "knowledge_origin": record.get("knowledge_origin", "document"),
             "index_version": record.get("index_version"),
         })
     return items

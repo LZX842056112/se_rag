@@ -6,7 +6,9 @@ from typing import Any
 from langchain_core.messages import HumanMessage
 
 from app.evolution.candidate.pii import sanitize_candidate
+from app.evolution.candidate.storage import store_candidate
 from app.evolution.flags import writes_enabled
+from app.evolution.gap.registration import GapClaimLost, VISIBLE_REGISTRATION
 from app.evolution.models import KnowledgeCandidate
 from app.evolution.quality import looks_like_non_answer
 from app.evolution.repositories import evolution_repo
@@ -34,7 +36,9 @@ def _call_llm(question: str, context: str) -> dict[str, Any]:
 def _exists_question(question: str) -> bool:
     """按问题文本去重。"""
     try:
-        return evolution_repo.k_candidates.find_one({"faq_question": question}) is not None
+        return evolution_repo.k_candidates.find_one({"$and": [
+            {"faq_question": question}, VISIBLE_REGISTRATION,
+        ]}) is not None
     except Exception:  # noqa: BLE001 - 去重查询失败按「不存在」处理
         return False
 
@@ -59,9 +63,9 @@ def _store_need_info(question: str, item_names: list[str], reason: str,
         reason=reason,
         gap_id=gap_id,
     )
-    evolution_repo.k_candidates.insert_one(candidate.document())
+    stored = store_candidate(candidate)
     logger.info(f"候选登记为待人工补充：{question[:40]}（{reason}）")
-    return candidate
+    return KnowledgeCandidate.model_validate(stored)
 
 
 def generate_candidate(gap: dict[str, Any], context_docs: list[dict[str, Any]]) -> KnowledgeCandidate | None:
@@ -126,8 +130,9 @@ def generate_candidate(gap: dict[str, Any], context_docs: list[dict[str, Any]]) 
             if _exists_question(faq_question):
                 candidate.status = "rejected"
                 candidate.reason = "duplicate"
-            evolution_repo.k_candidates.insert_one(candidate.document())
-            return candidate
+            return KnowledgeCandidate.model_validate(store_candidate(candidate))
+        except GapClaimLost:
+            raise
         except Exception as exc:  # noqa: BLE001 - 重试后仍失败则放弃该缺口
             last_error = exc
 

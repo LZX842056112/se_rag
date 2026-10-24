@@ -49,11 +49,34 @@ def resolve_source(ref: str) -> dict | None:
     return rows[0] if rows else None
 
 
-def validate_sources(doc: dict, *, check_support: bool = True, source_resolver=None) -> list[dict]:
-    """校验候选项的全部来源：存在性、版本、有效性与产品归属。
+def _valid_stamp(value) -> bool:
+    return not isinstance(value, bool) and isinstance(value, (int, float)) and math.isfinite(value) and value > 0
+
+
+def validate_sources(doc: dict, *, check_support: bool = True, source_resolver=None,
+                     require_approval: bool = False) -> list[dict]:
+    """校验文档来源，或管理员人工补充及审批记录。
 
     返回元数据快照（不含正文 text）。可选校验答案是否能在来源中核验。
     """
+    if doc.get("knowledge_origin") == "manual":
+        if not _valid_stamp(doc.get("manual_edited_at")):
+            raise ValueError("人工知识尚未通过编辑确认")
+        product_names = doc.get("item_names")
+        if (not isinstance(product_names, list) or not product_names
+                or any(not isinstance(name, str) or not name.strip() for name in product_names)
+                or not str(doc.get("faq_question") or "").strip()):
+            raise ValueError("人工知识的问题和产品不能为空")
+        if looks_like_non_answer(doc.get("faq_answer")):
+            raise ValueError("人工知识必须包含已核实的事实答案")
+        if doc.get("source_refs") or doc.get("source_versions"):
+            raise ValueError("人工补充与文档来源记录不一致，请重新编辑")
+        if require_approval and (not _valid_stamp(doc.get("approved_at")) or
+                                 doc.get("approved_content_sha256") != content_hash(doc)):
+            raise ValueError("人工知识尚未审批或内容已变化")
+        return []
+    if doc.get("knowledge_origin") not in {None, "document"}:
+        raise ValueError("知识来源类型不合法")
     refs = doc.get("source_refs") or []
     if not refs or not doc.get("item_names"):
         raise ValueError("来源和产品不能为空")
@@ -100,6 +123,9 @@ def content_hash(doc: dict) -> str:
     """对候选项的核心内容字段做确定性哈希，作为发布内容的指纹。"""
     import json
     payload = {key: doc.get(key) for key in ("faq_question", "faq_answer", "source_refs", "source_versions", "item_names")}
+    # 旧文档条目的指纹保持兼容。人工来源和编辑时间纳入新条目的审批指纹。
+    if doc.get("knowledge_origin") == "manual":
+        payload.update(knowledge_origin="manual", manual_edited_at=doc.get("manual_edited_at"))
     return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
@@ -131,23 +157,29 @@ def approve_candidate(candidate_id: str, reason: str = "") -> tuple[bool, str]:
         doc = evolution_repo.k_candidates.find_one({"_id": cid})
         if not doc:
             return False, "候选不存在"
+        if doc.get("registration_status") not in {None, "ready"}:
+            return False, "候选登记尚未完成，请刷新后重试"
         if doc.get("status") == "need_info":
-            return False, "该候选没有可用事实，请先编辑补充答案和来源后再通过"
+            return False, "该候选没有可用事实，请先编辑补充已核实的答案后再通过"
         if doc.get("status") not in {"draft", "active"}:
             return False, "候选不在可审批状态"
         if looks_like_non_answer(doc.get("faq_answer")):
             return False, "候选答案未包含可入库的事实，请先编辑补充后再通过"
         if doc.get("publication_status") in {"deprecated", "revoked"}:
-            return False, "候选已失效，请复核来源后编辑"
+            return False, "候选已失效，请复核并编辑后再审批"
         sources = validate_sources(doc)
         if is_retrievable(doc):
             return True, ""
         patch = {"schema_version": 1, "source_versions": sources, "reason": reason,
                  "publication_status": "indexing", "approved_at": time.time(),
                  "content_version": doc.get("content_version", 1)}
+        patch["approved_content_sha256"] = content_hash({**doc, **patch})
         result = evolution_repo.k_candidates.update_one(
             {"_id": cid, "faq_answer": doc.get("faq_answer"), "faq_question": doc.get("faq_question"),
              "source_refs": doc.get("source_refs"), "status": doc["status"],
+             "source_versions": doc.get("source_versions"), "item_names": doc.get("item_names"),
+             "content_version": doc.get("content_version"), "knowledge_origin": doc.get("knowledge_origin"),
+             "manual_edited_at": doc.get("manual_edited_at"),
              "publication_status": doc.get("publication_status")}, {"$set": patch})
         if not result.matched_count:
             return False, "候选已变化，请重试"
@@ -196,7 +228,7 @@ def run_publication_tasks(limit: int = 20, *, task_key: str | None = None) -> di
                         doc.get("publication_status") != "indexing" or content_hash(doc) != task["digest"]):
                     tasks.update_one({"_id": task["_id"], "lease_token": token}, {"$set": {"state": "cancelled"}})
                     continue
-                validate_sources(doc, check_support=False)
+                validate_sources(doc, check_support=False, require_approval=True)
                 evo_id = "evo_" + hashlib.sha256(task["_id"].encode()).hexdigest()[:32]
                 item = KnowledgeCandidate(**{k: v for k, v in doc.items() if k != "_id"})
                 item.status = "active"
@@ -214,7 +246,7 @@ def run_publication_tasks(limit: int = 20, *, task_key: str | None = None) -> di
                     # 后继者可能持有这个相同的确定性向量 ID。
                     # 过期的 worker 既不能激活它，也不能删除它。
                     continue
-                validate_sources(doc, check_support=False)
+                validate_sources(doc, check_support=False, require_approval=True)
                 ownership['lease_until'] = {'$gt': time.time()}
                 renewed = tasks.update_one(ownership, {'$set': {'lease_until': time.time() + 120}})
                 if not renewed.matched_count:
@@ -251,10 +283,13 @@ def is_retrievable(doc: dict | None, *, source_resolver=None) -> bool:
     """判断候选项是否已完全发布且来源/指纹一致，可被在线检索命中。"""
     if not doc or doc.get("schema_version") != 1 or doc.get("status") != "active" or doc.get("publication_status") != "active":
         return False
-    if not doc.get("source_versions") or not doc.get("evo_doc_id"):
+    if doc.get("registration_status") not in {None, "ready"}:
+        return False
+    if not doc.get("evo_doc_id") or (doc.get("knowledge_origin") != "manual" and not doc.get("source_versions")):
         return False
     try:
-        return validate_sources(doc, check_support=False, source_resolver=source_resolver) == doc["source_versions"] and content_hash(doc) == doc.get("content_sha256")
+        return validate_sources(doc, check_support=False, source_resolver=source_resolver,
+                                require_approval=True) == doc["source_versions"] and content_hash(doc) == doc.get("content_sha256")
     except Exception:
         return False
 

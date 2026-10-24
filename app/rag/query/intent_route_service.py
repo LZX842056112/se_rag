@@ -22,6 +22,7 @@ from langchain_core.messages import HumanMessage
 from app.process.query.agent.state import QueryGraphState
 from app.rag.query.config import CHITCHAT_ENABLED
 from app.rag.query.history_utils import build_chat_history_context
+from app.rag.query.greetings import is_plain_greeting
 from app.rag.query.business import classify_business, needs_business_route
 from app.shared.models import llm_providers
 from app.shared.config import settings
@@ -94,7 +95,8 @@ def route_intent(state: QueryGraphState) -> QueryGraphState:
     1. ``CHITCHAT_ENABLED=false``——开关关闭，零外部调用，恒为 rag；
     2. ``rewrite_hint`` 非空——点选主体后的重问一定是知识诉求，确定性回填 rag
        （与 ``resolve_by_hint`` 同一哲学：结构化直传比模型推断可靠）；
-    3. 常规流程——历史上下文 + LLM 二分类，失败兜底 rag。
+    3. 纯寒暄——完整输入命中确定性规则，不依赖历史或分类模型；
+    4. 常规流程——历史上下文 + LLM 二分类，失败兜底 rag。
     """
     state["business_tag"] = classify_business(state.get("original_query") or "")
     if not CHITCHAT_ENABLED:
@@ -107,6 +109,10 @@ def route_intent(state: QueryGraphState) -> QueryGraphState:
 
     session_id = require_state_str(state, "session_id")
     original_query = require_state_str(state, "original_query")
+    if is_plain_greeting(original_query):
+        state["intent"] = INTENT_CHITCHAT
+        logger.info(f"纯寒暄直接进入闲聊：session_id={session_id}")
+        return state
     history_text = build_chat_history_context(session_id, limit=_INTENT_HISTORY_LIMIT)
     started = time.perf_counter()
     state["intent"] = call_llm_classify_intent(history_text, original_query)

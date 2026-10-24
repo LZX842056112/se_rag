@@ -96,8 +96,9 @@ def sample_doc(tmp_path: Path):
     md_path = tmp_path / f"{file_title}.md"
     md_path.write_text(_SAMPLE_MD, encoding="utf-8")
     yield file_title, md_path
-    _cleanup_milvus(file_title)
-    _cleanup_parents(file_title)
+    if os.getenv("E2E_KEEP_DATA") != "1":
+        _cleanup_milvus(file_title)
+        _cleanup_parents(file_title)
 
 
 def _delete_and_verify(collection: str, filter_expr: str, *, retries: int = 3,
@@ -220,32 +221,49 @@ def test_import_query_and_evolution_flow(require_e2e, sample_doc):
     if not settings.evolution.enabled:
         pytest.skip("EVOLUTION_ENABLED=false，跳过自进化闭环校验")
 
+    missing_query = f"{item_name} 在本轮隔离测试 {file_title} 中的保修期是多少？"
+    missing = invoke_query_graph(session_id=session_id, original_query=missing_query, is_stream=False)
+    assert missing and missing.get('answer_id'), '真实反馈需要已保存的回答 ID'
     record_feedback(FeedbackEvent(
         session_id=session_id,
-        query=f"e2e_{uuid.uuid4().hex[:6]} 的保修期是多少？",
-        rewritten_query="保修期",
-        item_names=[item_name],
-        adopt=False,
+        answer_id=missing['answer_id'],
+        resolved=False,
         thumbs=-1,
-        source="kb",
     ))
-    result = run_scan_and_generate_once()
-    assert result["scanned"] >= 1, "缺口扫描未消费到测试反馈"
 
-    drafts = list(evolution_repo.k_candidates.find({"item_names": item_name, "status": "draft"}))
-    if drafts:
-        from app.evolution.approval import service as approval_service
-
-        candidate_id = str(drafts[0]["_id"])
-        approved_ok, approved_msg = approval_service.approve(candidate_id)
-        assert approved_ok, f"候选审批通过失败：{approved_msg}"
-        approved = evolution_repo.k_candidates.find_one({"_id": drafts[0]["_id"]})
-        evo_doc_id = approved.get("evo_doc_id")
-        assert evo_doc_id, "审批后未生成 evo_doc_id"
-        # 清理：下架本次审批产生的进化条目与候选记录（下架后复核确实已移出检索）
-        _cleanup_evolution_item(evo_doc_id)
-        evolution_repo.k_candidates.delete_one({"_id": drafts[0]["_id"]})
+    # 缺口不能因为未自动生成 draft 就跳过闭环验收。
+    from app.evolution.approval import service as approval_service
+    from app.evolution.gap.review import review_gap
+    from app.evolution.governance import is_retrievable
+    from app.evolution.retrieval import search_evolution_items
+    from bson import ObjectId
+    # 保留历史测试数据时，扫描器会先消费已有信号。逐批推进，不能假定新信号位于首批。
+    gap = None
+    scan_batches = evolution_repo.fb_events.count_documents({}) // max(1, settings.evolution.scan_batch) + 2
+    for _ in range(scan_batches):
+        run_scan_and_generate_once()
+        gap = evolution_repo.k_gaps.find_one({"session_id": session_id, 'query': missing_query})
+        if gap:
+            break
+    assert gap, "测试反馈未持久化为缺口"
+    ok, message = review_gap(str(gap["_id"]), disposition="knowledge_missing", reason="E2E隔离夹具明确规定保修期，验证人工补充路径")
+    assert ok, message
+    reviewed = evolution_repo.k_gaps.find_one({"_id": gap["_id"]})
+    candidate_id = reviewed["candidate_id"]
+    assert approval_service.edit(candidate_id, faq_answer=f"{item_name}的隔离测试保修期为12个月。", source_refs=[], item_names=[item_name])
+    draft = evolution_repo.k_candidates.find_one({"_id": ObjectId(candidate_id)})
+    assert not is_retrievable(draft), "草稿不能召回"
+    approved_ok, approved_msg = approval_service.approve(candidate_id)
+    assert approved_ok, approved_msg
+    approved = evolution_repo.k_candidates.find_one({"_id": ObjectId(candidate_id)})
+    assert is_retrievable(approved)
+    evo_doc_id = approved["evo_doc_id"]
+    assert any(row["chunk_id"] == evo_doc_id for row in search_evolution_items("隔离测试保修期", [item_name]))
+    assert approval_service.reject(candidate_id, "E2E测试撤回")
+    assert not is_retrievable(evolution_repo.k_candidates.find_one({"_id": ObjectId(candidate_id)}))
+    assert all(row["chunk_id"] != evo_doc_id for row in search_evolution_items("隔离测试保修期", [item_name]))
 
     # ---------- 4. 清理测试会话与缺口 ----------
-    evolution_repo.fb_events.delete_many({"session_id": session_id})
-    evolution_repo.k_gaps.delete_many({"session_id": session_id})
+    if os.getenv("E2E_KEEP_DATA") != "1":
+        evolution_repo.fb_events.delete_many({"session_id": session_id})
+        evolution_repo.k_gaps.delete_many({"session_id": session_id})

@@ -24,7 +24,13 @@
     rejected: '已驳回',
     hold: '观察中',
     removed: '已下架',
-    need_info: '待人工补充'
+    deprecated: '已下架',
+    need_info: '待人工补充',
+    strategy_pending: '待策略修复',
+    reviewing: '正在登记候选',
+    processing: '后台处理中',
+    dismissed: '已忽略',
+    resolved: '已解决'
   };
 
   // 审批写操作令牌：仅当前标签页会话有效（sessionStorage），输入时即时持久化
@@ -34,17 +40,90 @@
     tokenEl.addEventListener('change', () => { reload(); loadStatus(); });
   }
 
+  async function loadGaps() {
+    const list = document.getElementById('gapList');
+    if (!list) return;
+    try {
+      const data = await App.fetchJson('/api/evolution/gaps');
+      list.textContent = '';
+      const labels = { retrieval_miss: '检索遗漏', reading_miss: '阅读遗漏', generation_error: '生成错误', knowledge_missing: '知识缺失' };
+      (data.items || []).forEach(item => {
+        const row = App.create('div', 'item');
+        row.appendChild(App.create('p', 'q', item.query));
+        row.appendChild(App.create('p', null, (labels[item.gap_kind] || '原因待确认') + ' · ' + (ST_LABEL[item.status] || item.status || '待处理')));
+        row.appendChild(App.create('p', null, item.processing_reason || '等待调度处理；可先核对资料。'));
+        if (['candidate', 'pending', 'strategy_pending'].includes(item.status) && !item.candidate_id) {
+          const reason = document.createElement('input');
+          reason.placeholder = '复核原因：例如已核对哪份资料';
+          reason.maxLength = 1000;
+          row.appendChild(reason);
+          const ops = App.create('div', 'ops');
+          function reviewButton(label, disposition) {
+            actButton(ops, label, 'plain', async btn => {
+              if (!reason.value.trim()) { toast('请填写复核原因'); return; }
+              if (disposition === 'knowledge_missing' && !(await App.confirm('确认需要补充知识？系统会登记空答案候选，补充已核实的答案后再审批入库。', { confirmText: '确认登记' }))) return;
+              btn.disabled = true;
+              try {
+                await App.fetchJson('/api/evolution/gaps/' + encodeURIComponent(item.id) + '/review', {
+                  method: 'POST', body: JSON.stringify({ disposition, reason: reason.value.trim() })
+                });
+                await reload();
+              } catch (e) { btn.disabled = false; toast(e.message); }
+            });
+          }
+          reviewButton('确认为知识缺失', 'knowledge_missing');
+          reviewButton('忽略本会话同题', 'dismissed');
+          row.appendChild(ops);
+        }
+        list.appendChild(row);
+      });
+      if (!(data.items || []).length) list.textContent = '当前没有缺口。';
+    } catch (e) { list.textContent = e.message; }
+  }
+
   async function loadIssues() {
     const list = document.getElementById('issueList');
     if (!list) return;
     try {
-      const data = await App.fetchJson('/api/evolution/issues');
+      const selection = (document.getElementById('issueStatusFilter') || {}).value || 'unresolved';
+      const data = await App.fetchJson('/api/evolution/issues' + (selection === 'all' ? '' : '?status=' + encodeURIComponent(selection)));
       list.textContent = '';
       (data.items || []).forEach(item => {
         const row = App.create('div', 'item');
         row.appendChild(App.create('p', null, item.query));
-        const types = { missing_material: '缺资料', retrieval_failure: '检索失败', answer_error: '回答错误', complaint: '业务投诉' };
-        row.appendChild(App.create('p', 'greet', (types[item.issue_type] || item.issue_type) + ' · 创建 ' + fmtTs(item.created_at) + (item.completed_at ? ' · 完成 ' + fmtTs(item.completed_at) : '')));
+        const types = { missing_material: '缺资料', retrieval_failure: '检索遗漏', reading_failure: '阅读遗漏', answer_error: '回答错误', complaint: '业务投诉' };
+        const reasons = (item.issue_types || [item.issue_type]).map(type => types[type] || type).join('、');
+        row.appendChild(App.create('p', 'greet', reasons + ' · 关联登记' + (item.record_count || 1) + '条 · 创建 ' + fmtTs(item.created_at) + (item.completed_at ? ' · 完成 ' + fmtTs(item.completed_at) : '')));
+        if ((item.item_names || []).length) row.appendChild(App.create('p', 'greet', '产品：' + item.item_names.join('、')));
+        else row.appendChild(App.create('p', 'greet', '产品未确认，保留为单独待办。'));
+        if (item.session_id) row.appendChild(App.create('p', 'greet', '会话：' + shortId(item.session_id)));
+        const records = item.related_records || [];
+        if (item.record_count > 1 || records.some(record => (record.handling_history || []).length)) {
+          const details = App.create('details');
+          details.appendChild(App.create('summary', null, '查看登记及处理记录'));
+          records.forEach(record => {
+            details.appendChild(App.create('p', 'greet', (types[record.issue_type] || record.issue_type || '') +
+              ' · ' + fmtTs(record.created_at) + (record.owner ? ' · ' + record.owner : '') +
+              (record.resolution ? ' · ' + record.resolution : '')));
+            (record.handling_history || []).forEach(previous => {
+              details.appendChild(App.create('p', 'greet', '此前处理：' + (previous.owner || '未分配') + ' · ' +
+                (previous.resolution || '未填写结果') + ' · ' + fmtTs(previous.changed_at)));
+            });
+          });
+          row.appendChild(details);
+        }
+        if (item.status === 'dismissed') {
+          row.appendChild(App.create('p', 'greet', '已忽略 · 原因：' + (item.suppression_reason || '人工忽略') +
+            (item.suppressed_at ? ' · ' + fmtTs(item.suppressed_at) : '')));
+          if (item.owner || item.resolution) row.appendChild(App.create('p', 'greet', '原处理记录：' + (item.owner || '未分配') + ' · ' + (item.resolution || '未填写结果')));
+          list.appendChild(row);
+          return;
+        }
+        if (item.status === 'resolved') {
+          row.appendChild(App.create('p', 'greet', '负责人：' + (item.owner || '未分配') + ' · 处理结果：' + (item.resolution || '未填写')));
+          list.appendChild(row);
+          return;
+        }
         const owner = document.createElement('input');
         owner.placeholder = '负责人'; owner.maxLength = 128; owner.value = item.owner || '';
         const status = document.createElement('select');
@@ -54,7 +133,7 @@
         status.value = item.status;
         const resolution = document.createElement('textarea');
         resolution.placeholder = '处理结果'; resolution.maxLength = 2000; resolution.value = item.resolution || '';
-        const save = App.create('button', 'btn', '保存处理记录');
+        const save = App.create('button', 'btn', item.record_count > 1 ? '保存整组处理记录' : '保存处理记录');
         save.addEventListener('click', async () => {
           save.disabled = true;
           try {
@@ -101,6 +180,7 @@
 
   /** 闭环状态：把「扫描游标 / 缺口与候选计数」显式展示，避免只能翻日志判断是否卡住 */
   async function loadStatus() {
+    loadGaps();
     loadIssues();
     loadTrialMetrics();
     if (!statusEl) return;
@@ -124,6 +204,7 @@
 
   function chipsHtml(item) {
     const parts = [];
+    if (item.knowledge_origin === 'manual') parts.push('<span class="chip">人工补充</span>');
     if (Array.isArray(item.item_names) && item.item_names.length) {
       item.item_names.forEach(n => parts.push('<span class="chip">主体:' + esc(n) + '</span>'));
     } else {
@@ -139,10 +220,14 @@
     if (card.querySelector('.edit-box')) return; // 防重入：编辑框已存在则忽略
     const box = App.create('div', 'edit-box');
     box.innerHTML =
-      '<label>问题（faq_question）</label>' +
+      '<label>问题</label>' +
       '<textarea rows="2" data-k="q">' + esc(item.faq_question) + '</textarea>' +
-      '<label>答案（faq_answer）</label>' +
+      '<label>答案</label>' +
       '<textarea rows="4" data-k="a">' + esc(item.faq_answer) + '</textarea>' +
+      '<label>来源分块 ID（人工补充可留空；有文档依据时每行一个）</label>' +
+      '<textarea rows="2" data-k="refs">' + esc((item.source_refs || []).join('\n')) + '</textarea>' +
+      '<label>产品名称（每行一个）</label>' +
+      '<textarea rows="2" data-k="items">' + esc((item.item_names || []).join('\n')) + '</textarea>' +
       '<div class="ops">' +
       '  <button class="btn" data-act="save">保存</button>' +
       '  <button class="btn plain" data-act="cancel">取消</button>' +
@@ -151,12 +236,15 @@
     box.querySelector('[data-act=save]').addEventListener('click', async () => {
       const question = box.querySelector('[data-k=q]').value.trim();
       const answer = box.querySelector('[data-k=a]').value.trim();
+      const splitLines = value => value.split(/[\n,，]+/).map(v => v.trim()).filter(Boolean);
+      const sourceRefs = splitLines(box.querySelector('[data-k=refs]').value);
+      const itemNames = splitLines(box.querySelector('[data-k=items]').value);
       if (!question && !answer) { toast('无改动'); return; }
       try {
         await App.fetchJson(App.PATHS.candidateAction(item.id, 'edit'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ faq_question: question || null, faq_answer: answer || null })
+          body: JSON.stringify({ faq_question: question || null, faq_answer: answer || null, source_refs: sourceRefs, item_names: itemNames })
         });
         toast('已保存，重新加载');
         reload();
@@ -176,7 +264,7 @@
 
   function renderOps(ops, item, card) {
     if (item.status === 'draft') {
-      actButton(ops, '✔ 通过', 'good', async (btn) => {
+      actButton(ops, item.knowledge_origin === 'manual' ? '✔ 确认并入库' : '✔ 通过', 'good', async (btn) => {
         btn.disabled = true;
         try {
           await App.fetchJson(App.PATHS.candidateAction(item.id, 'approve'), {
@@ -206,7 +294,7 @@
     }
     if (item.status === 'need_info') {
       // 无证据 / 生成答案不含事实：不允许直接通过，先编辑补充真实答案
-      ops.appendChild(App.create('span', 'greet', '该候选没有可用事实，请先「编辑」补充答案，保存后即可通过'));
+      ops.appendChild(App.create('span', 'greet', '请编辑并补充已核实的答案和产品。人工补充可留空来源分块，保存后再确认入库。填写文档来源时会校验原文。'));
       actButton(ops, '✎ 编辑', 'plain', () => beginEdit(item, card));
       return;
     }
@@ -240,6 +328,7 @@
 
     items.forEach(item => {
       const card = App.create('div', 'item');
+      const reason = String(item.reason || '').replace(/^人工确认知识缺失；请补充事实答案与有效来源。/, '人工确认知识缺失；请补充已核实的事实答案。');
       card.innerHTML =
         '<div class="item-head">' +
         '  <span class="st ' + esc(item.status) + '">' + esc(ST_LABEL[item.status] || item.status) + '</span>' +
@@ -248,6 +337,7 @@
         '</div>' +
         '<div class="q">' + esc(item.faq_question) + '</div>' +
         '<div class="a">' + esc(item.faq_answer) + '</div>' +
+        (reason ? '<p class="greet">' + esc(reason) + '</p>' : '') +
         '<div class="chips">' + chipsHtml(item) + '</div>' +
         '<div class="ops"></div>';
       renderOps(card.querySelector('.ops'), item, card);
@@ -270,6 +360,8 @@
   }
 
   filterEl.addEventListener('change', reload);
+  const issueStatusFilter = document.getElementById('issueStatusFilter');
+  if (issueStatusFilter) issueStatusFilter.addEventListener('change', loadIssues);
   document.getElementById('refresh').addEventListener('click', reload);
   reload();
 })();

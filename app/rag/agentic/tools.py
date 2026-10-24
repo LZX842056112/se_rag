@@ -340,6 +340,7 @@ class RetrievalTools:
                 "approval_status": "active", "source_version": record["content_sha256"],
                 "document_version": str(record.get("content_version", 1)),
                 "source_versions": record["source_versions"], "publication_status": "active"})
+            approved[-1]["knowledge_origin"] = record.get("knowledge_origin", "document")
         return approved
 
     def _semantic_search(self, arguments, scope, limit, deadline):

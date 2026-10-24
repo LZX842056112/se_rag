@@ -17,6 +17,8 @@ class CandidateItem(BaseModel):
     status: str
     source_refs: list[str] = Field(default_factory=list)
     item_names: list[str] = Field(default_factory=list)
+    reason: str = ""
+    knowledge_origin: Literal["document", "manual"] = "document"
     ts: Any = None
 
 
@@ -34,6 +36,11 @@ class CandidateEditRequest(BaseModel):
     source_refs: Optional[list[str]] = None
     item_names: Optional[list[str]] = None
     reason: str = ""
+
+
+class GapReviewRequest(BaseModel):
+    disposition: Literal["knowledge_missing", "dismissed"]
+    reason: str = Field(min_length=1, max_length=1000)
 
 
 # ---------------- 引用（读链路返回） ---------------

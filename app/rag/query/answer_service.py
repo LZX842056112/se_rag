@@ -1,17 +1,15 @@
 """答案生成服务（查询链路末节点）。
 
-职责：组装上下文提示词 → 调用 LLM（流式/非流式）→ 抽取图片 → 回填引用/信号/接地性 →
+职责：组装上下文提示词 → 调用 LLM（流式/非流式）→ 校验答案配图 → 回填引用/信号/接地性 →
 落库助手消息。
 """
 from __future__ import annotations
-
-import re
 
 from langchain_core.messages import HumanMessage
 
 from app.evolution.online_eval.grounding import compute_groundedness
 from app.process.query.agent.state import QueryGraphState
-from app.rag.config import SUPPORTED_IMAGE_EXTENSIONS
+from app.rag.query.answer_images import select_answer_images
 from app.rag.query.citations import build_citations, build_doc_meta, split_cited
 from app.rag.query.history_utils import build_history_context
 from app.rag.query.business import apply_business_policy
@@ -20,10 +18,7 @@ from app.shared.config import settings
 from app.shared.models import llm_providers
 from app.shared.runtime.logger import logger
 from app.shared.runtime.prompts import load_prompt
-from app.shared.utils.answer import is_no_answer
 from app.shared.utils.sse_broker import SSEEvent, publish
-
-_IMAGE_MARKDOWN_RE = re.compile(r"!\[.*?\]\((.*?)\)")
 
 
 def state_exists_answer(state: QueryGraphState) -> bool:
@@ -100,23 +95,8 @@ def call_llm_deal_answer(state: QueryGraphState, answer_prompt_text: str) -> Non
 
 
 def extract_text_image_url(state: QueryGraphState) -> None:
-    """从重排结果中抽取图片地址（图片类型 URL + Markdown 图片语法）。
-
-    若模型已给出「无法作答」兜底话术，则不再回填图片：切片正文常是「零碎文字 + 配图」
-    （如说明书安装步骤），模型据文字判为答不出、图片却会被照常渲染，形成
-    「说答不出、界面却给出图」的自相矛盾。兜底话术与图片互斥，二者只保留其一。
-    """
-    if is_no_answer(state.get("answer")):
-        state["image_urls"] = []
-        logger.info("命中无法作答兜底话术，已抑制检索图片回填")
-        return
-    image_urls: list[str] = []
-    for doc in state.get("reranked_docs", []):
-        url = doc.get("url")
-        if url and url.endswith(SUPPORTED_IMAGE_EXTENSIONS):
-            image_urls.append(url)
-        image_urls.extend(_IMAGE_MARKDOWN_RE.findall(doc.get("text") or ""))
-    state["image_urls"] = image_urls
+    """只保留答案明确选用、且存在于实际生成上下文的图片。"""
+    select_answer_images(state)
 
 
 def backfill_evolution_outputs(state: QueryGraphState) -> QueryGraphState:
@@ -186,13 +166,14 @@ def save_answer_message_history(state: QueryGraphState) -> None:
 def generate_answer(state: QueryGraphState) -> QueryGraphState:
     """答案生成服务入口。"""
     state["answer_contexts"] = []
+    state["image_urls"] = []
     state['evidence_manifest'] = []
     state['evidence_manifest'] = []
     apply_business_policy(state)
     if not state_exists_answer(state):
         answer_prompt_text = load_answer_prompt(state)
         call_llm_deal_answer(state, answer_prompt_text)
-        extract_text_image_url(state)
+    extract_text_image_url(state)
     backfill_evolution_outputs(state)
     save_answer_message_history(state)
     return state

@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -17,6 +17,7 @@ def _now() -> float:
 # ---------------- 反馈事件 fb_events ----------------
 class FeedbackEvent(BaseModel):
     session_id: str
+    business_tag: str = ""
     answer_id: str = Field(default="", max_length=24)
     resolved: bool | None = None
     query: str = ""
@@ -43,6 +44,7 @@ class GapSignal(BaseModel):
 
 class KnowledgeGap(BaseModel):
     gap_kind: str = "retrieval_miss"
+    business_tag: str = ""
     gap_id: str | None = None   # Mongo 主键（生成候选时透传给候选，用于回写缺口状态）
     session_id: str
     query: str = ""
@@ -60,6 +62,10 @@ class KnowledgeGap(BaseModel):
 # ---------------- 知识候选 k_candidates ----------------
 class KnowledgeCandidate(BaseModel):
     schema_version: int = 1
+    knowledge_origin: Literal["document", "manual"] = "document"
+    manual_edited_at: float | None = None
+    approved_at: float | None = None
+    approved_content_sha256: str = ""
     gap_kind: str = "knowledge_missing"
     source_versions: list[dict[str, Any]] = Field(default_factory=list)
     content_version: int = 1

@@ -23,11 +23,10 @@
           <option value="">全部状态</option>
           <option value="draft">待审批（draft）</option>
           <option value="need_info">待人工补充（need_info）</option>
-          <option value="candidate">强缺口（candidate）</option>
-          <option value="pending">弱缺口（pending）</option>
           <option value="active">已入库（active）</option>
           <option value="rejected">已驳回（rejected）</option>
           <option value="hold">观察中（hold）</option>
+          <option value="deprecated">已下架（deprecated）</option>
         </select>
         <span class="count" id="count">—</span>
         <span class="pill" id="evoStatus" title="自进化闭环运行状态">闭环状态：—</span>
@@ -40,7 +39,26 @@
     </div>
     <div class="greet">说明：待审候选（draft）可「通过」（写入知识库并置为 active）、「驳回」（置为 rejected）或先「编辑」内容再审批。</div>
     <section class="greet"><h2>内部试用指标</h2><div id="trialMetrics">输入管理令牌后刷新。</div></section>
-    <section class="greet"><h2>未解决问题</h2><div id="issueList"></div></section>
+    <section class="greet"><h2>未解决问题</h2>
+      <p>用于分配负责人、排查原因和记录处理结果。保存处理记录不会修改知识库。需要补充知识时，请到“缺口处理”复核，再审批知识候选。</p>
+      <p>同一会话、同一产品、同一问题的未完成登记合并为一个待办，各次登记和处理历史保留。</p>
+      <label>显示范围
+        <select id="issueStatusFilter">
+          <option value="unresolved">未完成</option>
+          <option value="in_progress">处理中</option>
+          <option value="resolved">已解决</option>
+          <option value="dismissed">已忽略</option>
+          <option value="all">全部</option>
+        </select>
+      </label>
+      <div id="issueList"></div>
+    </section>
+    <section class="greet"><h2>缺口处理</h2>
+      <p>强缺口会先区分处理原因。检索、阅读和生成问题进入策略待办。核对资料后，可确认为知识缺失，登记待补充候选。</p>
+      <p>人工忽略后，本会话中同一产品、同一问题不再自动登记待办或缺口。失败信号仍保留。忽略不会补充答案或修改知识库。</p>
+      <div id="gapList"></div>
+    </section>
+    <h2>知识候选</h2>
     <div id="list"></div>
   </div>
 

@@ -278,24 +278,32 @@
   }
 
   /**
-   * 拆分「答案正文 + 图片列表」：支持 `【图片】` / `[图片]` 标记后的图片列表。
+   * 拆分正文与显式图片引用：支持 Markdown 图片及末尾的 `【图片】` / `[图片]` 列表。
    * 返回 `{ text, images }`，images 已规整、过滤并去重。
    */
   function parseAnswerAndImages(text) {
     var raw = String(text || '');
-    var marker = /【\s*图片\s*】|\[\s*图片\s*\]/g;
+    var marker = /^[ \t]*(?:【[ \t]*图片[ \t]*】|\[[ \t]*图片[ \t]*\])[ \t]*\r?$/gm;
+    var markdownImage = /!\[[^\]\r\n]*\]\(\s*(<[^>\r\n]+>|(?:[^()\s]|\([^()\r\n]*\))+?)(?:\s+["'][^\r\n]*?["'])?\s*\)/g;
     var match;
-    var lastIndex = -1;
-    var lastLength = 0;
+    var body = raw;
+    var tail = '';
     while ((match = marker.exec(raw)) !== null) {
-      lastIndex = match.index;
-      lastLength = match[0].length;
+      var rest = raw.slice(match.index + match[0].length).trim();
+      var lines = rest.split(/\r?\n/).map(function (line) {
+        return line.trim().replace(/^(?:[-*+]\s+|\d+[.)]\s+)/, '');
+      }).filter(Boolean);
+      if (!lines.length || lines.every(function (line) {
+        return /^<?https?:\/\/[^\s<>"']+>?$/i.test(line) || line.replace(markdownImage, '') === '';
+      })) {
+        body = raw.slice(0, match.index).trimEnd();
+        tail = rest;
+        break;
+      }
     }
-    if (lastIndex === -1) return { text: raw, images: [] };
-
-    var body = raw.slice(0, lastIndex).trimEnd();
-    var tail = raw.slice(lastIndex + lastLength).trim();
     var urls = [];
+    body = body.replace(markdownImage,
+      function (_, url) { urls.push(url.replace(/^<|>$/g, '')); return ''; });
     tail.split(/\r?\n/).map(function (line) { return line.trim(); }).filter(Boolean).forEach(function (line) {
       if (line.indexOf('http://') === 0 || line.indexOf('https://') === 0) urls.push(line);
       else urls = urls.concat(extractUrlsLoose(line));
@@ -305,15 +313,14 @@
   }
 
   /**
-   * 渲染答案正文 + 图片：显式标记、接口候选、正文宽松提取三者取并集后去重。
+   * 只展示正文明确选用且服务端已核验的图片。流式未收到最终列表时不展示图片。
    * 图片加载成功只显示图片；加载失败才回退成链接，保证用户仍能手动打开。
    */
   function renderAnswerWithImages(containerEl, answerText, candidateImageUrls) {
     var parsed = parseAnswerAndImages(answerText);
     var candidates = (Array.isArray(candidateImageUrls) ? candidateImageUrls : [])
       .map(normalizeUrl).filter(isImageUrl);
-    var loose = extractUrlsLoose(answerText).map(normalizeUrl).filter(isImageUrl);
-    var images = dedupeKeepOrder(parsed.images.concat(candidates).concat(loose));
+    var images = dedupeKeepOrder(parsed.images.filter(function (url) { return candidates.indexOf(url) !== -1; }));
 
     containerEl.textContent = '';
     var textEl = create('div', 'answer-text', (parsed.text || '').trim() || '（已完成，但未返回答案）');
@@ -335,7 +342,11 @@
       link.rel = 'noopener noreferrer';
       link.style.display = 'none';
 
-      img.addEventListener('load', function () { link.style.display = 'none'; img.style.display = ''; });
+      img.addEventListener('load', function () {
+        link.style.display = 'none';
+        // 旧图片说明可能把小编号误写成操作图；真实尺寸不足以说明步骤时不单独展示。
+        img.style.display = img.naturalWidth < 96 && img.naturalHeight < 96 ? 'none' : '';
+      });
       img.addEventListener('error', function () { img.style.display = 'none'; link.style.display = 'inline'; });
       wrap.appendChild(img);
       wrap.appendChild(link);

@@ -9,7 +9,11 @@ from typing import Any
 
 from app.evolution.models import GapSignal, KnowledgeGap
 from app.evolution.flags import writes_enabled
+from app.evolution.gap.decisions import ignored_contexts
+from app.evolution.issue_groups import context_key
 from app.evolution.repositories import evolution_repo
+from app.rag.query.greetings import is_plain_greeting
+from app.rag.query.business import classify_business
 from app.shared.config import settings
 from app.shared.runtime.logger import logger
 
@@ -47,7 +51,8 @@ def _is_duplicated(query: str, ts: float) -> bool:
     try:
         if evolution_repo.k_gaps.find_one({"query": text, "status": "pending"}):
             return True
-        recent = evolution_repo.k_gaps.find_one({"query": text, "ts": {"$gte": ts - _DEDUP_WINDOW}})
+        recent = evolution_repo.k_gaps.find_one({"query": text, "status": {"$ne": "dismissed"},
+                                               "ts": {"$gte": ts - _DEDUP_WINDOW}})
         return recent is not None
     except Exception:  # noqa: BLE001 - 去重失败按「不重复」处理，交由后续去重兜底
         return False
@@ -85,6 +90,7 @@ def detect_and_classify(fb_doc: dict[str, Any], transcript_slice: str = "") -> K
     grade, confidence = grade_signals(signals)
     return KnowledgeGap(
         gap_kind=classify_gap(fb_doc),
+        business_tag=fb_doc.get("business_tag") or classify_business(fb_doc.get("query") or ""),
         session_id=fb_doc.get("session_id", ""),
         query=fb_doc.get("query", ""),
         item_names=list(fb_doc.get("item_names") or []),
@@ -117,11 +123,18 @@ def scan_unresolved_feedbacks(batch: int = 50) -> list[KnowledgeGap]:
             .sort("ts", 1)
             .limit(batch)
         )
+        events = list(events)
+        decisions = ignored_contexts(events)
         scanned = 0
         last_ts = _CURSOR["ts"]
         for doc in events:
             scanned += 1
             last_ts = float(doc.get("ts") or 0.0)
+            # 兼容修复前误写入的闲聊信号。保留原事件，不制造知识缺口。
+            if doc.get("intent") == "chitchat" or is_plain_greeting(doc.get("query", "")):
+                continue
+            if context_key(doc) in decisions:
+                continue
             if _is_duplicated(doc.get("query", ""), doc.get("ts") or 0):
                 continue
             gap = detect_and_classify(doc, transcript_slice=doc.get("query", ""))

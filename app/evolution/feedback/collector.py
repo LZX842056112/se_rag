@@ -2,11 +2,15 @@
 from __future__ import annotations
 
 import time
+import hashlib
+import json
 from typing import Any
+from pymongo.errors import DuplicateKeyError
 
 from app.evolution.models import FeedbackEvent
 from app.evolution.flags import writes_enabled
 from app.evolution.repositories import evolution_repo
+from app.rag.query.business import classify_business
 from app.shared.config import settings
 from app.shared.clients.history_repository import history_repository
 from app.shared.runtime.logger import logger
@@ -16,14 +20,30 @@ from app.shared.utils.answer import is_no_answer
 _DEDUP_WINDOW_SECONDS = 30
 
 
-def _emit(event: FeedbackEvent) -> None:
+def _upsert_answer_feedback(collection, selector: dict, payload: dict, session_id: str, answer_id: str) -> None:
+    """新事件共用确定性主键；旧事件按原条件更新，无需迁移历史。"""
+    key = 'answer_' + hashlib.sha256(json.dumps([session_id, answer_id]).encode()).hexdigest()
+    try:
+        collection.update_one(selector, {'$set': payload, '$setOnInsert': {'_id': key}}, upsert=True)
+    except DuplicateKeyError:
+        # 另一个进程先插入相同主键时，只合并本次提供的字段。
+        collection.update_one(selector, {'$set': payload}, upsert=False)
+
+
+def _emit(event: FeedbackEvent, *, explicit: bool = False) -> None:
     """幂等写入一条反馈事件。"""
     now = time.time()
+    payload = event.document()
+    if explicit:
+        if event.resolved is None:
+            payload.pop('resolved', None)
+            payload.pop('adopt', None)
+        if event.thumbs is None:
+            payload.pop('thumbs', None)
     if event.answer_id:
-        evolution_repo.fb_events.update_one(
+        _upsert_answer_feedback(evolution_repo.fb_events,
             {"session_id": event.session_id, "answer_id": event.answer_id},
-            {"$set": event.document()}, upsert=True,
-        )
+            payload, event.session_id, event.answer_id)
         return
     evolution_repo.fb_events.update_one(
         {
@@ -44,8 +64,10 @@ def record_feedback(event: FeedbackEvent) -> None:
     answer = history_repository.get_answer(event.session_id, event.answer_id)
     if not answer or answer.get("intent") not in ("rag", "chitchat"):
         return
+    query = answer.get("query") or answer.get("rewritten_query") or ""
     canonical = event.model_copy(update={
-        "query": answer.get("query") or answer.get("rewritten_query") or "",
+        "query": query,
+        "business_tag": answer.get("business_tag") or classify_business(query),
         "rewritten_query": answer.get("rewritten_query") or "",
         "item_names": answer.get("item_names") or [],
         "cited_chunk_ids": [str(c["faq_id"]) for c in answer.get("citations", [])
@@ -58,17 +80,18 @@ def record_feedback(event: FeedbackEvent) -> None:
         payload = {**canonical.document(), "intent": answer["intent"]}
         if event.resolved is None:
             payload.pop("resolved", None)
+            payload.pop("adopt", None)
         if event.thumbs is None:
             payload.pop("thumbs", None)
-        evolution_repo.query_feedback.update_one(
-            {"answer_id": event.answer_id}, {"$set": payload}, upsert=True,
-        )
+        _upsert_answer_feedback(evolution_repo.query_feedback, {"answer_id": event.answer_id},
+                                payload, event.session_id, event.answer_id)
         if writes_enabled() and answer["intent"] == "rag":
-            _emit(canonical)
+            _emit(canonical, explicit=True)
         if answer["intent"] == "rag" and (event.resolved is False or (event.thumbs or 0) < 0):
             from app.evolution.issues import open_issue
             open_issue({"session_id": event.session_id, "answer_id": event.answer_id,
                         "original_query": canonical.query,
+                        "item_names": canonical.item_names,
                         "business_tag": answer.get("business_tag", ""),
                         "issue_type": "answer_error" if canonical.cited_chunk_ids else "missing_material"})
     except Exception as exc:
@@ -89,6 +112,7 @@ def flush_session_signals(state: dict[str, Any]) -> None:
             return
         _emit(FeedbackEvent(
             session_id=session_id,
+            business_tag=state.get("business_tag") or classify_business(state.get("original_query") or ""),
             answer_id=state.get("answer_id") or "",
             query=state.get("original_query", ""),
             rewritten_query=state.get("rewritten_query", ""),

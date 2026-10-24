@@ -31,11 +31,11 @@ def test_no_answer_suppresses_retrieved_images():
     assert state["image_urls"] == []
 
 
-def test_normal_answer_still_extracts_images():
-    """正常作答时图片照常回填，修复不能误伤正常链路。"""
+def test_text_only_answer_does_not_attach_unrelated_retrieved_images():
+    """功率结论不需要安装配图，不能把检索图片自动附上。"""
     state = {"answer": "烫金机的额定功率为 55W。", "reranked_docs": _docs()}
     extract_text_image_url(state)
-    assert state["image_urls"] == [IMG_A, IMG_B]
+    assert state["image_urls"] == []
 
 
 def test_image_url_field_is_suppressed_too():

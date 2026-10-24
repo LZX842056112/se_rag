@@ -117,11 +117,16 @@ def test_approve_missing_candidate_returns_message(fake_mongo, upsert_ok):
     assert ok is False and message == "候选不存在"
 
 
-def test_remove_candidate_deactivates_and_deletes(fake_mongo, monkeypatch):
-    """下架：已入库条目要同时移出向量库（误批的伪知识靠它清理）。"""
+def test_remove_candidate_deactivates_but_keeps_approval_record(fake_mongo, monkeypatch):
+    """下架立即阻止召回，同时保留候选内容和发布任务供核查。"""
     deactivated: list[str] = []
     monkeypatch.setattr(approval_service, "deactivate", lambda evo_id: deactivated.append(evo_id) or True)
+    from app.evolution import governance
+    monkeypatch.setattr(governance, 'index_deactivate', lambda evo_id: deactivated.append(evo_id) or True)
     cid = _insert(fake_mongo, status="active", evo_doc_id="evo_test123")
     assert approval_service.remove_candidate(cid) is True
     assert deactivated == ["evo_test123"]
-    assert fake_mongo[settings.mongo.k_candidates_collection].count_documents({}) == 0
+    doc = approval_service.get_candidate(cid)
+    assert doc and doc['status']=='deprecated' and doc['publication_status']=='revoked'
+    assert doc['faq_answer']=='配对码默认为 0000。'
+    assert fake_mongo[settings.mongo.k_candidates_collection+'_publication_tasks'].count_documents({'action':'revoke'})==1

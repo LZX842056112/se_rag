@@ -15,6 +15,7 @@ from app.evolution.approval import service as approval_service
 from app.evolution.feedback.collector import record_feedback
 from app.evolution.models import FeedbackEvent
 from app.evolution.repositories import evolution_repo
+from app.evolution.gap.registration import VISIBLE_REGISTRATION
 from app.evolution.schema import (
     CandidateApproveRequest,
     CandidateEditRequest,
@@ -23,6 +24,7 @@ from app.evolution.schema import (
     EvolutionStatusResponse,
     OkResponse,
     IssueUpdateRequest,
+    GapReviewRequest,
 )
 from app.evolution.scheduler import loop_status
 from app.evolution.online_eval.metrics import latest_metrics
@@ -50,6 +52,8 @@ def _to_item(doc: dict) -> CandidateItem:
         status=doc.get("status", ""),
         source_refs=doc.get("source_refs", []),
         item_names=doc.get("item_names", []),
+        reason=doc.get("reason", ""),
+        knowledge_origin=doc.get("knowledge_origin") or "document",
         ts=doc.get("ts"),
     )
 
@@ -69,10 +73,25 @@ def list_candidates(status: str | None = None, limit: int = 100) -> CandidateLis
     return CandidateListResponse(items=[_to_item(doc) for doc in docs])
 
 
-def _count_by(collection, field: str = "status") -> dict[str, int]:
+@router.get("/gaps", dependencies=[Depends(require_admin_token)])
+def get_gaps(limit: int = 100):
+    from app.evolution.gap.review import list_gaps
+    return {"items": list_gaps(limit)}
+
+
+@router.post("/gaps/{gap_id}/review", response_model=OkResponse, dependencies=[Depends(require_admin_token)])
+def review_gap(gap_id: str, req: GapReviewRequest) -> OkResponse:
+    from app.evolution.gap.review import review_gap as review
+    ok, message = review(gap_id, **req.model_dump())
+    if not ok:
+        raise ApiError("gap_review_failed", message, status_code=400)
+    return OkResponse(message=message)
+
+
+def _count_by(collection, field: str = "status", *, query: dict | None = None) -> dict[str, int]:
     """按字段聚合计数（读不到库时返回空，不影响接口可用）。"""
     try:
-        rows = collection.aggregate([{"$group": {"_id": f"${field}", "n": {"$sum": 1}}}])
+        rows = collection.aggregate([{"$match": query or {}}, {"$group": {"_id": f"${field}", "n": {"$sum": 1}}}])
         return {str(row.get("_id") or "unknown"): int(row.get("n", 0)) for row in rows}
     except Exception as exc:  # noqa: BLE001 - 状态接口属排障能力，缺库时降级
         logger.warning(f"闭环状态聚合失败（{field}）：{exc}")
@@ -103,7 +122,7 @@ def get_status() -> EvolutionStatusResponse:
         enabled=settings.evolution.enabled,
         scheduler=dict(loop_status()),
         gaps=_count_by(evolution_repo.k_gaps),
-        candidates=_count_by(evolution_repo.k_candidates),
+        candidates=_count_by(evolution_repo.k_candidates, query=VISIBLE_REGISTRATION),
         feedback_events=feedback_events,
         latest_metric=latest,
     )
@@ -142,7 +161,7 @@ def edit_candidate(candidate_id: str, req: CandidateEditRequest) -> OkResponse:
 @router.delete("/candidates/{candidate_id}", response_model=OkResponse,
                dependencies=[Depends(require_admin_token)])
 def remove_candidate(candidate_id: str) -> OkResponse:
-    """下架候选：删除元数据，并从向量库移除已入库的条目。"""
+    """下架候选：立即禁止召回，保留审核记录并重试索引撤回。"""
     if not approval_service.remove_candidate(candidate_id):
         raise ApiError("candidate_not_found", "候选不存在或下架失败", status_code=404)
     return OkResponse(code=200, message="removed")

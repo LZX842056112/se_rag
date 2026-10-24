@@ -67,6 +67,7 @@ def test_supported_draft_only_published_after_verification():
     assert seen == ['assess', 'draft', 'verify']
     assert len(tools.calls) == 1
     assert result['answer_contexts'] and result['evidence_manifest']
+    assert result['groundedness'] is None, '二元草稿校验不能伪造数值质量评分'
 
 
 def test_successful_agentic_query_is_not_a_no_retrieval_signal():
@@ -96,6 +97,32 @@ def test_model_payload_omits_unbudgeted_backend_metadata():
     assert 'debug_blob' not in seen[0]
 
 
+def test_assessment_sees_approved_faq_question_and_publication_metadata():
+    row={**evidence(),'source':'evolution','title':'温度多少？','source_version':'2','approval_status':'active'}
+    seen=[]
+    def model(kind,payload,timeout):
+        if kind=='assess':
+            seen.append(payload['evidence'][0])
+            return {'coverage':'supported','evidence_ids':['a']}
+        if kind=='draft':return {'answer':'工作温度为10到32度。'}
+        return {'supported':True,'evidence_ids':['a']}
+    result=run_agentic({'item_names':['HAK180'],'rewritten_query':'温度多少'},tools=Tools([row]),model=model,persist=False)
+    assert result['agentic_stop_reason']=='answered'
+    assert seen[0]['title']=='温度多少？'
+    assert seen[0]['approval_status']=='active' and seen[0]['source_version']=='2'
+
+
+def test_assessment_uses_current_evidence_without_previous_coverage_or_action_trace():
+    def model(kind,payload,timeout):
+        if kind=='assess':
+            assert set(payload)=={'question','evidence'}
+            return {'coverage':'supported','evidence_ids':['a']}
+        if kind=='draft':return {'answer':'工作温度为10到32度。'}
+        return {'supported':True,'evidence_ids':['a']}
+    result=run_agentic({'item_names':['HAK180'],'rewritten_query':'温度'},tools=Tools([evidence()]),model=model,persist=False)
+    assert result['agentic_stop_reason']=='answered'
+
+
 @pytest.mark.parametrize('verdict', [False, None, 'yes'])
 def test_invalid_or_unsupported_answer_is_not_released(verdict):
     def judge(kind, payload, timeout):
@@ -121,6 +148,61 @@ def test_empty_evidence_and_invalid_actions_terminate():
     assert calls.count('select') == 2
     assert result['agentic_stop_reason'] == 'invalid_action'
     assert result['handoff_required'] is True
+
+
+def test_invalid_action_retry_receives_validation_feedback():
+    calls = {'assess':0, 'select':0}
+    def model(kind, payload, timeout):
+        if kind == 'assess':
+            calls['assess'] += 1
+            return {'coverage':'missing' if calls['assess']==1 else 'supported', 'evidence_ids':['a']}
+        if kind == 'select':
+            calls['select'] += 1
+            if calls['select']==1:
+                return {'action':'search', 'tool':'search_approved_faq', 'arguments':{'query':'温度'}, 'reason':'extra'}
+            assert payload.get('validation_feedback'), '重试必须知道首次动作的校验错误'
+            assert any(error['loc']==['reason'] for error in payload['validation_feedback'])
+            return {'action':'search','tool':'search_approved_faq','arguments':{'query':'温度'}}
+        if kind == 'draft': return {'answer':'工作温度为10到32度。'}
+        if kind == 'verify': return {'supported':True,'evidence_ids':['a']}
+        raise AssertionError(kind)
+    result=run_agentic({'item_names':['HAK180'],'rewritten_query':'温度'},tools=Tools([evidence()]),model=model,persist=False)
+    assert result['agentic_stop_reason']=='answered'
+    assert calls['select']==2
+
+
+def test_invalid_extra_field_cannot_expand_retry_context_without_bound():
+    import json
+    calls=[]
+    def model(kind,payload,timeout):
+        if kind=='assess':return {'coverage':'missing','evidence_ids':[]}
+        calls.append(payload)
+        if len(calls)==1:return {'action':'search','unexpected-'+'x'*100000:1}
+        assert len(json.dumps(payload)) < 10000
+        return {'action':'handoff'}
+    result=run_agentic({'item_names':['HAK180'],'rewritten_query':'q'},tools=Tools([]),model=model,
+                       budget=Budget(max_calls=1),persist=False)
+    assert result['agentic_stop_reason']=='handoff'
+    assert max(len(str(part)) for error in calls[1]['validation_feedback'] for part in error['loc']) <= 80
+
+
+def test_missing_document_evidence_checks_approved_faq_before_early_clarification():
+    class FaqTools(Tools):
+        def execute(self, name, arguments, timeout_seconds):
+            self.calls.append((name, arguments, timeout_seconds))
+            return {'status':'ok' if name=='search_approved_faq' else 'empty',
+                    'evidence':[evidence()] if name=='search_approved_faq' else []}
+    tools=FaqTools([])
+    def model(kind,payload,timeout):
+        if kind=='assess':return {'coverage':'supported' if payload['evidence'] else 'missing','evidence_ids':['a'] if payload['evidence'] else []}
+        if kind=='select':return {'action':'clarify'}
+        if kind=='draft':return {'answer':'工作温度为10到32度。'}
+        if kind=='verify':return {'supported':True,'evidence_ids':['a']}
+        raise AssertionError(kind)
+    result=run_agentic({'item_names':['HAK180'],'original_query':'温度多少'},tools=tools,model=model,persist=False)
+    assert result['agentic_stop_reason']=='answered'
+    assert [call[0] for call in tools.calls]==['semantic_search','search_approved_faq']
+    assert result['agentic_metrics']['tool_calls']==2
 
 
 def test_grounding_consumes_same_parent_context(monkeypatch):

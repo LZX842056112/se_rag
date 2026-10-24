@@ -154,8 +154,15 @@
   }
 
   async function submitFeedback(msgEl, btnEl, meta, value, resolved) {
-    if (btnEl.dataset.submitted === '1') return;
-    btnEl.disabled = true;
+    if (btnEl.dataset.submitted === '1' || btnEl.disabled) return;
+    const bar = msgEl.querySelector('.feedback-bar');
+    const group = btnEl.dataset.feedbackGroup;
+    const setGroupDisabled = disabled => {
+      if (bar) bar.querySelectorAll('.fb-btn').forEach(button => {
+        if (button.dataset.feedbackGroup === group) button.disabled = disabled;
+      });
+    };
+    setGroupDisabled(true);
     try {
       await App.fetchJson(App.PATHS.feedback, {
         method: 'POST',
@@ -174,14 +181,12 @@
       });
       btnEl.dataset.submitted = '1';
       btnEl.classList.add('active');
-      const bar = msgEl.querySelector('.feedback-bar');
       if (bar) {
-        // 置灰另一枚并标注已反馈
-        bar.querySelectorAll('.fb-btn').forEach(b => { if (b !== btnEl) b.disabled = true; });
+        // 帮助度与解决状态分别提交，同组选择只提交一次。
         if (!bar.querySelector('.fb-done')) bar.appendChild(App.create('span', 'fb-done', '已反馈'));
       }
     } catch (err) {
-      btnEl.disabled = false;
+      setGroupDisabled(false);
       if (btnEl.dataset.submitted !== '1') showToast('反馈提交失败：' + (err && err.message || err));
     }
   }
@@ -247,9 +252,11 @@
     const bar = App.create('div', 'feedback-bar');
     const up = App.create('button', 'fb-btn', '👍 有帮助');
     up.type = 'button';
+    up.dataset.feedbackGroup = 'thumbs';
     up.addEventListener('click', () => submitFeedback(msgEl, up, meta, 1));
     const down = App.create('button', 'fb-btn', '👎 没帮助');
     down.type = 'button';
+    down.dataset.feedbackGroup = 'thumbs';
     down.addEventListener('click', () => submitFeedback(msgEl, down, meta, -1));
     bar.appendChild(up);
     bar.appendChild(down);
@@ -257,6 +264,7 @@
       [ [true, '已解决'], [false, '仍未解决'] ].forEach(([resolved, label]) => {
         const button = App.create('button', 'fb-btn', label);
         button.type = 'button';
+        button.dataset.feedbackGroup = 'resolved';
         button.addEventListener('click', () => submitFeedback(msgEl, button, meta, null, resolved));
         bar.appendChild(button);
       });

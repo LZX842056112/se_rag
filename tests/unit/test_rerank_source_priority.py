@@ -97,6 +97,28 @@ def test_local_wins_ties_against_web():
     assert ranked[0]["chunk_id"] == 9
 
 
+def test_web_supplement_does_not_consume_minimum_local_evidence_slots():
+    docs = [
+        {'chunk_id': 'temperature-setting', 'type': 'milvus', 'score': .43},
+        {'chunk_id': None, 'type': 'web', 'score': .43},
+        {'chunk_id': 'environment-facts', 'type': 'milvus', 'score': .118},
+        {'chunk_id': 'unrelated', 'type': 'milvus', 'score': .001},
+    ]
+    selected = rerank_service.dyn_limit_reranker_docs(docs)
+    assert [doc['chunk_id'] for doc in selected] == ['temperature-setting', None, 'environment-facts']
+
+
+def test_small_total_cap_reserves_its_slots_for_minimum_local_evidence(monkeypatch):
+    monkeypatch.setattr(rerank_service, 'get_rerank_topk', lambda: 2)
+    docs = [
+        {'chunk_id':'local-a','type':'milvus','score':.43},
+        {'chunk_id':None,'type':'web','score':.43},
+        {'chunk_id':None,'type':'web','score':.43},
+        {'chunk_id':'local-b','type':'milvus','score':.118},
+    ]
+    assert [d['chunk_id'] for d in rerank_service.dyn_limit_reranker_docs(docs)] == ['local-a','local-b']
+
+
 def test_evolution_authority_survives_truncation(monkeypatch):
     """权威 FAQ 即使重排分数被压低，也必须留在最终上下文里。"""
     evolution = _evolution_chunk()

@@ -229,15 +229,26 @@ def dyn_limit_reranker_docs(reranker_docs: list[dict]) -> list[dict]:
     """动态截断：以重排峰值作基准逐项累计下跌，达到阈值即截断。
 
     相比仅比较相邻两项，累计口径能捕捉「相邻分差细小、但相对头部已明显下滑」的慢坡，
-    避免把头尾质量接近的低分长尾一并放进作答上下文。前 ``RERANK_MIN_TOPK`` 条无条件保留。
+    避免把头尾质量接近的低分长尾一并放进作答上下文。
+    本地有命中时，最低保留数按本地证据计算，联网补充不占其名额。
     """
     if not reranker_docs:
         return []
     top_max = min(get_rerank_topk(), len(reranker_docs))
+    required_local = [doc for doc in reranker_docs if doc.get('type') != 'web'][:min(RERANK_MIN_TOPK, top_max)]
+    selected_ids = {id(doc) for doc in required_local}
+    for doc in reranker_docs:
+        if len(selected_ids) >= top_max:
+            break
+        selected_ids.add(id(doc))
+    reranker_docs = [doc for doc in reranker_docs if id(doc) in selected_ids]
     topk = top_max
     running_max = reranker_docs[0].get("score", 0.0)
+    minimum_local = len(required_local)
 
     for i in range(RERANK_MIN_TOPK, top_max):
+        if minimum_local and sum(doc.get('type') != 'web' for doc in reranker_docs[:i]) < minimum_local:
+            continue
         score = reranker_docs[i].get("score", 0.0)
         if score > running_max:
             running_max = score
