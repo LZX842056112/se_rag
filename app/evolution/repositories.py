@@ -28,6 +28,10 @@ class EvolutionRepository:
         return get_collection(settings.mongo.query_feedback_collection)
 
     @property
+    def query_issues(self):
+        return get_collection(settings.mongo.query_issues_collection)
+
+    @property
     def fb_events(self):
         """反馈事件集合（用户显式反馈 + 读链路未解决信号）。"""
         return get_collection(settings.mongo.fb_events_collection)

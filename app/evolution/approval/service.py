@@ -6,10 +6,9 @@ import time
 from bson import ObjectId
 from pymongo.errors import PyMongoError
 
-from app.evolution.index.update import deactivate, upsert_item
 from app.evolution.quality import looks_like_non_answer
 from app.evolution.repositories import evolution_repo
-from app.evolution.gap.registration import VISIBLE_REGISTRATION
+from app.evolution.gap.registration import VISIBLE_REGISTRATION, mark_source_gap
 from app.shared.runtime.logger import logger
 
 
@@ -38,18 +37,8 @@ def approve(candidate_id: str, reason: str = "") -> tuple[bool, str]:
     ok, message = approve_candidate(candidate_id, reason)
     if ok:
         doc = get_candidate(candidate_id) or {}
-        _mark_gap(doc.get("gap_id"), "resolved")
+        mark_source_gap(doc.get("gap_id"), "resolved")
     return ok, message
-
-def _mark_gap(gap_id: str | None, status: str) -> None:
-    """回写来源缺口状态（审批通过 → resolved / 驳回 → rejected），避免缺口永久残留。"""
-    if not gap_id:
-        return
-    try:
-        evolution_repo.k_gaps.update_one({"_id": ObjectId(gap_id)}, {"$set": {"status": status}})
-    except Exception as exc:  # noqa: BLE001 - 缺口状态属辅助信息，失败不影响审批结果
-        logger.warning(f"回写缺口状态失败：{gap_id} -> {status}（{exc}）")
-
 
 def reject(candidate_id: str, reason: str = "") -> bool:
     """驳回候选。"""
@@ -66,7 +55,7 @@ def reject(candidate_id: str, reason: str = "") -> bool:
             {"_id": object_id, 'publication_status': 'revoked'},
             {"$set": {"status": "rejected", "reason": reason}}
         )
-        _mark_gap(current.get("gap_id"), "rejected")
+        mark_source_gap(current.get("gap_id"), "rejected")
         return True
     except Exception as exc:  # noqa: BLE001
         logger.warning(f"驳回失败：{exc}")

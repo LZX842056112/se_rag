@@ -168,7 +168,6 @@ def generate_answer(state: QueryGraphState) -> QueryGraphState:
     state["answer_contexts"] = []
     state["image_urls"] = []
     state['evidence_manifest'] = []
-    state['evidence_manifest'] = []
     apply_business_policy(state)
     if not state_exists_answer(state):
         answer_prompt_text = load_answer_prompt(state)

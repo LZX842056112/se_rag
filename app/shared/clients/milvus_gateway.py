@@ -14,7 +14,7 @@ from typing import Any, Optional
 from pymilvus import AnnSearchRequest, DataType, MilvusClient, WeightedRanker
 
 from app.shared.config import settings
-from app.rag.agentic.deadline import bounded_timeout
+from app.shared.runtime.deadline import bounded_timeout
 from app.shared.runtime.logger import logger
 
 _milvus_client: Optional[MilvusClient] = None

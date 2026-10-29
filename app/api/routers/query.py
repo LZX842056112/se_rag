@@ -17,7 +17,8 @@ from app.api.schema.query_schema import (
     QueryStreamResponseSchema,
     QueryTaskStatusResponseSchema,
 )
-from app.rag.query.citations import citations_from_reranked_docs
+from app.rag.query.answer_payload import answer_fields
+from app.evolution.feedback.collector import feedback_states
 from app.rag.query.pipeline import invoke_query_graph
 from app.rag.query.lifecycle import reserve_query, query_is_active
 from app.shared.clients.history_repository import history_repository
@@ -63,24 +64,15 @@ def query(background_tasks: BackgroundTasks, query_params: QueryRequestSchema, r
     )
     if state is None:
         raise ApiError("query_failed", "查询流程执行失败", status_code=500)
+    fields = answer_fields(state)
+    fields["answer_id"] = fields["answer_id"] or ""
     return QueryNotStreamResponseSchema(
         message=f"已完成{query_params.query}的内容检索",
         session_id=session_id,
-        answer=state.get("answer"),
         done_list=get_done_task_list(session_id),
-        image_urls=state.get("image_urls", []),
-        item_names=state.get("item_names", []),
-        citations=state.get("citations") or citations_from_reranked_docs(state.get("reranked_docs")),
-        groundedness=state.get("groundedness"),
         retrieval_signals=state.get("retrieval_signals", {}),
-        item_name_options=state.get("item_name_options", []),
-        intent=state.get("intent") or "rag",
         turn_id=turn_id,
-        answer_id=state.get("answer_id") or "",
-        business_tag=state.get("business_tag", ""),
-        issue_id=state.get("issue_id", ""),
-        handoff_required=state.get("handoff_required", False),
-        metrics=state.get("metrics", {}),
+        **fields,
     )
 
 
@@ -122,6 +114,7 @@ def get_history(session_id: str, limit: int = 10, request: Request = None) -> Hi
     authorize_session(request, session_id)
     safe_limit = max(1, min(limit, _HISTORY_MAX_LIMIT))
     history_list = history_repository.list_recent(session_id=session_id, limit=safe_limit)
+    feedback = feedback_states(session_id, [str(item["_id"]) for item in history_list if item.get("role") == "assistant"])
     return HistoryListResponseSchema(
         session_id=session_id,
         items=[
@@ -140,6 +133,7 @@ def get_history(session_id: str, limit: int = 10, request: Request = None) -> Hi
                 business_tag=item.get("business_tag", ""),
                 issue_id=item.get("issue_id", ""),
                 handoff_required=item.get("handoff_required", False),
+                feedback=feedback.get(str(item.get("_id"))) if item.get("role") == "assistant" else None,
                 ts=item.get("ts"),
             )
             for item in history_list

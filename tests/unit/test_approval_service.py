@@ -27,7 +27,6 @@ def upsert_ok(monkeypatch):
         called["count"] += 1
         return True
 
-    monkeypatch.setattr(approval_service, "upsert_item", _upsert)
     from app.evolution import governance
     monkeypatch.setattr(governance, "index_upsert", _upsert)
     monkeypatch.setattr(governance, "resolve_source", lambda ref: {
@@ -120,7 +119,6 @@ def test_approve_missing_candidate_returns_message(fake_mongo, upsert_ok):
 def test_remove_candidate_deactivates_but_keeps_approval_record(fake_mongo, monkeypatch):
     """下架立即阻止召回，同时保留候选内容和发布任务供核查。"""
     deactivated: list[str] = []
-    monkeypatch.setattr(approval_service, "deactivate", lambda evo_id: deactivated.append(evo_id) or True)
     from app.evolution import governance
     monkeypatch.setattr(governance, 'index_deactivate', lambda evo_id: deactivated.append(evo_id) or True)
     cid = _insert(fake_mongo, status="active", evo_doc_id="evo_test123")

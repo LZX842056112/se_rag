@@ -10,6 +10,7 @@ from statistics import mean
 import time
 import uuid
 
+from app.shared.utils.statistics import percentile
 
 def validate_cases(cases: list[dict]) -> dict:
     ids = set()
@@ -27,13 +28,6 @@ def validate_cases(cases: list[dict]) -> dict:
     return {"case_count": len(cases), "reviewed_count": reviewed,
             "categories": dict(Counter(c.get("category", "other") for c in cases)),
             "ready_for_acceptance": len(cases) >= 200 and reviewed == len(cases)}
-
-
-def _p95(values):
-    if not values:
-        return None
-    ordered = sorted(values)
-    return ordered[max(0, __import__("math").ceil(len(ordered) * .95) - 1)]
 
 
 def evaluate_cases(cases, client, *, revision: str):
@@ -77,7 +71,7 @@ def evaluate_cases(cases, client, *, revision: str):
                "subject_accuracy": mean(subject) if subject else None,
                "answer_check_rate": mean(checks) if checks else None,
                "answer_check_coverage": len(checks) / len(results) if results else None,
-               "duration_p95_ms": _p95(times), "first_token_p95_ms": _p95(ttfts),
+               "duration_p95_ms": percentile(times, .95), "first_token_p95_ms": percentile(ttfts, .95),
                "mean_llm_calls": mean(r.get("metrics", {}).get("llm_calls", 0) for r in results) if results else None,
                "cost_usd": sum(costs) if len(costs) == len(results) and results else None, "http_errors": errors}
     digest = hashlib.sha256(json.dumps(cases, ensure_ascii=False, sort_keys=True).encode()).hexdigest()

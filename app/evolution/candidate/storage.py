@@ -14,7 +14,7 @@ def store_candidate(candidate: KnowledgeCandidate) -> dict:
     fields = registration_fields(candidate.gap_id)
     collection = evolution_repo.k_candidates
     if not candidate.gap_id:
-        doc = candidate.document()
+        doc = candidate.model_dump()
         doc["_id"] = collection.insert_one(doc).inserted_id
         return doc
     existing = collection.find_one({"gap_id": candidate.gap_id})
@@ -22,6 +22,6 @@ def store_candidate(candidate: KnowledgeCandidate) -> dict:
         require_current_claim()
         return existing
     oid = ObjectId(hashlib.sha256(("gap-candidate:" + candidate.gap_id).encode()).hexdigest()[:24])
-    collection.update_one({"_id": oid}, {"$setOnInsert": {**candidate.document(), **fields}}, upsert=True)
+    collection.update_one({"_id": oid}, {"$setOnInsert": {**candidate.model_dump(), **fields}}, upsert=True)
     require_current_claim()
     return collection.find_one({"_id": oid})

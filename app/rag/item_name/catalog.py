@@ -22,7 +22,7 @@ import time
 from app.rag.item_name.config import ITEM_NAME_CATALOG_TTL_SECONDS
 from app.shared.clients.milvus_gateway import milvus_gateway
 from app.shared.config import settings
-from app.rag.agentic.deadline import bounded_timeout
+from app.shared.runtime.deadline import bounded_timeout
 from app.shared.runtime.logger import logger
 from app.shared.utils.text import is_same_entity, name_tokens, normalize_item_name, token_prefix_match
 

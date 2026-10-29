@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const source = fs.readFileSync('app/resources/js/chat.js', 'utf8');
-const start = source.indexOf('async function submitFeedback(');
+const start = source.indexOf('function applyFeedbackState(');
 const end = source.indexOf('\n  function renderCitationsAndFeedback(', start);
 
 test('helpfulness feedback leaves resolution available and each group submits once', async () => {
@@ -13,7 +13,7 @@ test('helpfulness feedback leaves resolution available and each group submits on
   }));
   const bar = { querySelectorAll: () => buttons, querySelector: () => ({}), appendChild() {} };
   const message = { querySelector: () => bar };
-  const fn = vm.runInNewContext('(' + source.slice(start, end).trim() + ')', {
+  const fn = vm.runInNewContext(source.slice(start, end) + '\nsubmitFeedback', {
     App: { PATHS: { feedback: '/feedback' }, fetchJson: async (url, options) => requests.push(JSON.parse(options.body)) },
     showToast: message => assert.fail(message)
   });

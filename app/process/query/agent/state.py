@@ -47,7 +47,6 @@ class QueryGraphState(TypedDict):
     reranked_docs: list  # 重排序后的最终 Top-K 文档
 
     # 生成过程中的数据
-    prompt: str  # 组装好的 Prompt
     answer: str  # 最终生成的答案
     answer_contexts: list[str]  # 实际送入答案提示词的证据；不属于公开 API
 
@@ -94,7 +93,6 @@ query_graph_default_state: QueryGraphState = {
     "evolution_chunks": [],
     "rrf_chunks": [],
     "reranked_docs": [],
-    "prompt": "",
     "answer": "",
     "answer_contexts": [],
     "cited_chunk_ids": [],
@@ -120,13 +118,3 @@ def create_query_default_state(**overrides) -> QueryGraphState:
     state = copy.deepcopy(query_graph_default_state)
     state.update(overrides)
     return state
-
-
-# ========================
-# 获取干净状态
-# ========================
-def get_query_default_state() -> QueryGraphState:
-    """
-    返回一个新的状态实例，避免全局变量污染。
-    """
-    return copy.deepcopy(query_graph_default_state)

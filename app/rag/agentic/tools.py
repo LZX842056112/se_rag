@@ -453,12 +453,9 @@ class RetrievalTools:
 
     @staticmethod
     async def _request_web(query, limit, deadline):
-        from agents.mcp import MCPServerStreamableHttp
+        from app.shared.clients.mcp_web import request_web_search
         timeout = min(float(settings.mcp.timeout_seconds), remaining_seconds(deadline))
-        server = MCPServerStreamableHttp(name="Agentic read-only web search", params={
-            "url": settings.mcp.base_url, "headers": {"Authorization": f"Bearer {settings.mcp.api_key}"},
-            "timeout": timeout, "sse_read_timeout": timeout}, cache_tools_list=True,
-            client_session_timeout_seconds=timeout, max_retry_attempts=0)
-        async with asyncio.timeout(remaining_seconds(deadline)):
-            async with server:
-                return await server.call_tool(tool_name="bailian_web_search", arguments={"query": query, "count": limit})
+        return await request_web_search(
+            query, limit, request_timeout=timeout, overall_timeout=remaining_seconds(deadline),
+            retries=0, name="Agentic read-only web search", read_timeout=timeout, session_timeout=timeout,
+        )

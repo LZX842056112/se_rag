@@ -10,8 +10,8 @@ from pymongo.errors import DuplicateKeyError
 from app.evolution.models import FeedbackEvent
 from app.evolution.flags import writes_enabled
 from app.evolution.repositories import evolution_repo
+from app.evolution.feedback.state import is_unresolved
 from app.rag.query.business import classify_business
-from app.shared.config import settings
 from app.shared.clients.history_repository import history_repository
 from app.shared.runtime.logger import logger
 from app.shared.utils.answer import is_no_answer
@@ -20,11 +20,33 @@ from app.shared.utils.answer import is_no_answer
 _DEDUP_WINDOW_SECONDS = 30
 
 
-def _upsert_answer_feedback(collection, selector: dict, payload: dict, session_id: str, answer_id: str) -> None:
+def feedback_states(session_id: str, answer_ids: list[str]) -> dict[str, dict]:
+    """批量回读本会话的显式选择；自动失败信号不能当作用户选择。"""
+    if not answer_ids:
+        return {}
+    result = {}
+    try:
+        rows = evolution_repo.query_feedback.find(
+            {"session_id": session_id, "answer_id": {"$in": answer_ids}},
+            {"answer_id": 1, "thumbs": 1, "resolved": 1, "ts": 1},
+        ).sort("ts", -1)
+        for row in rows:
+            state = result.setdefault(row["answer_id"], {"thumbs": None, "resolved": None})
+            if state["thumbs"] is None and type(row.get("thumbs")) is int and row["thumbs"] in (-1, 1):
+                state["thumbs"] = row["thumbs"]
+            if state["resolved"] is None and type(row.get("resolved")) is bool:
+                state["resolved"] = row["resolved"]
+    except Exception as exc:
+        logger.warning(f"读取已保存反馈失败：{exc}")
+    return {key: state for key, state in result.items() if any(value is not None for value in state.values())}
+
+
+def _upsert_answer_feedback(collection, selector: dict, payload: dict, session_id: str, answer_id: str,
+                            *, initial: dict | None = None) -> None:
     """新事件共用确定性主键；旧事件按原条件更新，无需迁移历史。"""
     key = 'answer_' + hashlib.sha256(json.dumps([session_id, answer_id]).encode()).hexdigest()
     try:
-        collection.update_one(selector, {'$set': payload, '$setOnInsert': {'_id': key}}, upsert=True)
+        collection.update_one(selector, {'$set': payload, '$setOnInsert': {'_id': key, **(initial or {})}}, upsert=True)
     except DuplicateKeyError:
         # 另一个进程先插入相同主键时，只合并本次提供的字段。
         collection.update_one(selector, {'$set': payload}, upsert=False)
@@ -33,7 +55,7 @@ def _upsert_answer_feedback(collection, selector: dict, payload: dict, session_i
 def _emit(event: FeedbackEvent, *, explicit: bool = False) -> None:
     """幂等写入一条反馈事件。"""
     now = time.time()
-    payload = event.document()
+    payload = event.model_dump()
     if explicit:
         if event.resolved is None:
             payload.pop('resolved', None)
@@ -41,9 +63,17 @@ def _emit(event: FeedbackEvent, *, explicit: bool = False) -> None:
         if event.thumbs is None:
             payload.pop('thumbs', None)
     if event.answer_id:
+        initial = None
+        if not explicit:
+            # 自动信号只能初始化选择；晚到的自动收尾不能覆盖用户反馈。
+            saved = evolution_repo.query_feedback.find_one({"session_id": event.session_id, "answer_id": event.answer_id}) or {}
+            initial = {key: saved.get(key) if saved.get(key) is not None else payload[key]
+                       for key in ("resolved", "adopt", "thumbs")}
+            for key in initial:
+                payload.pop(key)
         _upsert_answer_feedback(evolution_repo.fb_events,
             {"session_id": event.session_id, "answer_id": event.answer_id},
-            payload, event.session_id, event.answer_id)
+            payload, event.session_id, event.answer_id, initial=initial)
         return
     evolution_repo.fb_events.update_one(
         {
@@ -54,15 +84,18 @@ def _emit(event: FeedbackEvent, *, explicit: bool = False) -> None:
             "source": event.source,
             "ts": {"$gte": now - _DEDUP_WINDOW_SECONDS},
         },
-        {"$setOnInsert": event.document()},
+        {"$setOnInsert": event.model_dump()},
         upsert=True,
     )
 
 
 def record_feedback(event: FeedbackEvent) -> None:
-    """显式反馈入口；未开启自进化时仅幂等接受、不落库。"""
+    """保存显式选择；只有已确认的 RAG 回答才产生知识治理信号。"""
     answer = history_repository.get_answer(event.session_id, event.answer_id)
-    if not answer or answer.get("intent") not in ("rag", "chitchat"):
+    if not answer:
+        return
+    intent = answer.get("intent") or ""
+    if intent not in ("", "rag", "chitchat"):
         return
     query = answer.get("query") or answer.get("rewritten_query") or ""
     canonical = event.model_copy(update={
@@ -77,7 +110,7 @@ def record_feedback(event: FeedbackEvent) -> None:
         "ts": time.time(),
     })
     try:
-        payload = {**canonical.document(), "intent": answer["intent"]}
+        payload = {**canonical.model_dump(), "intent": intent}
         if event.resolved is None:
             payload.pop("resolved", None)
             payload.pop("adopt", None)
@@ -85,9 +118,10 @@ def record_feedback(event: FeedbackEvent) -> None:
             payload.pop("thumbs", None)
         _upsert_answer_feedback(evolution_repo.query_feedback, {"answer_id": event.answer_id},
                                 payload, event.session_id, event.answer_id)
-        if writes_enabled() and answer["intent"] == "rag":
+        saved = evolution_repo.query_feedback.find_one({"session_id": event.session_id, "answer_id": event.answer_id}) or payload
+        if writes_enabled() and intent == "rag":
             _emit(canonical, explicit=True)
-        if answer["intent"] == "rag" and (event.resolved is False or (event.thumbs or 0) < 0):
+        if intent == "rag" and is_unresolved(saved):
             from app.evolution.issues import open_issue
             open_issue({"session_id": event.session_id, "answer_id": event.answer_id,
                         "original_query": canonical.query,

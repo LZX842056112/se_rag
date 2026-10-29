@@ -6,7 +6,7 @@ from app.evolution.feedback.collector import flush_session_signals
 from app.evolution.issues import register_unresolved
 from app.process.query.agent.main_graph import query_app
 from app.process.query.agent.state import QueryGraphState, create_query_default_state
-from app.rag.query.citations import citations_from_reranked_docs
+from app.rag.query.answer_payload import answer_fields
 from app.rag.query.errors import classify_query_error
 from app.rag.query.lifecycle import reserve_query, release_query
 from app.shared.config import settings
@@ -43,7 +43,7 @@ def invoke_query_graph(
     metrics = QueryMetrics(session_id, turn_id)
     metrics_token = current_metrics.set(metrics)
     from app.rag.agentic.budget import selected_mode
-    from app.rag.agentic.deadline import query_deadline
+    from app.shared.runtime.deadline import query_deadline
     use_agentic = selected_mode(session_id, mode=settings.agentic.mode,
                                 percent=settings.agentic.gray_percent) == 'agentic'
     deadline_token = query_deadline.set((query_deadline.get() or time.monotonic() + settings.agentic.timeout_seconds) if use_agentic else None)
@@ -72,24 +72,9 @@ def invoke_query_graph(
 
         # 收尾事件不分流式与否：非流式页面刷新后同样靠通道里的 final 续上答案
         publish(session_id, SSEEvent.FINAL, {
-            "answer": result_state.get("answer"),
-            "answer_id": result_state.get("answer_id", ""),
+            **answer_fields(result_state),
             "turn_id": turn_id,
-            "business_tag": result_state.get("business_tag", ""),
-            "handoff_required": result_state.get("handoff_required", False),
-            "issue_id": result_state.get("issue_id", ""),
-            "metrics": result_state.get("metrics", {}),
             "status": "completed",
-            "image_urls": result_state.get("image_urls", []),
-            # 回传已识别主体：前端点踩时原样回传，保证 反馈→缺口→候选 的 item_names 贯通
-            "item_names": result_state.get("item_names", []),
-            "citations": result_state.get("citations")
-            or citations_from_reranked_docs(result_state.get("reranked_docs")),
-            "groundedness": result_state.get("groundedness"),
-            "item_name_options": result_state.get("item_name_options", []),
-            # 本轮意图（rag / chitchat）：前端据此给闲聊回答渲染「闲聊」徽标；
-            # 缺键的旧 state 按 rag 处理
-            "intent": result_state.get("intent") or "rag",
         })
         publish(session_id, SSEEvent.CLOSE, {})
 

@@ -5,12 +5,12 @@ import hashlib
 import math
 import time
 import uuid
-from typing import Any
 
 from bson import ObjectId
 from pymongo import ReturnDocument
 
 from app.evolution.flags import writes_enabled
+from app.evolution.gap.registration import mark_source_gap
 from app.evolution.models import KnowledgeCandidate
 from app.evolution.quality import looks_like_non_answer
 from app.evolution.repositories import evolution_repo
@@ -261,11 +261,7 @@ def run_publication_tasks(limit: int = 20, *, task_key: str | None = None) -> di
                     if current.get('evo_doc_id') != evo_id or current.get('publication_status') != 'active':
                         index_deactivate(evo_id)
                     raise RuntimeError("candidate changed during publication")
-                if doc.get("gap_id"):
-                    try:
-                        evolution_repo.k_gaps.update_one({"_id": ObjectId(doc["gap_id"])}, {"$set": {"status": "resolved"}})
-                    except Exception:
-                        pass  # 源头缺口属辅助信息；发布仍然有效。
+                mark_source_gap(doc.get("gap_id"), "resolved")
             tasks.update_one({"_id": task["_id"], "lease_token": token}, {"$set": {
                 "state": "completed", "lease_until": 0, "completed_at": time.time(), "last_error": ""}})
             result["completed"] += 1

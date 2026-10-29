@@ -73,7 +73,7 @@
     scrollToBottom();
   }
 
-  function addBotMsgWithTime(text, ts, imageUrls, citations, groundedness, query, itemNames, intent, answerId, issueId) {
+  function addBotMsgWithTime(text, ts, imageUrls, citations, groundedness, query, itemNames, intent, answerId, issueId, feedback) {
     const id = 'bot-his-' + Math.random().toString(36).slice(2);
     chatEl.insertAdjacentHTML('beforeend', `
       <div class="msg bot" id="${id}">
@@ -88,7 +88,7 @@
     if (!el) return;
     App.renderAnswerWithImages(el.querySelector('.answer'), text || '', imageUrls || []);
     // 历史消息同样渲染引用来源 / 置信度 / 反馈，保证刷新后不丢失
-    renderCitationsAndFeedback(el, buildBotMeta(citations, groundedness, sessionId, query, itemNames, intent, answerId));
+    renderCitationsAndFeedback(el, buildBotMeta(citations, groundedness, sessionId, query, itemNames, intent, answerId, feedback));
     // 闲聊轮（intent=chitchat）渲染「闲聊」徽标，与知识库作答区分
     if (intent === 'chitchat') renderChitchatBadge(el);
     if (issueId) el.querySelector('.bubble').appendChild(App.create('div', 'option-hint', '已登记待办：' + issueId));
@@ -140,17 +140,37 @@
     lines.forEach(line => ul.insertAdjacentHTML('beforeend', `<li>${escapeHtml(line)}</li>`));
   }
 
-  function buildBotMeta(citations, groundedness, sid, query, itemNames, intent, answerId) {
+  function buildBotMeta(citations, groundedness, sid, query, itemNames, intent, answerId, feedback) {
     return {
       citations: Array.isArray(citations) ? citations : [],
       groundedness: (typeof groundedness === 'number' && isFinite(groundedness)) ? groundedness : null,
       sessionId: sid || '',
       intent: intent || 'rag',
       answerId: answerId || '',
+      feedback: feedback || null,
       query: query || '',
       // 该回答关联的主体：点踩时回传后端，保证缺口/候选能带上正确 item_name
       itemNames: Array.isArray(itemNames) ? itemNames : []
     };
+  }
+
+  function applyFeedbackState(bar, feedback) {
+    if (!bar || !feedback) return;
+    const choices = {};
+    if (feedback.thumbs === 1 || feedback.thumbs === -1) choices.thumbs = String(feedback.thumbs);
+    if (typeof feedback.resolved === 'boolean') choices.resolved = String(feedback.resolved);
+    bar.querySelectorAll('.fb-btn').forEach(button => {
+      const value = choices[button.dataset.feedbackGroup];
+      if (value === undefined) return;
+      button.disabled = true;
+      if (button.dataset.feedbackValue === value) {
+        button.dataset.submitted = '1';
+        button.classList.add('active');
+      }
+    });
+    if (Object.keys(choices).length && !bar.querySelector('.fb-done')) {
+      bar.appendChild(App.create('span', 'fb-done', '已反馈'));
+    }
   }
 
   async function submitFeedback(msgEl, btnEl, meta, value, resolved) {
@@ -179,12 +199,8 @@
           resolved: resolved
         })
       });
-      btnEl.dataset.submitted = '1';
-      btnEl.classList.add('active');
-      if (bar) {
-        // 帮助度与解决状态分别提交，同组选择只提交一次。
-        if (!bar.querySelector('.fb-done')) bar.appendChild(App.create('span', 'fb-done', '已反馈'));
-      }
+      meta.feedback = Object.assign({}, meta.feedback, group === 'resolved' ? { resolved } : { thumbs: value });
+      applyFeedbackState(bar, meta.feedback);
     } catch (err) {
       setGroupDisabled(false);
       if (btnEl.dataset.submitted !== '1') showToast('反馈提交失败：' + (err && err.message || err));
@@ -253,10 +269,12 @@
     const up = App.create('button', 'fb-btn', '👍 有帮助');
     up.type = 'button';
     up.dataset.feedbackGroup = 'thumbs';
+    up.dataset.feedbackValue = '1';
     up.addEventListener('click', () => submitFeedback(msgEl, up, meta, 1));
     const down = App.create('button', 'fb-btn', '👎 没帮助');
     down.type = 'button';
     down.dataset.feedbackGroup = 'thumbs';
+    down.dataset.feedbackValue = '-1';
     down.addEventListener('click', () => submitFeedback(msgEl, down, meta, -1));
     bar.appendChild(up);
     bar.appendChild(down);
@@ -265,11 +283,13 @@
         const button = App.create('button', 'fb-btn', label);
         button.type = 'button';
         button.dataset.feedbackGroup = 'resolved';
+        button.dataset.feedbackValue = String(resolved);
         button.addEventListener('click', () => submitFeedback(msgEl, button, meta, null, resolved));
         bar.appendChild(button);
       });
     }
     wrap.appendChild(bar);
+    applyFeedbackState(bar, meta.feedback);
 
     // 插到 .meta 之前（.meta 在骨架的内层容器里，必须用其父节点 insertBefore，
     // 否则抛 NotFoundError 且被静默 catch 吞掉，表现为反馈栏凭空消失）
@@ -344,7 +364,7 @@
         } else {
           addBotMsgWithTime(item.text || '', item.ts, item.image_urls || [],
                             item.citations || [], item.groundedness, lastUserQuery,
-                            item.item_names || [], item.intent, item.id, item.issue_id);
+                            item.item_names || [], item.intent, item.id, item.issue_id, item.feedback);
         }
       });
       scrollToBottom();

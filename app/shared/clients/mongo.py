@@ -59,6 +59,12 @@ def get_collection(name: str) -> Collection:
     return get_mongo_db()[name]
 
 
+def ensure_gap_feedback_index(collection: Collection) -> None:
+    """新建和合并共用来源唯一约束。旧记录和空来源数组不参与约束。"""
+    collection.create_index([("source_feedback_keys", 1)], name="gap_source_feedback_unique_v1",
+                            unique=True, partialFilterExpression={"source_feedback_keys.0": {"$exists": True}})
+
+
 def ensure_indexes() -> None:
     """创建各集合所需索引（幂等；失败只告警不影响主链路）。"""
     global _indexes_ready
@@ -76,6 +82,7 @@ def ensure_indexes() -> None:
         db[mongo.fb_events_collection].create_index([("session_id", 1), ("ts", -1)])
         db[mongo.fb_events_collection].create_index([("ts", -1)])
         db[mongo.k_gaps_collection].create_index([("session_id", 1), ("ts", -1)])
+        ensure_gap_feedback_index(db[mongo.k_gaps_collection])
         db[mongo.k_candidates_collection].create_index([("faq_question", 1)])
         db[mongo.k_candidates_collection].create_index([("status", 1)])
         db[mongo.k_metrics_collection].create_index([("ts", -1)])

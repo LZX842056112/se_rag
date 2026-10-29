@@ -558,7 +558,7 @@ P1 表示在对应触发条件下可造成明显数据、权限或核心功能�
 
 ### F21 · P3：配置、注释、观测能力存在漂移
 
-**静态确认：** gray_enabled、groundedness_min 只定义/读取，未发现消费点；EMBEDDING_DIM 名称出现在 `.env`，向量 schema 却固定 1024；“唯一环境变量入口”有多个例外；节点说明把联网算入 RRF，实际未参与；父块仓储顶部仍写“先删后插”，方法已改为 upsert。LLM temperature 使用 `value or 0.1`，显式 0 无法生效。[配置](../app/shared/config/settings.py#L204)、[向量 schema](../app/shared/clients/milvus_gateway.py#L58)、[RRF 节点注释](../app/process/query/agent/nodes/node_rrf.py#L9)、[父块仓储](../app/shared/clients/parent_chunk_repository.py#L1)、[温度](../app/shared/models/llm.py#L15)
+**静态确认（已更新）：** gray_enabled 保留为兼容配置；groundedness_min 已用于审批来源的支持度校验，不应删除。以下其余观察属于原审查记录，需按当前代码复核：EMBEDDING_DIM 名称出现在 `.env`，向量 schema 却固定 1024；“唯一环境变量入口”有多个例外；节点说明把联网算入 RRF，实际未参与；父块仓储顶部仍写“先删后插”，方法已改为 upsert。LLM temperature 使用 `value or 0.1`，显式 0 无法生效。[配置](../app/shared/config/settings.py#L204)、[向量 schema](../app/shared/clients/milvus_gateway.py#L58)、[RRF 节点注释](../app/process/query/agent/nodes/node_rrf.py#L9)、[父块仓储](../app/shared/clients/parent_chunk_repository.py#L1)、[温度](../app/shared/models/llm.py#L15)
 
 **影响与建议：** 调开关可能没有效果，指标/说明让人误判实际行为；健康检查只证明存活。梳理配置消费表，移除或实现未接线项，用 is None 区分 0 与未配置，分开 liveness/readiness 并补运行说明。未发现仓库 CI 证据，建议把验证门禁和依赖锁同步流程写清。代价低到中。
 

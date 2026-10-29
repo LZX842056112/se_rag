@@ -17,6 +17,14 @@ def _normalize(value: str) -> str:
     return re.sub(r"\s+", "", unicodedata.normalize("NFKC", str(value or ""))).casefold()
 
 
+def _query_key(value: object) -> str:
+    return " ".join(unicodedata.normalize("NFKC", str(value or "")).casefold().split()).rstrip("?!。").rstrip()
+
+
+def _product_key(names) -> tuple[str, ...]:
+    return tuple(sorted({key for name in names or [] if (key := _normalize(name))}))
+
+
 def with_context(rows: list[dict], get_collection) -> list[dict]:
     """旧登记缺少产品时，批量读取关联回答或缺口。同会话校验不能省略。"""
     sources = {}
@@ -45,19 +53,19 @@ def with_context(rows: list[dict], get_collection) -> list[dict]:
 def context_key(row: dict) -> tuple | None:
     """只为会话、问题和产品均明确的记录生成跨登记上下文键。"""
     text = row.get("original_query") or row.get("query") or ""
-    query = " ".join(unicodedata.normalize("NFKC", str(text)).casefold().split()).rstrip("?!。").rstrip()
-    products = tuple(sorted({_normalize(name) for name in row.get("item_names") or [] if _normalize(name)}))
+    query = _query_key(text)
+    products = _product_key(row.get("item_names"))
     if not row.get("session_id") or not query or not products:
         return None
     return row["session_id"], query, products, row.get("business_tag") or classify_business(str(text))
 
 
 def group_key(row: dict) -> tuple:
-    query = " ".join(unicodedata.normalize("NFKC", str(row.get("query") or "")).casefold().split()).rstrip("?!。").rstrip()
+    query = _query_key(row.get("query"))
     # 无法确认会话或问题的旧记录各自保留，避免错误归并。
     session = row.get("session_id") or str(row["_id"])
     query = query or str(row["_id"])
-    products = tuple(sorted({_normalize(name) for name in row.get("item_names") or [] if _normalize(name)}))
+    products = _product_key(row.get("item_names"))
     if not products:
         products = ("unknown-product:" + str(row["_id"]),)
     phase = ("active",)

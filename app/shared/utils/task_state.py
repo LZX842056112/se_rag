@@ -217,12 +217,6 @@ def snapshot(task_id: str) -> dict:
         }
 
 
-def task_count() -> int:
-    """当前在册任务数（供测试与运维观测）。"""
-    with _lock:
-        return len(_tasks)
-
-
 def track_node_task(node_name: str, id_key: str = "session_id", stream_key: str = "is_stream"):
     """装饰器：在图节点执行前后自动登记 running / done。
 

@@ -4,7 +4,6 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 
-from app.evolution.index.update import deactivate
 from app.evolution.flags import writes_enabled
 from app.evolution.repositories import evolution_repo
 from app.shared.config import settings
@@ -82,13 +81,6 @@ def run_backtest(window_days: int | None = None) -> list[BacktestResult]:
         if result.verdict == "remove":
             from app.evolution.governance import revoke_candidate
             if revoke_candidate(str(candidate["_id"]), "backtest failed"):
-                try:
-                    evolution_repo.k_candidates.update_one(
-                        {"evo_doc_id": evo_id},
-                        {"$set": {"status": "deprecated", "reason": "backtest failed"}},
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    logger.error(f"回测下架后更新候选状态失败 {evo_id}：{exc}")
                 logger.warning(f"[自进化止损] 条目 {evo_id} 回测不达标已下架")
         results.append(result)
     return results

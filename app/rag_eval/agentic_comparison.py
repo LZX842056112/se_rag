@@ -14,6 +14,7 @@ from app.rag_eval.answer_collection import collect_answers, require_isolated_res
 from app.rag_eval.answer_dataset import DEFAULT_CASES, PROJECT_ROOT, json_digest, load_answer_cases, validate_answer_cases
 from app.rag_eval.answer_quality import _build_backend, _revision, _write_json
 from app.rag_eval.answer_scoring import METRICS, score_snapshots, validate_snapshot_rows
+from app.shared.utils.statistics import percentile
 
 MODES = ("legacy", "agentic")
 BUDGET_FIELDS = ("max_tool_calls", "max_web_calls", "max_repairs", "max_context_tokens",
@@ -140,9 +141,9 @@ def _measure(values, total):
 def runtime_summary(rows: list[dict]) -> dict:
     total = len(rows)
     latency = _measure([r.get("elapsed_ms") for r in rows], total)
-    known = sorted(_numbers([r.get("elapsed_ms") for r in rows]))
+    known = _numbers([r.get("elapsed_ms") for r in rows])
     for label, p in (("p50", .5), ("p95", .95)):
-        latency[label] = known[max(0, math.ceil(len(known) * p) - 1)] if known else None
+        latency[label] = percentile(known, p)
     cost = _measure([(r.get("query_metrics") or {}).get("cost_usd") for r in rows], total)
     cost["total"] = cost["mean"] * total if cost["coverage"] == 1 else None
     counts = Counter(r.get("agentic_stop_reason") for r in rows if r.get("agentic_stop_reason"))

@@ -77,6 +77,19 @@ def list_issues(status: str | None = None, limit: int = 100) -> list[dict]:
     return groups[:max(1, min(limit, 100))]
 
 
+def _resolve_strategy_gap(issue: dict) -> None:
+    """只完成当前策略待办的来源缺口，不覆盖候选复核或发布状态。"""
+    gap_id = issue.get("gap_id")
+    if not ObjectId.is_valid(gap_id):
+        return
+    get_collection(settings.mongo.k_gaps_collection).update_one({
+        "_id": ObjectId(gap_id), "session_id": issue.get("session_id"),
+        "issue_id": str(issue["_id"]), "status": "strategy_pending",
+    }, {"$set": {"status": "resolved", "resolved_at": issue.get("completed_at"),
+                 "resolved_by_issue_id": str(issue["_id"]),
+                 "processing_reason": "策略待办已完成：" + (issue.get("resolution") or "")}})
+
+
 def update_issue(issue_id: str, *, owner: str, status: str, resolution: str) -> tuple[bool, str]:
     if status not in ("open", "in_progress", "resolved"):
         return False, "处理状态不合法"
@@ -92,9 +105,8 @@ def update_issue(issue_id: str, *, owner: str, status: str, resolution: str) -> 
         if not current:
             return False, "待办不存在"
         if current.get("status") == "resolved":
-            if status == "resolved" and current.get("owner") == owner and current.get("resolution") == resolution:
-                return True, ""
-            return False, "待办已完成，不能覆盖处理结果；请刷新查看，后续问题另行登记"
+            if status != "resolved" or current.get("owner") != owner or current.get("resolution") != resolution:
+                return False, "待办已完成，不能覆盖处理结果；请刷新查看，后续问题另行登记"
         phase = {"status": {"$in": ACTIVE_STATUSES}} if current.get("status") in ACTIVE_STATUSES else {"status": current.get("status")}
         query = {"$and": [VISIBLE_REGISTRATION, {"session_id": current.get("session_id", "")}, phase]}
         rows = list(collection.find(query).limit(ISSUE_SCAN_LIMIT + 1))
@@ -104,9 +116,13 @@ def update_issue(issue_id: str, *, owner: str, status: str, resolution: str) -> 
             rows.append(current)
         rows = with_context(rows, get_collection)
         target = next(row for row in rows if row["_id"] == current["_id"])
-        if ignored_gap(target, get_collection):
+        if current.get("status") != "resolved" and ignored_gap(target, get_collection):
             return False, "该问题已在缺口复核中忽略，请刷新查看"
         members = [row for row in rows if group_key(row) == group_key(target)]
+        if current.get("status") == "resolved":
+            for row in members:
+                _resolve_strategy_gap(row)
+            return True, ""
         patch = {"owner": owner, "status": status, "resolution": resolution,
                  "updated_at": now, "completed_at": now if status == "resolved" else None}
         for row in members:
@@ -115,6 +131,9 @@ def update_issue(issue_id: str, *, owner: str, status: str, resolution: str) -> 
             result = collection.update_one({"_id": row["_id"], "status": row["status"], "updated_at": row.get("updated_at")}, update)
             if not result.matched_count:
                 return False, "部分待办状态已变化，请刷新后核对处理结果"
+        if status == "resolved":
+            for row in members:
+                _resolve_strategy_gap({**row, **patch})
         return True, ""
     except Exception as exc:
         logger.warning(f"更新待办失败：{exc}")

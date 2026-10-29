@@ -4,17 +4,24 @@
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import time
 from typing import Any
 
+from bson import ObjectId
+from pymongo.errors import DuplicateKeyError
+
 from app.evolution.models import GapSignal, KnowledgeGap
 from app.evolution.flags import writes_enabled
+from app.evolution.feedback.state import is_unresolved, unresolved_filter
 from app.evolution.gap.decisions import ignored_contexts
-from app.evolution.issue_groups import context_key
+from app.evolution.issue_groups import ISSUE_SCAN_LIMIT, context_key
 from app.evolution.repositories import evolution_repo
 from app.rag.query.greetings import is_plain_greeting
 from app.rag.query.business import classify_business
 from app.shared.config import settings
+from app.shared.clients.mongo import ensure_gap_feedback_index
 from app.shared.runtime.logger import logger
 
 # 聚类窗口内视为同一缺口（秒）
@@ -24,7 +31,7 @@ _DEDUP_WINDOW = 3600
 # 真实问题：早期实现 `.sort("ts", -1).limit(batch)` 只取「最新 batch 条」，反馈事件一多，
 # 更早的未解决信号就永远排不进窗口（永远扫不到）。改为升序 + 游标前进后，窗口内的信号
 # 一定会在有限轮次内被逐条看到；游标用尽（窗口内没有更新的信号）时回到窗口起点复扫，
-# 重复由问题级去重兜住。进程重启丢游标只会多扫一轮，故不为此新增 Mongo 字段。
+# 已处理反馈有持久标记。游标重置或反馈时间更新不会重复登记。
 _CURSOR: dict[str, float] = {"ts": 0.0}
 _CURSOR_EPSILON = 1e-6  # 冷启动/复扫时包含窗口边界上的事件
 
@@ -34,28 +41,47 @@ def reset_scan_cursor() -> None:
     _CURSOR["ts"] = 0.0
 
 
-def _is_duplicated(query: str, ts: float) -> bool:
-    """**按问题**去重（不是按会话）。
-
-    真实事故：早期实现按 session 判定「已有 pending/candidate 缺口就跳过」，而缺口在候选通过后
-    不会复位，于是同一会话里**后续的所有问题永远扫不到**（日志表现为「产出 strong 缺口 0 条」）。
-
-    规则：
-    - 同一问题已有 ``pending`` 缺口（尚未生成候选）→ 跳过；
-    - 同一问题在去重窗口内出现过缺口 → 跳过。
-    已经生成过候选的问题由候选级 ``_exists_question`` 负责去重，因此这里不再看 ``candidate``。
-    """
-    text = str(query or "").strip()
+def _duplicate_gap(event: dict) -> dict | None:
+    """同一已知上下文才可持久合并。未知上下文保留旧的同题窗口规则。"""
+    text = str(event.get("query") or "").strip()
     if not text:
-        return False
-    try:
-        if evolution_repo.k_gaps.find_one({"query": text, "status": "pending"}):
-            return True
-        recent = evolution_repo.k_gaps.find_one({"query": text, "status": {"$ne": "dismissed"},
-                                               "ts": {"$gte": ts - _DEDUP_WINDOW}})
-        return recent is not None
-    except Exception:  # noqa: BLE001 - 去重失败按「不重复」处理，交由后续去重兜底
-        return False
+        return None
+    key = context_key(event)
+    query = {
+        "query": text, "status": {"$nin": ["resolved", "rejected", "dismissed", "removed", "deprecated"]},
+        "$or": [{"status": "pending"}, {"ts": {"$gte": (event.get("ts") or 0) - _DEDUP_WINDOW}}],
+    }
+    if key is not None:
+        query["session_id"] = key[0]
+    rows = evolution_repo.k_gaps.find(query).sort("ts", -1).limit(ISSUE_SCAN_LIMIT + 1)
+    for index, row in enumerate(rows):
+        if index == ISSUE_SCAN_LIMIT:
+            raise RuntimeError("同题缺口超过合并检查上限")
+        if context_key(row) != key:
+            continue
+        # 旧版本只完成待办而未回写缺口；精确核对绑定后排除已完成目标。
+        if row.get("status") == "strategy_pending" and ObjectId.is_valid(row.get("issue_id")):
+            completed = evolution_repo.query_issues.find_one({
+                "_id": ObjectId(row["issue_id"]), "gap_id": str(row["_id"]),
+                "session_id": row.get("session_id"), "status": "resolved",
+            }, {"_id": 1})
+            if completed:
+                continue
+        return row
+    return None
+
+
+def _feedback_gap_id(event: dict) -> ObjectId:
+    identity = ["answer", event.get("session_id", ""), event["answer_id"]] if event.get("answer_id") \
+        else ["event", str(event["_id"])]
+    key = json.dumps(identity, ensure_ascii=False)
+    return ObjectId(hashlib.sha256(("feedback-gap:" + key).encode()).hexdigest()[:24])
+
+
+def _acknowledge(event: dict, *, gap_id: str = "", issue_id: str = "") -> None:
+    evolution_repo.fb_events.update_one({"_id": event["_id"], "ts": event["ts"]}, {"$set": {
+        "gap_scanned_at": time.time(), "gap_scan_id": gap_id, "gap_scan_issue_id": issue_id,
+    }})
 
 
 def grade_signals(signals: GapSignal) -> tuple[str, float]:
@@ -76,7 +102,7 @@ def grade_signals(signals: GapSignal) -> tuple[str, float]:
 def detect_and_classify(fb_doc: dict[str, Any], transcript_slice: str = "") -> KnowledgeGap:
     """由单条反馈事件构造缺口并分类。"""
     signals = GapSignal()
-    user_bad = fb_doc.get("adopt") is False or (fb_doc.get("thumbs") or 0) < 0
+    user_bad = is_unresolved(fb_doc)
     has_cited = bool(fb_doc.get("cited_chunk_ids"))
     if user_bad:
         signals.user = 1.0
@@ -110,15 +136,15 @@ def scan_unresolved_feedbacks(batch: int = 50) -> list[KnowledgeGap]:
         return []
     gaps: list[KnowledgeGap] = []
     try:
+        ensure_gap_feedback_index(evolution_repo.k_gaps)
         since = time.time() - settings.evolution.observe_window_days * 86400
         cursor_ts = max(_CURSOR["ts"], since - _CURSOR_EPSILON)
-        # 未采纳信号包含两类：读链路写入的 adopt=False（零命中/兜底话术），
-        # 以及用户点踩产生的事件（adopt 为 None、thumbs<0）。只查 adopt=False 会漏掉后者，
-        # 导致「点踩」永远进不了缺口扫描（实测缺陷 D1）。
+        # 解决状态优先于历史点踩。持久标记保留在反馈文档中，不受 ts 更新影响。
         events = (
             evolution_repo.fb_events.find({
                 "ts": {"$gt": cursor_ts},
-                "$or": [{"adopt": False}, {"thumbs": {"$lt": 0}}],
+                "gap_scanned_at": {"$exists": False},
+                **unresolved_filter(),
             })
             .sort("ts", 1)
             .limit(batch)
@@ -135,13 +161,56 @@ def scan_unresolved_feedbacks(batch: int = 50) -> list[KnowledgeGap]:
                 continue
             if context_key(doc) in decisions:
                 continue
-            if _is_duplicated(doc.get("query", ""), doc.get("ts") or 0):
+            current = evolution_repo.fb_events.find_one({"_id": doc["_id"]})
+            if not current or not is_unresolved(current):
+                continue
+            doc = current
+            # 兼容旧记录：同一回答已有完成待办时，不把旧信号重新派单。
+            if doc.get("answer_id") and doc.get("session_id"):
+                completed = evolution_repo.query_issues.find_one({
+                    "session_id": doc["session_id"], "answer_id": doc["answer_id"], "status": "resolved",
+                }, {"_id": 1})
+                if completed:
+                    _acknowledge(doc, issue_id=str(completed["_id"]))
+                    continue
+            oid = _feedback_gap_id(doc)
+            key = str(oid)
+            existing = evolution_repo.k_gaps.find_one({"_id": oid}) or evolution_repo.k_gaps.find_one({"source_feedback_keys": key})
+            if existing:
+                _acknowledge(doc, gap_id=str(existing["_id"]))
+                continue
+            duplicate = _duplicate_gap(doc)
+            if duplicate:
+                # 来源关联与合并在同一文档原子提交。确认失败后仍可查回来源。
+                try:
+                    linked = evolution_repo.k_gaps.update_one({"_id": duplicate["_id"], "status": duplicate["status"]},
+                        {"$addToSet": {"source_feedback_keys": key}})
+                except DuplicateKeyError:
+                    winner = evolution_repo.k_gaps.find_one({"source_feedback_keys": key})
+                    if not winner:
+                        raise
+                    _acknowledge(doc, gap_id=str(winner["_id"]))
+                    continue
+                if linked.matched_count:
+                    _acknowledge(doc, gap_id=str(duplicate["_id"]))
                 continue
             gap = detect_and_classify(doc, transcript_slice=doc.get("query", ""))
             if gap.status == "candidate":
-                inserted = evolution_repo.k_gaps.insert_one(gap.document())
-                gap.gap_id = str(inserted.inserted_id)  # 透传给候选，便于审批后回写缺口状态
-                gaps.append(gap)
+                payload = {**gap.model_dump(), "source_feedback_keys": [key],
+                           "source_feedback_id": str(doc["_id"]), "source_answer_id": doc.get("answer_id") or ""}
+                try:
+                    inserted = evolution_repo.k_gaps.update_one({"_id": oid}, {"$setOnInsert": payload}, upsert=True)
+                except DuplicateKeyError:
+                    # 来源可能已由另一进程并入别的缺口。
+                    winner = evolution_repo.k_gaps.find_one({"source_feedback_keys": key})
+                    if not winner:
+                        raise
+                    _acknowledge(doc, gap_id=str(winner["_id"]))
+                    continue
+                _acknowledge(doc, gap_id=str(oid))
+                if inserted.upserted_id is not None:
+                    gap.gap_id = str(oid)
+                    gaps.append(gap)
         # 扫到东西 → 游标前进；窗口内已无更新信号 → 归零，下一轮从窗口起点复扫
         _CURSOR["ts"] = last_ts if scanned else 0.0
         logger.info(

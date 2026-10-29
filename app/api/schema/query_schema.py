@@ -76,10 +76,16 @@ class HistoryClearResponseSchema(BaseModel):
     message:str
     deleted_count:int
 
+class AnswerFeedbackSchema(BaseModel):
+    thumbs: int | None = Field(default=None, ge=-1, le=1)
+    resolved: bool | None = None
+
+
 class HistoryItemResponseSchema(BaseModel):
     business_tag: str = ""
     issue_id: str = ""
     handoff_required: bool = False
+    feedback: AnswerFeedbackSchema | None = None
     id:str
     session_id:str
     role:str

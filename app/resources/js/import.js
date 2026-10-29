@@ -6,6 +6,11 @@
 
   App.configure({ fallbackPort: 8000 });
 
+  const TASKS_KEY = 'import_tasks_v1:' + App.base;
+  const taskRecords = new Map();
+  const pollTimers = new Map();
+  let storageWarningShown = false;
+
   // 与服务端 IMPORT_MAX_UPLOAD_MB 默认值保持一致；本地先拦一次，避免白传超大文件
   const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 
@@ -21,6 +26,7 @@
     App.setImportToken(tokenInput.value);
     tokenInput.classList.remove('attention');
     App.toast('导入令牌已保存');
+    resumePolling(true);
   });
 
   function currentToken() {
@@ -30,6 +36,46 @@
   function highlightTokenInput() {
     tokenInput.classList.add('attention');
     tokenInput.focus();
+  }
+
+  function needsImportToken(error) {
+    return error && (error.status === 401 || (error.status === 503 && error.code === 'import_admin_token_missing'));
+  }
+
+  function warnStorage() {
+    if (storageWarningShown) return;
+    storageWarningShown = true;
+    App.toast('浏览器无法保存导入任务，刷新后可能无法恢复。');
+  }
+
+  function saveTasks() {
+    let finished = 0;
+    const active = new Set(['uploading', 'pending', 'processing']);
+    const rows = Array.from(taskRecords.values()).reverse().filter(row => active.has(row.status) || ++finished <= 50);
+    try { sessionStorage.setItem(TASKS_KEY, JSON.stringify(rows)); } catch (_) { warnStorage(); }
+  }
+
+  function remember(itemEl, patch) {
+    const record = taskRecords.get(itemEl.id);
+    if (!record) return;
+    Object.assign(record, patch);
+    saveTasks();
+  }
+
+  function savedTasks() {
+    let raw, rows;
+    try { raw = sessionStorage.getItem(TASKS_KEY); } catch (_) { warnStorage(); return []; }
+    try { rows = JSON.parse(raw || '[]'); } catch (_) { return []; }
+    if (!Array.isArray(rows)) return [];
+    return rows.filter(row => row && /^file-[a-z0-9]+$/i.test(row.id) && typeof row.name === 'string'
+      && typeof row.size === 'number' && Number.isFinite(row.size) && row.size >= 0
+      && (!row.task_id || (typeof row.task_id === 'string' && /^[a-z0-9_-]{1,128}$/i.test(row.task_id))))
+      .map(row => ({ id: row.id, name: row.name, size: row.size, task_id: row.task_id || '',
+        status: typeof row.status === 'string' ? row.status : 'pending',
+        done_list: Array.isArray(row.done_list) ? row.done_list.filter(text => typeof text === 'string') : [],
+        running_list: Array.isArray(row.running_list) ? row.running_list.filter(text => typeof text === 'string') : [],
+        error_code: typeof row.error_code === 'string' ? row.error_code : '',
+        message: typeof row.message === 'string' ? row.message : '' }));
   }
 
   dropZone.addEventListener('click', () => fileInput.click());
@@ -103,20 +149,31 @@
     lines.forEach(line => logListEl.appendChild(App.create('li', null, line)));
   }
 
-  // 轮询句柄登记，页面卸载时统一清理防泄漏
-  const pollTimers = new Set();
-
   function pollStatus(taskId, itemEl) {
-    const stop = (interval) => { clearInterval(interval); pollTimers.delete(interval); };
-    const interval = setInterval(async () => {
+    if (pollTimers.has(taskId)) return;
+    const current = () => pollTimers.get(taskId) === interval;
+    const stop = () => { clearInterval(interval); if (current()) pollTimers.delete(taskId); };
+    let inFlight = false;
+    const poll = async () => {
+      if (inFlight) return;
+      inFlight = true;
       try {
         const data = await App.fetchJson(App.PATHS.taskStatus(taskId), { token: currentToken() });
+        if (!current()) return;
+        if (!data.status) {
+          setBadge(itemEl, '状态不可用', 'status-error');
+          remember(itemEl, { status: 'unavailable' });
+          stop();
+          return;
+        }
+        remember(itemEl, { status: data.status, done_list: data.done_list || [], running_list: data.running_list || [],
+          error_code: data.error_code || '', message: data.message || '' });
         renderLogs(itemEl, data.done_list, data.running_list);
         if (data.status === 'completed') {
           setBadge(itemEl, '已完成', 'status-completed');
           updateProgressBar(itemEl.querySelector('.progress-bar'), 100);
-          stop(interval);
-        } else if (data.status === 'processing') {
+          stop();
+        } else if (data.status === 'processing' || data.status === 'pending') {
           // 进度由日志反映，不造假百分比
           setBadge(itemEl, '处理中...', 'status-processing');
         } else if (data.status === 'failed') {
@@ -127,32 +184,47 @@
             logListEl.appendChild(App.create('li', null, data.message || data.error_code));
             itemEl.querySelector('.log-details').open = true;
           }
-          stop(interval);
+          stop();
         }
       } catch (e) {
+        if (!current()) return;
         console.error('轮询任务状态失败', e);
-        if (e && (e.status === 401 || e.status === 503)) highlightTokenInput();
-        stop(interval);
+        if (needsImportToken(e)) {
+          highlightTokenInput();
+          setBadge(itemEl, '等待验证导入令牌', 'status-error');
+          stop();
+        } else {
+          const record = taskRecords.get(itemEl.id);
+          if (!record || !['completed', 'failed'].includes(record.status)) {
+            setBadge(itemEl, '暂时无法读取，正在重试', 'status-processing');
+          }
+        }
+      } finally {
+        inFlight = false;
       }
-    }, 2000);
-    pollTimers.add(interval);
+    };
+    const interval = setInterval(poll, 2000);
+    pollTimers.set(taskId, interval);
+    poll();
   }
 
-  function failItem(itemEl, logSummary, logListEl, logDetails, message) {
-    setBadge(itemEl, '失败', 'status-error');
+  function failItem(itemEl, logSummary, logListEl, logDetails, message, status = 'failed') {
+    setBadge(itemEl, status === 'interrupted' ? '上传中断' : '失败', 'status-error');
+    remember(itemEl, { status, message });
     logSummary.textContent = '日志（失败，点击展开）';
     logListEl.innerHTML = '';
     logListEl.appendChild(App.create('li', null, message));
     logDetails.open = true;
   }
 
-  async function uploadFile(file) {
-    const id = 'file-' + Math.random().toString(36).slice(2, 11);
+  function createTaskItem(record) {
+    const { id, name, size } = record;
+    taskRecords.set(id, record);
     fileList.insertAdjacentHTML('afterbegin', `
       <div class="file-item" id="${id}">
         <div class="file-info">
-          <span class="file-name">${App.escapeHtml(file.name)}</span>
-          <span class="file-size">${(file.size / 1024).toFixed(2)} KB</span>
+          <span class="file-name">${App.escapeHtml(name)}</span>
+          <span class="file-size">${(size / 1024).toFixed(2)} KB</span>
           <div class="progress-bar-container"><div class="progress-bar"></div></div>
           <details class="log-details">
             <summary>日志（点击展开）</summary>
@@ -162,8 +234,52 @@
         <div class="status-badge status-uploading">上传中...</div>
       </div>
     `);
+    return document.getElementById(id);
+  }
 
-    const itemEl = document.getElementById(id);
+  function resumePolling(restart = false) {
+    taskRecords.forEach(record => {
+      const itemEl = document.getElementById(record.id);
+      if (!record.task_id || !itemEl || ['completed', 'failed'].includes(record.status)) return;
+      if (restart && pollTimers.has(record.task_id)) {
+        clearInterval(pollTimers.get(record.task_id));
+        pollTimers.delete(record.task_id);
+      }
+      pollStatus(record.task_id, itemEl);
+    });
+  }
+
+  function restoreTasks() {
+    savedTasks().reverse().forEach(record => {
+      if (taskRecords.has(record.id)) return;
+      const itemEl = createTaskItem(record);
+      itemEl.querySelector('.progress-bar-container').style.display = 'block';
+      renderLogs(itemEl, record.done_list, record.running_list);
+      if (record.task_id) {
+        if (record.status === 'failed') {
+          failItem(itemEl, itemEl.querySelector('.log-details summary'), itemEl.querySelector('.log-list'),
+            itemEl.querySelector('.log-details'), record.message || record.error_code || '导入失败');
+        } else {
+          setBadge(itemEl, record.status === 'completed' ? '已完成' : '处理中...',
+            record.status === 'completed' ? 'status-completed' : 'status-processing');
+        }
+        if (record.status === 'completed') updateProgressBar(itemEl.querySelector('.progress-bar'), 100);
+        if (!['completed', 'failed'].includes(record.status)) pollStatus(record.task_id, itemEl);
+      } else {
+        const interrupted = record.status === 'uploading' || record.status === 'interrupted';
+        failItem(itemEl, itemEl.querySelector('.log-details summary'), itemEl.querySelector('.log-list'),
+          itemEl.querySelector('.log-details'), interrupted
+            ? '刷新前尚未收到上传结果。请先核对是否已导入；如未导入，请重新选择文件。' : record.message,
+          interrupted ? 'interrupted' : 'failed');
+      }
+    });
+  }
+
+  async function uploadFile(file) {
+    const record = { id: 'file-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 11),
+      name: file.name, size: file.size, task_id: '', status: 'uploading', done_list: [], running_list: [] };
+    const itemEl = createTaskItem(record);
+    saveTasks();
     const progressContainer = itemEl.querySelector('.progress-bar-container');
     const logDetails = itemEl.querySelector('.log-details');
     const logSummary = itemEl.querySelector('.log-details summary');
@@ -192,12 +308,13 @@
       });
       const ids = Array.isArray(result.task_ids) ? result.task_ids : [];
       if (!ids.length) throw new Error('上传接口未返回 task_id');
+      remember(itemEl, { task_id: ids[0], status: 'processing' });
       setBadge(itemEl, '处理中...', 'status-processing');
       pollStatus(ids[0], itemEl);
     } catch (error) {
       // 业务拒绝（如 422 仅支持 md/pdf）属预期路径，用 warn 避免污染错误监控
       console.warn(error);
-      if (error && (error.status === 401 || error.status === 503)) highlightTokenInput();
+      if (needsImportToken(error)) highlightTokenInput();
       failItem(itemEl, logSummary, logListEl, logDetails,
         (error && error.message) ? error.message : String(error));
     } finally {
@@ -210,5 +327,8 @@
     pollTimers.clear();
   });
 
+  window.addEventListener('pageshow', event => { if (event.persisted) resumePolling(); });
+
+  restoreTasks();
   refreshEmptyHint();
 })();

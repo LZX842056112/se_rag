@@ -29,9 +29,6 @@ class FeedbackEvent(BaseModel):
     source: str = "kb"                 # web | kb | evolution | hyde
     ts: float = Field(default_factory=_now)
 
-    def document(self) -> dict[str, Any]:
-        return self.model_dump()
-
 
 # ---------------- 知识缺口 k_gaps ----------------
 class GapSignal(BaseModel):
@@ -54,9 +51,6 @@ class KnowledgeGap(BaseModel):
     transcript_slice: str = ""
     status: str = "pending"    # pending | candidate | rejected
     ts: float = Field(default_factory=_now)
-
-    def document(self) -> dict[str, Any]:
-        return self.model_dump()
 
 
 # ---------------- 知识候选 k_candidates ----------------
@@ -82,9 +76,6 @@ class KnowledgeCandidate(BaseModel):
     gap_id: str | None = None   # 来源缺口 id（审批后把缺口标记为 resolved/rejected）
     ts: float = Field(default_factory=_now)
 
-    def document(self) -> dict[str, Any]:
-        return self.model_dump()
-
 
 # ---------------- 指标快照 k_metrics ----------------
 class MetricSnapshot(BaseModel):
@@ -95,18 +86,3 @@ class MetricSnapshot(BaseModel):
     adopt_rate: float = 0.0
     gap_rate: float = 0.0
     params_snapshot: dict[str, Any] = Field(default_factory=dict)
-
-    def document(self) -> dict[str, Any]:
-        return self.model_dump()
-
-
-# ---------------- 参数注册表 param_registry ----------------
-class ParamRecord(BaseModel):
-    key: str
-    value: Any
-    updated_at: float = Field(default_factory=_now)
-    updated_by: str = "manual"    # metric | manual
-    rev: int = 0
-
-    def document(self) -> dict[str, Any]:
-        return self.model_dump()

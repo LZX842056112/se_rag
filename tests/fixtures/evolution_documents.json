@@ -1,0 +1,96 @@
+{
+  "FeedbackEvent": {
+    "input": {
+      "session_id": "session-a",
+      "ts": 1.0
+    },
+    "document": {
+      "session_id": "session-a",
+      "business_tag": "",
+      "answer_id": "",
+      "resolved": null,
+      "query": "",
+      "rewritten_query": "",
+      "cited_chunk_ids": [],
+      "item_names": [],
+      "adopt": null,
+      "thumbs": null,
+      "source": "kb",
+      "ts": 1.0
+    }
+  },
+  "KnowledgeGap": {
+    "input": {
+      "session_id": "session-a",
+      "query": "产品温度",
+      "ts": 1.0
+    },
+    "document": {
+      "gap_kind": "retrieval_miss",
+      "business_tag": "",
+      "gap_id": null,
+      "session_id": "session-a",
+      "query": "产品温度",
+      "item_names": [],
+      "confidence": 0.0,
+      "signals": {
+        "user": 0.0,
+        "retrieval": 0.0,
+        "generation": 0.0,
+        "confidence": 0.0,
+        "grade": "none"
+      },
+      "transcript_slice": "",
+      "status": "pending",
+      "ts": 1.0
+    }
+  },
+  "KnowledgeCandidate": {
+    "input": {
+      "faq_question": "产品温度",
+      "faq_answer": "额定温度为 180 ℃。",
+      "item_names": [
+        "HAK 180"
+      ],
+      "ts": 1.0
+    },
+    "document": {
+      "schema_version": 1,
+      "knowledge_origin": "document",
+      "manual_edited_at": null,
+      "approved_at": null,
+      "approved_content_sha256": "",
+      "gap_kind": "knowledge_missing",
+      "source_versions": [],
+      "content_version": 1,
+      "publication_status": "draft",
+      "index_version": "",
+      "content_sha256": "",
+      "faq_question": "产品温度",
+      "faq_answer": "额定温度为 180 ℃。",
+      "source_refs": [],
+      "item_names": [
+        "HAK 180"
+      ],
+      "status": "draft",
+      "evo_doc_id": null,
+      "reason": "",
+      "gap_id": null,
+      "ts": 1.0
+    }
+  },
+  "MetricSnapshot": {
+    "input": {
+      "ts": 1.0
+    },
+    "document": {
+      "ts": 1.0,
+      "recall_k": 0.0,
+      "precision": 0.0,
+      "groundedness": 0.0,
+      "adopt_rate": 0.0,
+      "gap_rate": 0.0,
+      "params_snapshot": {}
+    }
+  }
+}

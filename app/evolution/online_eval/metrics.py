@@ -6,7 +6,6 @@ import time
 from app.evolution.models import MetricSnapshot
 from app.evolution.repositories import evolution_repo
 from app.evolution.tuning import param_registry
-from app.shared.config import settings
 from app.shared.runtime.logger import logger
 
 
@@ -39,7 +38,7 @@ def record_metric(snapshot: MetricSnapshot | None = None) -> None:
         return
     snapshot = snapshot or compute_snapshot()
     try:
-        evolution_repo.k_metrics.insert_one(snapshot.document())
+        evolution_repo.k_metrics.insert_one(snapshot.model_dump())
     except Exception as exc:  # noqa: BLE001
         logger.warning(f"写 k_metrics 失败：{exc}")
 

@@ -116,7 +116,7 @@ def _process_gap(claimed: dict) -> str:
     if not existing:
         context = _build_context(gap.query or gap.transcript_slice, gap.item_names) \
             if settings.evolution.gen_context_enabled else []
-        generate_candidate(gap.document(), context)
+        generate_candidate(gap.model_dump(), context)
         existing = evolution_repo.k_candidates.find_one({"gap_id": str(oid)})
     if not existing:
         raise RuntimeError("未生成候选，等待重试")

@@ -4,9 +4,8 @@ from __future__ import annotations
 import asyncio
 import json
 
-from agents.mcp import MCPServerStreamableHttp
-
 from app.process.query.agent.state import QueryGraphState
+from app.shared.clients.mcp_web import request_web_search
 from app.shared.config import settings
 from app.shared.runtime.logger import logger
 from app.shared.runtime.query_metrics import mark_degraded
@@ -19,37 +18,14 @@ _MCP_TIMEOUT_MARGIN_SECONDS = 5
 async def _call_bailian_web_search(rewritten_query: str):
     """连接百炼 MCP 并调用联网搜索工具；异常返回 None（由调用方降级）。"""
     timeout_seconds = settings.mcp.timeout_seconds
-    mcp_server = MCPServerStreamableHttp(
-        name="Streamable HTTP Python Server",
-        params={
-            "url": settings.mcp.base_url,
-            "headers": {"Authorization": f"Bearer {settings.mcp.api_key}"},
-            "timeout": timeout_seconds,
-        },
-        cache_tools_list=True,
-        max_retry_attempts=3,
-    )
     try:
-        # 整体超时兜底：MCP 客户端超时只覆盖单次请求，连接/握手卡住时会一直阻塞，
-        # 进而把整条查询链路拖住（实测过该现象），故这里再加一层硬超时。
-        return await asyncio.wait_for(
-            _connect_and_call(mcp_server, rewritten_query),
-            timeout=timeout_seconds + _MCP_TIMEOUT_MARGIN_SECONDS,
+        return await request_web_search(
+            rewritten_query, 5, request_timeout=timeout_seconds,
+            overall_timeout=timeout_seconds + _MCP_TIMEOUT_MARGIN_SECONDS, retries=3,
         )
     except Exception as exc:  # noqa: BLE001 - 联网失败必须降级而非中断主链路
         logger.exception(f"MCP 联网搜索调用失败：{exc}")
         return None
-    finally:
-        await mcp_server.cleanup()
-
-
-async def _connect_and_call(mcp_server: MCPServerStreamableHttp, rewritten_query: str):
-    """连接 MCP 并调用联网搜索工具（被整体超时包裹）。"""
-    await mcp_server.connect()
-    return await mcp_server.call_tool(
-        tool_name="bailian_web_search",
-        arguments={"query": rewritten_query, "count": 5},
-    )
 
 
 def search_by_web(state: QueryGraphState) -> list[dict]:

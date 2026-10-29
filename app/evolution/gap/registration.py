@@ -15,6 +15,16 @@ _CLAIM: ContextVar[dict | None] = ContextVar("gap_registration_claim", default=N
 VISIBLE_REGISTRATION = {"$or": [{"registration_status": {"$exists": False}}, {"registration_status": "ready"}]}
 
 
+def mark_source_gap(gap_id: str | None, status: str) -> None:
+    """回写来源缺口；辅助状态失败不影响已完成的审批或发布。"""
+    if not gap_id:
+        return
+    try:
+        evolution_repo.k_gaps.update_one({"_id": ObjectId(gap_id)}, {"$set": {"status": status}})
+    except Exception as exc:
+        logger.warning(f"回写缺口状态失败：{gap_id} -> {status}（{exc}）")
+
+
 class GapClaimLost(RuntimeError):
     """缺口已由其他任务接管，当前任务必须停止写入。"""
 

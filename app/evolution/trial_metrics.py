@@ -2,19 +2,12 @@
 from __future__ import annotations
 
 from collections import Counter
-import math
 import time
 from statistics import mean
 
 from app.shared.clients.mongo import get_collection
 from app.shared.config import settings
-
-
-def percentile(values, q):
-    if not values:
-        return None
-    ordered = sorted(values)
-    return ordered[max(0, math.ceil(len(ordered) * q) - 1)]
+from app.shared.utils.statistics import percentile
 
 
 def report(window_hours: int = 24):

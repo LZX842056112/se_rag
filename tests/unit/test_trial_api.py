@@ -55,6 +55,62 @@ def test_approval_reads_require_admin_token(api):
         assert response.status_code==200,response.text
 
 
+def test_feedback_choices_survive_history_reload(api):
+    owner, _, db = api
+    answer = owner.post("/api/query", json={"query": "功率是多少", "session_id": "feedback-refresh"}).json()
+    body = {"session_id": "feedback-refresh", "answer_id": answer["answer_id"]}
+    assert owner.post("/api/evolution/feedback", json={**body, "thumbs": 1}).status_code == 200
+    assert owner.post("/api/evolution/feedback", json={**body, "resolved": False}).status_code == 200
+    history = owner.get("/api/history/feedback-refresh").json()["items"]
+    assistant = next(item for item in history if item["role"] == "assistant")
+    assert assistant["feedback"] == {"thumbs": 1, "resolved": False}
+    assert next(item for item in history if item["role"] == "user")["feedback"] is None
+    assert db[settings.mongo.query_feedback_collection].count_documents({}) == 1
+
+
+@pytest.mark.parametrize("legacy_intent", [None, ""])
+def test_legacy_answer_feedback_is_saved_without_creating_knowledge_signals(api, legacy_intent):
+    from bson import ObjectId
+    owner, _, db = api
+    answer = owner.post("/api/query", json={"query": "旧版问题", "session_id": "legacy-feedback"}).json()
+    selector = {"_id": ObjectId(answer["answer_id"])}
+    update = {"$unset": {"intent": ""}} if legacy_intent is None else {"$set": {"intent": legacy_intent}}
+    db[settings.mongo.chat_message_collection].update_one(selector, update)
+    assert owner.post("/api/evolution/feedback", json={
+        "session_id": "legacy-feedback", "answer_id": answer["answer_id"], "thumbs": -1,
+    }).status_code == 200
+    history = owner.get("/api/history/legacy-feedback").json()["items"]
+    assert next(item for item in history if item["role"] == "assistant")["feedback"] == {"thumbs": -1, "resolved": None}
+    assert db[settings.mongo.fb_events_collection].count_documents({}) == 0
+    assert db[settings.mongo.query_issues_collection].count_documents({}) == 0
+
+
+def test_automatic_failure_signal_is_not_a_user_feedback_choice(api):
+    owner, _, db = api
+    answer = owner.post("/api/query", json={"query": "功率是多少", "session_id": "auto-feedback"}).json()
+    db[settings.mongo.fb_events_collection].insert_one({
+        "session_id": "auto-feedback", "answer_id": answer["answer_id"], "thumbs": -1,
+    })
+    db[settings.mongo.query_feedback_collection].insert_one({
+        "session_id": "another-session", "answer_id": answer["answer_id"], "thumbs": 1,
+    })
+    history = owner.get("/api/history/auto-feedback").json()["items"]
+    assert next(item for item in history if item["role"] == "assistant")["feedback"] is None
+
+
+def test_history_feedback_reads_partial_legacy_rows_without_changing_dimensions(api):
+    owner, _, db = api
+    answer = owner.post("/api/query", json={"query": "功率是多少", "session_id": "partial-feedback"}).json()
+    common = {"session_id": "partial-feedback", "answer_id": answer["answer_id"]}
+    db[settings.mongo.query_feedback_collection].insert_many([
+        {**common, "thumbs": -1, "ts": 1},
+        {**common, "resolved": True, "ts": 2},
+        {**common, "thumbs": "invalid", "resolved": "false", "ts": 3},
+    ])
+    history = owner.get("/api/history/partial-feedback").json()["items"]
+    assert next(item for item in history if item["role"] == "assistant")["feedback"] == {"thumbs": -1, "resolved": True}
+
+
 def test_active_query_rejects_history_clear_and_second_post(api):
     owner,_,_=api
     assert owner.post("/api/query",json={"query":"q","session_id":"busy-api"}).status_code==200

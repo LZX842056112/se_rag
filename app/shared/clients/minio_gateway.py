@@ -87,23 +87,6 @@ class MinioGateway:
         scheme = "https" if settings.minio.secure else "http"
         return f"{scheme}://{settings.minio.endpoint}/{self.bucket_name}/{self.object_key(stem, image_name)}"
 
-    def remove_images(self, stem: str) -> None:
-        """删除某文档目录下的全部图片（幂等，失败只告警）。"""
-        try:
-            client = self.minio_client
-            objects = client.list_objects(
-                bucket_name=self.bucket_name,
-                prefix=self.image_prefix(stem),
-                recursive=True,
-            )
-            errors = client.remove_objects(
-                self.bucket_name,
-                delete_object_list=[DeleteObject(obj.object_name) for obj in objects],
-            )
-            for error in errors:
-                logger.warning(f"MinIO 删除对象失败：{error}")
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(f"清理 MinIO 旧图片失败（忽略继续）：{exc}")
 
     def _list_object_names(self, stem: str) -> list[str]:
         """列出某文档目录下的对象名；失败返回空列表。"""
@@ -121,8 +104,7 @@ class MinioGateway:
     def remove_stale_images(self, stem: str, keep_names: set[str]) -> int:
         """删除该文档目录下「不在 ``keep_names`` 内」的旧对象，返回删除条数。
 
-        与 ``remove_images`` 的区别：后者是「先清空再上传」，上传失败会让图片全部丢失。
-        本方法配合「先上传新图、后清理残留」的顺序使用，只清理本次未再引用的对象，
+        配合「先上传新图、后清理残留」的顺序使用，只清理本次未再引用的对象，
         因此单张上传失败不会导致已有图片消失。
         """
         prefix = self.image_prefix(stem)

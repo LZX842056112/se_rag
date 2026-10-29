@@ -374,7 +374,6 @@
 
   window.App = {
     PATHS: PATHS,
-    resolveBase: resolveBase,
     configure: function (options) {
       var opts = options || {};
       state.base = opts.apiBase || resolveBase(opts.fallbackPort);
@@ -390,13 +389,7 @@
     confirm: confirmDialog,
     create: create,
     STATUS_LABEL: STATUS_LABEL,
-    isImageUrl: isImageUrl,
-    normalizeUrl: normalizeUrl,
-    dedupeKeepOrder: dedupeKeepOrder,
-    extractUrlsLoose: extractUrlsLoose,
-    parseAnswerAndImages: parseAnswerAndImages,
     renderAnswerWithImages: renderAnswerWithImages,
-    loadedAssetVersion: LOADED_ASSET_V,
     checkFreshness: checkFreshness,
     setAdminToken: function (token) {
       state.adminToken = String(token || '').trim();

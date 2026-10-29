@@ -111,18 +111,6 @@ class HistoryRepository:
             logger.error(f"写入会话历史失败：{exc}")
             return ""
 
-    def update_item_names(self, ids: list[str], item_names: list[str]) -> int:
-        """批量更新历史消息的关联主体名。"""
-        try:
-            object_ids = [ObjectId(i) for i in ids]
-            result = self._collection().update_many(
-                {"_id": {"$in": object_ids}},
-                {"$set": {"item_names": item_names}},
-            )
-            return result.modified_count
-        except Exception as exc:  # noqa: BLE001
-            logger.error(f"更新历史主体名失败：{exc}")
-            return 0
 
     def clear_session(self, session_id: str) -> int:
         """清空指定会话的全部消息，返回删除条数。"""

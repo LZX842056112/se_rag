@@ -15,9 +15,6 @@ from __future__ import annotations
 
 import hashlib
 
-# 哈希输出长度（sha1 十六进制）
-_HASH_LEN = 40
-
 
 def _sha1(text: str) -> str:
     """返回文本的 sha1 十六进制摘要。"""

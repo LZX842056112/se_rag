@@ -1,24 +1,8 @@
-"""贯穿查询图模型客户端的请求截止时间。"""
-from contextvars import ContextVar
+"""Agentic 模式的查询预算与 Mongo 超时边界。"""
 import time
 from functools import wraps
 
-query_deadline = ContextVar('agentic_query_deadline', default=None)
-
-
-def remaining():
-    deadline = query_deadline.get()
-    if deadline is None:
-        return None
-    seconds = deadline - time.monotonic()
-    if seconds <= 0:
-        raise TimeoutError('agentic query deadline exceeded')
-    return seconds
-
-
-def bounded_timeout(configured):
-    available = remaining()
-    return min(float(configured), available) if available is not None else configured
+from app.shared.runtime.deadline import query_deadline
 
 
 def bounded_query(function):

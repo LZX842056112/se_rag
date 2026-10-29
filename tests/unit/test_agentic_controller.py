@@ -291,7 +291,7 @@ def test_mode_switch_preserves_legacy_route(monkeypatch):
 
 def test_catalog_rpcs_share_the_request_deadline(monkeypatch):
     from types import SimpleNamespace
-    from app.rag.agentic import deadline
+    from app.shared.runtime import deadline
     from app.rag.item_name import catalog
     monkeypatch.setattr(catalog, '_CACHE', {'names': [], 'raws': [], 'ts': 0.0})
     clock, timeouts = [0.0], []

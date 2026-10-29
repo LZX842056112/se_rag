@@ -285,7 +285,7 @@ def run_agentic(state, *, tools=None, model=None, budget=None, persist=True):
     if tools is None:
         from app.rag.agentic.tools import RetrievalTools
         tools = RetrievalTools(state)
-    from app.rag.agentic.deadline import remaining
+    from app.shared.runtime.deadline import remaining
     available = remaining()
     budget = budget or Budget(max_calls=cfg.max_tool_calls, max_web=cfg.max_web_calls,
                                max_tokens=cfg.max_context_tokens, seconds=min(cfg.timeout_seconds, available) if available is not None else cfg.timeout_seconds,
