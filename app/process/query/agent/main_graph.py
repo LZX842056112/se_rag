@@ -25,17 +25,17 @@ def node_agentic(state):
 query_graph_builder = StateGraph(QueryGraphState)
 
 # 1. 注册节点（意图路由与闲聊作答为本功能新增，其余为原有检索/作答链路）
-query_graph_builder.add_node(node_intent_route)
-query_graph_builder.add_node(node_chitchat_answer)
-query_graph_builder.add_node(node_item_name_confirm)
-query_graph_builder.add_node(node_search_embedding)
-query_graph_builder.add_node(node_search_embedding_hyde)
-query_graph_builder.add_node(node_web_search_mcp)
-query_graph_builder.add_node(node_rrf)
-query_graph_builder.add_node(node_rerank)
-query_graph_builder.add_node(node_parent_expand)
-query_graph_builder.add_node(node_answer_output)
-query_graph_builder.add_node(node_agentic)
+query_graph_builder.add_node(node_intent_route)          # 意图识别：区分闲聊 / 知识库问答
+query_graph_builder.add_node(node_chitchat_answer)       # 闲聊作答：不经过检索链路
+query_graph_builder.add_node(node_item_name_confirm)     # 主体确认：识别用户问的知识条目标题
+query_graph_builder.add_node(node_search_embedding)      # 向量召回：BGE-M3 稠密+稀疏语义检索
+query_graph_builder.add_node(node_search_embedding_hyde) # HyDE 召回：先生成假设答案再检索
+query_graph_builder.add_node(node_web_search_mcp)        # 联网召回：通过 MCP 百炼联网搜索
+query_graph_builder.add_node(node_rrf)                   # RRF 融合：多路召回结果归一化合并
+query_graph_builder.add_node(node_rerank)                # 重排：BGE-Reranker 精排
+query_graph_builder.add_node(node_parent_expand)         # 父块回溯：由切片回溯到章节级父块
+query_graph_builder.add_node(node_answer_output)         # 作答输出：依据召回证据生成最终答案
+query_graph_builder.add_node(node_agentic)               # Agentic 编排：LLM 驱动多轮检索（可选分支）
 
 # 2. 入口节点：意图识别
 query_graph_builder.set_entry_point("node_intent_route")

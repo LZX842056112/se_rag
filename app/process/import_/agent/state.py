@@ -4,35 +4,36 @@ from typing import TypedDict
 
 class ImportGraphState(TypedDict):
 
-    # 传入的数据 (12)
-    task_id: str
-    local_file_path: str
+    # 传入的数据
+    task_id: str  # 导入任务唯一 ID（由上传接口生成，用于追踪任务状态）
+    local_file_path: str  # 上传文件落盘后的本地完整路径
 
     # 文件类型标识
-    md_path : str
-    is_md_read_enabled : bool
+    md_path : str  # Markdown 文件的路径（PDF 转 MD 或直接上传 MD 后使用）
+    is_md_read_enabled : bool  # 是否启用 MD 文件读取（仅读取 MD 时置 True）
 
-    pdf_path: str
-    is_pdf_read_enabled: bool
+    pdf_path: str  # PDF 文件的路径（需转 MD 时使用）
+    is_pdf_read_enabled: bool  # 是否启用 PDF 文件读取（解析 PDF 流转 MD 时置 True）
 
-    file_title : str  #文件名
+    file_title : str  # 文件名（取自上传文件 basename，去掉路径）
 
     # 输出文件地址
-    local_dir : str # 存储生成文件地址 文件夹
+    local_dir : str  # 本次任务的工作目录（存储中间及最终生成文件的文件夹）
 
-    md_content: str # md文件内容
+    md_content: str  # MD 文件内容（读取/转换后的完整文本）
 
-    chunks : list # 装切割后的文本块 dict（子块，检索单元）
+    chunks : list  # 切割后的文本子块 dict（最小检索单元，用于向量化召回）
 
-    parent_chunks : list # 装章节级父块 dict（供检索命中后回填背景）
+    parent_chunks : list  # 章节级父块 dict（检索命中后回填父级背景上下文）
 
-    item_name: str  # 主体 file_title兜底
+    item_name: str  # 主体/品目名，缺省时用 file_title 兜底
 
-    document_kind: str
-    document_version: str
-    valid_until: float
+    # 业务政策元数据
+    document_kind: str  # 文档类型：manual（手册）/ policy（业务政策）
+    document_version: str  # 政策版本号，policy 类型必填
+    valid_until: float  # 政策失效时间戳（秒级），policy 类型必须晚于当前时间
 
-    embeddings_content: list # 带有向量的切块
+    embeddings_content: list  # 已生成向量的切块（带向量字段的 chunks 子集）
 
 
 # 准备一个state对象

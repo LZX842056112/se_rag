@@ -29,11 +29,14 @@ from app.shared.runtime.logger import logger
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     """服务生命周期：确保 Mongo 索引就绪，并按开关启停自进化调度器。"""
+    # 启动阶段：抢占单 worker 租约，保证调度器只有一个实例在跑。
     lease = SingleWorkerLease()
     lease.acquire()
     try:
+        # 确保数据库索引/集合结构就绪，后续读写才有正确约束。
         ensure_indexes()
         scheduler_task = None
+        # 仅当允许写入且调度器开关开启时才启动后台循环（只读/导入进程不启动）。
         if writes_enabled() and settings.evolution.scheduler_enabled:
             scheduler_task = asyncio.create_task(
                 evolution_scheduler_loop(settings.evolution.schedule_interval_minutes * 60.0)
@@ -45,6 +48,7 @@ async def lifespan(_app: FastAPI):
         try:
             yield
         finally:
+            # 关闭阶段：取消调度任务并等待其安全退出（吞掉 CancelledError）。
             if scheduler_task is not None:
                 scheduler_task.cancel()
                 try:
@@ -52,6 +56,7 @@ async def lifespan(_app: FastAPI):
                 except asyncio.CancelledError:
                     pass
     finally:
+        # 释放单 worker 租约，允许其他实例接管。
         lease.release()
 
 

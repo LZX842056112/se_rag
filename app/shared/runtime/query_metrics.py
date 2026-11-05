@@ -55,9 +55,12 @@ current_metrics: ContextVar[QueryMetrics | None] = ContextVar("query_metrics", d
 
 
 def mark_degraded(reason: str) -> None:
+    # 无当前查询上下文（非查询线程）时静默跳过，不做任何记录
     metrics = current_metrics.get()
     if metrics:
+        # 加锁保护 degraded_reasons，避免多线程并发写入竞态
         with metrics.lock:
+            # 去重：同一原因只记一次，避免同一降级事件被重复累计
             if reason not in metrics.degraded_reasons:
                 metrics.degraded_reasons.append(reason)
 

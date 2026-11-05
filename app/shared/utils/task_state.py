@@ -17,10 +17,11 @@ from typing import Dict, List
 from app.shared.config import settings
 from app.shared.utils.sse_broker import SSEEvent, publish
 
-TASK_STATUS_PENDING = "pending"
-TASK_STATUS_PROCESSING = "processing"
-TASK_STATUS_COMPLETED = "completed"
-TASK_STATUS_FAILED = "failed"
+# 任务整体状态枚举：与前端展示联动，node 的 done/running 是进度明细，状态是粗粒度汇总
+TASK_STATUS_PENDING = "pending"          # 排队中（已提交未开始）
+TASK_STATUS_PROCESSING = "processing"    # 处理中（图正在跑）
+TASK_STATUS_COMPLETED = "completed"      # 已完成
+TASK_STATUS_FAILED = "failed"            # 失败（配合 error_code / message 看分类）
 
 # 节点名 -> 中文展示名（前端展示用；key 必须与 LangGraph 节点名一致）
 _NODE_NAME_TO_CN: Dict[str, str] = {
@@ -51,18 +52,19 @@ _NODE_NAME_TO_CN: Dict[str, str] = {
 class _TaskRecord:
     """单个任务的进度快照。"""
 
-    running: List[str] = field(default_factory=list)
-    done: List[str] = field(default_factory=list)
-    status: str = ""
+    running: List[str] = field(default_factory=list)  # 进行中的节点名列表（按节点执行顺序追加）
+    done: List[str] = field(default_factory=list)  # 已完成的节点名列表（完成后从 running 摘除并入此列）
+    status: str = ""  # 任务整体状态，取值见 TASK_STATUS_* 常量
     # 失败分类：机器码 + 中文提示（成功任务留空）
-    error_code: str = ""
-    message: str = ""
+    error_code: str = ""  # 机器可读的错误码（定位用稳定标识）
+    message: str = ""  # 面向用户的中文错误提示
     # 本轮提问原文：页面刷新后用户消息可能还没落库，前端用快照补出提问气泡
-    query: str = ""
-    turn_id: str = ""
-    updated_at: float = field(default_factory=time.time)
+    query: str = ""  # 本轮提问原文（仅查询链路使用）
+    turn_id: str = ""  # 本轮会话轮次 ID（关联多轮对话用）
+    updated_at: float = field(default_factory=time.time)  # 最近一次访问/变更时间，用于 TTL 超时回收判定
 
 
+# 进程内任务状态表 + 全局锁：task_id -> 快照记录；所有读写走锁保证图线程池并发安全
 _tasks: Dict[str, _TaskRecord] = {}
 _lock = threading.Lock()
 
@@ -70,6 +72,7 @@ _lock = threading.Lock()
 def _prune_locked(now: float) -> None:
     """回收超期的任务记录（调用方需持锁）。"""
     ttl = settings.runtime.task_state_ttl_seconds
+    # 找出超过 TTL 未更新的记录（updated_at 在每次访问时刷新，活跃任务不会被误回收）
     stale = [task_id for task_id, record in _tasks.items() if now - record.updated_at > ttl]
     for task_id in stale:
         _tasks.pop(task_id, None)
@@ -79,9 +82,10 @@ def _get_locked(task_id: str) -> _TaskRecord:
     """取（或创建）任务记录（调用方需持锁）。"""
     record = _tasks.get(task_id)
     if record is None:
+        # 首次访问：惰性创建空记录一并入表，随后所有写操作都在该记录上累积
         record = _TaskRecord()
         _tasks[task_id] = record
-    record.updated_at = time.time()
+    record.updated_at = time.time()  # 刷新时间戳，用于 TTL 存活判断
     return record
 
 
@@ -104,8 +108,10 @@ def add_running_task(task_id: str, node_name: str, is_stream: bool = False) -> N
     with _lock:
         _prune_locked(time.time())
         record = _get_locked(task_id)
+        # 同节点重复执行（如循环/重试）时只保留一个，避免列表重复
         if node_name not in record.running:
             record.running.append(node_name)
+        # 流式场景：状态变更即时推给前端
         if is_stream:
             _push_progress_locked(task_id, record)
 
@@ -115,7 +121,7 @@ def add_done_task(task_id: str, node_name: str, is_stream: bool = False) -> None
     with _lock:
         _prune_locked(time.time())
         record = _get_locked(task_id)
-        record.running = [n for n in record.running if n != node_name]
+        record.running = [n for n in record.running if n != node_name]  # 完成即从「进行中」摘除
         if node_name not in record.done:
             record.done.append(node_name)
         if is_stream:

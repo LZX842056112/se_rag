@@ -205,24 +205,36 @@ def resolve_by_pending_clarify(state: QueryGraphState) -> bool:
     ③ 该主体 ∈ 反问给出的候选（只认候选，避免把「另一台设备」硬拼成垃圾问句）；
     ④ 本轮去掉主体别名后为空，即用户没带自己的意图。
     """
+    # 取本轮用户消息原文；后续做目录对齐、剔别名都基于它（state 提供，失败即抛）
     original_query = require_state_str(state, "original_query")
 
-    # 闸门①：便宜的门——绝大多数轮次上一轮不是反问，直接早退，不白跑向量检索
+    # 闸门①：便宜的门——绝大多数轮次上一轮不是反问，直接早退，不白跑向量检索。
+    # 只读最近一条历史消息，避免更早的反问残留成「上一轮意图」（那是答错问题的成因）。
     pending = find_pending_clarify(state.get("session_id"))
     if not pending:
         return False
 
+    # 闸门②：把用户手输的展示名/别名对齐到目录标准主体名。
+    # 这里要做一次「向量检索 + select_item_names 判定」，是四条闸门里唯一较重的操作，
+    # 所以排在①之后；只有对齐上（得到 has confirmed_list 中的标准名）才继续。
     confirmed_name = _align_subject(original_query)
     if not confirmed_name:
+        # 对齐失败（模型/向量判定没确认出主体）→ 让路给常规「历史 + 模型改写」流程
         return False
 
+    # 闸门③：已对齐的主体名必须 ∈ 上一轮反问给出的候选集合。
+    # 只认候选，避免把「另一台设备」硬拼进上一轮意图，拼出垃圾问句。
+    # 用户可能手输展示名而非候选原文，故对每个候选都做一次对齐映射后比对。
     if confirmed_name not in set(pending["options"]):
         return False
 
-    # 闸门④：本轮自带意图（如「…烫金机怎么保养」）→ 尊重用户，不接管
+    # 闸门④：剔掉主体别名后若还剩下内容，说明用户自带意图（如「…烫金机怎么保养」），
+    # 尊重用户、不接管；只有剩下的为空（即原句其实只是主体名）才走兜底拼接。
     if _strip_subject_alias(original_query, confirmed_name):
         return False
 
+    # 四道闸门全过：回写「已确认主体 + 用上一轮反问意图原话拼装问句」。
+    # 顺带清空 options/answer，让后续路由不再把本轮当「待确认」，也不会短路去答反问话术。
     _apply_confirmed_subject(state, confirmed_name, pending["intent"])
     logger.info(
         f"手输兜底消解完成：主体={confirmed_name}，反问意图原话={pending['intent']}，"

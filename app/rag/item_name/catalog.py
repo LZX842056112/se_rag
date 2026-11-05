@@ -122,11 +122,8 @@ def expand_item_names(names: list[str]) -> list[str]:
 
 def match_catalog_exact(name: object) -> str | None:
     """归一化精确同名时返回库内标准名；否则 None。"""
-    key = normalize_item_name(name)
-    if not key:
-        return None
     for candidate in load_item_names():
-        if normalize_item_name(candidate) == key:
+        if normalize_item_name(candidate) == name:
             return candidate
     return None
 
@@ -137,11 +134,12 @@ def match_catalog_name(name: object) -> tuple[str, str] | None:
     先归一化精确同名，再退化为「同一实体」。命中方式 ∈
     ``{"catalog_exact", "catalog_entity"}``，便于日志区分并事后抽查误归并。
     """
+    name = normalize_item_name(name)
+    if not name:
+        return None
     exact = match_catalog_exact(name)
     if exact:
         return exact, "catalog_exact"
-    if not normalize_item_name(name):
-        return None
     for candidate in load_item_names():
         if is_same_entity(candidate, name):
             return candidate, "catalog_entity"

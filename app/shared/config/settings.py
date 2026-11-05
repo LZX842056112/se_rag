@@ -165,7 +165,7 @@ class EvolutionSettings:
 class AgenticSettings:
     """Agentic RAG 检索编排的运行时参数。"""
 
-    mode: str = 'legacy'  # 检索模式：legacy / agentic（RAG_MODE）
+    mode: str = 'agentic'  # 检索模式：legacy / agentic（RAG_MODE）
     policy_version: str = 'agentic-v1'  # Agentic 策略版本（RAG_POLICY_VERSION）
     gray_percent: int = 0  # 灰度放量比例 0-100（RAG_GRAY_PERCENT）
     decision_model: str = ''  # 决策/路由所用模型名，空则复用对话模型（AGENT_LLM_MODEL）
@@ -363,7 +363,7 @@ def _build_settings() -> Settings:
             default_issue_owner=env_str("DEFAULT_ISSUE_OWNER", ""),  # 问题默认负责人，默认空
         ),
         agentic=AgenticSettings(
-            mode=env_str('RAG_MODE', 'legacy'),  # 检索模式，默认 legacy
+            mode=env_str('RAG_MODE', 'agentic'),  # 检索模式，默认 legacy
             policy_version=env_str('RAG_POLICY_VERSION', 'agentic-v1'),  # 策略版本，默认 agentic-v1
             gray_percent=max(0, min(100, env_int('RAG_GRAY_PERCENT', 0))),  # 灰度放量比例 0-100，默认 0
             decision_model=env_str('AGENT_LLM_MODEL', ''),  # 决策模型名，默认空（复用对话模型）

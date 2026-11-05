@@ -55,31 +55,35 @@ def call_llm_classify_intent(history_text: str, original_query: str) -> str:
         prompt_text = load_prompt(
             "intent_classify", query=original_query, history_text=history_text
         )
+        # 信号量限流：拿不到并发名额立即降级为 rag，避免意图分类挤占不可控资源
         if not _INTENT_SLOTS.acquire(blocking=False):
             mark_degraded("intent_busy")
             return INTENT_RAG
+        # copy_context 把调用链的上下文字典（如 metrics）透传到线程池线程，保证子线程隔离可续
         context = copy_context()
         def invoke():
             try:
                 return context.run(llm_client.invoke, [HumanMessage(content=prompt_text)])
             finally:
-                _INTENT_SLOTS.release()
+                _INTENT_SLOTS.release()  # 无论成功失败都要归还并发名额
         try:
             future = _INTENT_POOL.submit(invoke)
         except BaseException:
-            _INTENT_SLOTS.release()
+            _INTENT_SLOTS.release()  # 提交本身失败时名额尚未被 invoke 持有，需在此手动释放
             raise
         try:
             response = future.result(timeout=INTENT_TIMEOUT_SECONDS)
         except FutureTimeout:
             mark_degraded("intent_timeout")
-            return INTENT_RAG
+            return INTENT_RAG  # 超时兜底：按知识库问答处理，不中断主链路
+        # 解析 LLM 返回的 JSON，取 intent 字段；缺失/为空也计入字段缺失分支由下方统一兜底
         result_dict = parse_json_object(response.content)
         intent = str(result_dict.get("intent") or "").strip().lower()
     except Exception as exc:  # noqa: BLE001 - 分类失败必须降级，不能升级成 500
         mark_degraded("intent_error")
         logger.warning(f"意图识别失败，按知识库问答处理：{exc}")
         return INTENT_RAG
+    # 枚举校验：输出不在 rag/chitchat 之内依旧按 rag 处理，宁可多查一次也不漏答
     if intent not in (INTENT_RAG, INTENT_CHITCHAT):
         mark_degraded("intent_invalid_output")
         logger.warning(f"意图识别输出不在枚举内，按知识库问答处理：intent={intent!r}")

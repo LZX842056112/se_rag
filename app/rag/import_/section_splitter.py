@@ -129,7 +129,9 @@ def _pack_blocks(blocks: list[Block]) -> list[str]:
     阈值 1 个字符就产出 [600, 56] 两块）。
     """
     parts: list[str] = []
+    # 当前正在累积的块文本列表
     current: list[str] = []
+    # 当前分组的预估总长度
     current_len = 0
 
     def flush() -> None:
@@ -251,7 +253,7 @@ def split_blocks(blocks: list[Block], doc_key: str, file_title: str) -> tuple[li
 def build_sections(blocks: list[Block], doc_key: str, file_title: str) -> tuple[list[dict], list[dict]]:
     """把 Block 流切分为章节，并产出「父块」与「章节（子块输入）」。
 
-    章节边界：本标题起，到**下一个层级 ≤ 本标题层级**的标题之前。因此：
+    章节边界：本标题起，到**下一个层级 ≤0 本标题层级**的标题之前。因此：
 
     - 无正文的章节标题（如 ``# 第3章`` 紧跟 ``## 3.1``）仍产出父块，标题不丢（修 P0-2）；
     - 父块 ``content`` 为整棵子树文本（提供完整背景），子块只取章节自身文本（避免重复入库）。
