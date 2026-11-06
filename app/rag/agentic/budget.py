@@ -17,7 +17,7 @@ class StopRun(RuntimeError):
     pass
 
 
-def selected_mode(session_id, *, mode='legacy', percent=0):
+def selected_mode(session_id, *, mode='agentic', percent=0):
     """按会话稳定分流：同样的 session_id 永远落到同一档位（agentic / legacy）。
 
     用 session_id 的 SHA-256 哈希取前 8 位十六进制再对 100 取模，得到一个 0~99
@@ -26,6 +26,8 @@ def selected_mode(session_id, *, mode='legacy', percent=0):
     """
     bucket = int(hashlib.sha256(str(session_id).encode()).hexdigest()[:8], 16) % 100
     return 'agentic' if mode == 'agentic' and bucket < percent else 'legacy'
+    # todo: 临时放量，后续根据需求调整
+    # return 'agentic' if mode == 'agentic' else 'legacy'
 
 
 class Budget:

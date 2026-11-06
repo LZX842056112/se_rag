@@ -26,6 +26,7 @@ from app.shared.utils.text import is_same_entity, split_subjects
 
 
 def remaining_seconds(deadline: float) -> float:
+    """返回距离截止时刻的剩余秒数；已超时则抛 TimeoutError 中断本轮检索。"""
     remaining = deadline - time.monotonic()
     if remaining <= 0:
         raise TimeoutError("retrieval deadline exceeded")
@@ -63,9 +64,14 @@ class RetrievalTools:
         self._owned_client = None
 
     def _config(self, key: str, default):
+        # 从 agentic 配置读取参数，缺省时回退到默认值，避免配置缺失导致崩溃。
         return getattr(getattr(settings, "agentic", SimpleNamespace()), key, default)
 
     def _scope(self, arguments: dict) -> RetrievalScope:
+        """构造检索作用域：以服务器确认的产品范围为基础，校验模型请求的收窄不越权。
+
+        模型只能把检索范围缩窄到服务器授权范围内，绝不能扩大访问其他产品/型号。
+        """
         item_names = self.state.get("item_names") or []
         if not isinstance(item_names, list) or not item_names or any(not isinstance(x, str) or not x.strip() for x in item_names):
             raise ValueError("a server-confirmed product scope is required")
@@ -106,6 +112,7 @@ class RetrievalTools:
 
     @staticmethod
     def _limit(arguments: dict) -> int:
+        """解析并校验返回条数上限（1~20）。"""
         value = arguments.get("limit", 5)
         if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 20:
             raise ValueError("limit must be between 1 and 20")
@@ -113,6 +120,7 @@ class RetrievalTools:
 
     @staticmethod
     def _query(arguments: dict) -> str:
+        """解析并校验查询文本（非空、1~4096 字符）。"""
         query = arguments.get("query")
         if not isinstance(query, str) or not query.strip() or len(query) > 4096:
             raise ValueError("query must contain 1 to 4096 characters")
@@ -140,9 +148,11 @@ class RetrievalTools:
 
     @staticmethod
     def _rpc_timeout(deadline: float) -> float:
+        """取「Milvus 配置超时」与「请求剩余时间」的较小者，确保任何 RPC 都不越过请求总截止。"""
         return min(float(settings.milvus.timeout_seconds), remaining_seconds(deadline))
 
     def _expression(self, scope: RetrievalScope, deadline: float) -> str:
+        """把检索作用域编译成 Milvus 过滤表达式（产品范围 ± 语料版本 ± 文档类型）。"""
         names = expand_scope_names(scope.item_names, deadline)
         expression = f"({in_expr('item_name', names)} or {eq_expr('item_name', GLOBAL_ITEM_NAME)})"
         if scope.corpus_version:
@@ -268,6 +278,7 @@ class RetrievalTools:
         return result
 
     def _hybrid(self, query: str, scope: RetrievalScope, limit: int, deadline: float, *, faq=False) -> list[dict]:
+        """稠密+稀疏混合检索（本地 BGE 向量 + Milvus WeightedRanker），可选只查已发布 FAQ。"""
         expression = self._expression(scope, deadline)
         if faq:
             expression = f"{eq_expr('status', 'active')} and ({expression})"
@@ -344,9 +355,11 @@ class RetrievalTools:
         return approved
 
     def _semantic_search(self, arguments, scope, limit, deadline):
+        """语义检索：默认走稠密+稀疏混合向量检索。"""
         return self._hybrid(self._query(arguments), scope, limit, deadline)
 
     def _keyword_search(self, arguments, scope, limit, deadline):
+        """关键词检索：在作用域内扫描语料做字面匹配，适合专有名词/编号等向量失配场景。"""
         terms = arguments.get("terms")
         if not isinstance(terms, list) or not 1 <= len(terms) <= 10 or any(
                 not isinstance(term, str) or not term.strip() or len(term) > 256 for term in terms):
@@ -368,6 +381,7 @@ class RetrievalTools:
         return matches
 
     def _read_chunk(self, arguments, scope, limit, deadline):
+        """深读指定 chunk 的正文，可按窗口带回前后邻近切片与章节父块内容。"""
         ids = arguments.get("chunk_ids")
         if not isinstance(ids, list) or not 1 <= len(ids) <= 20 or any(
                 not isinstance(cid, str) or not cid or len(cid) > 128 for cid in ids):
@@ -424,6 +438,7 @@ class RetrievalTools:
         return docs
 
     def _search_approved_faq(self, arguments, scope, limit, deadline):
+        """检索已审批发布的 FAQ（仅自进化召回开启时可用，并且商务场景强制回到原始政策证据）。"""
         from app.evolution.flags import recall_enabled
         if not recall_enabled():
             raise ConnectionError("approved FAQ recall is disabled")
@@ -432,6 +447,7 @@ class RetrievalTools:
         return self._hybrid(self._query(arguments), scope, limit, deadline, faq=True)
 
     def _web_search(self, arguments, scope, limit, deadline):
+        """联网搜索：仅允许常规业务场景，商务定价/售后等以事实政策为准的领域禁用。"""
         if self.state.get("business_tag") in {"pricing", "after_sales"}:
             raise ValueError("web results cannot support business policy promises")
         if not self._config("allow_web", True) or not settings.mcp.base_url or not settings.mcp.api_key:
@@ -453,6 +469,7 @@ class RetrievalTools:
 
     @staticmethod
     async def _request_web(query, limit, deadline):
+        """异步发起联网搜索请求，超时被收敛到剩余请求预算内。"""
         from app.shared.clients.mcp_web import request_web_search
         timeout = min(float(settings.mcp.timeout_seconds), remaining_seconds(deadline))
         return await request_web_search(

@@ -25,7 +25,7 @@ function harness({ storage = new Map(), requests = [], status, upload, base = 'h
     el.classList = { add(name) { el.className += ' ' + name; }, remove(name) { el.className = el.className.split(/\s+/).filter(value => value !== name).join(' '); } };
     return el;
   }
-  ['dropZone', 'fileInput', 'fileList', 'importToken', 'saveToken', 'documentKind', 'documentVersion', 'policyUntil'].forEach(id => {
+  ['dropZone', 'fileInput', 'fileList', 'importToken', 'saveToken', 'clearRecords', 'documentKind', 'documentVersion', 'policyUntil'].forEach(id => {
     const node = element(); node.id = id; nodes.set(id, node);
   });
   nodes.get('documentKind').value = 'manual';

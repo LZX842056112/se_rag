@@ -363,7 +363,7 @@ def _build_settings() -> Settings:
             default_issue_owner=env_str("DEFAULT_ISSUE_OWNER", ""),  # 问题默认负责人，默认空
         ),
         agentic=AgenticSettings(
-            mode=env_str('RAG_MODE', 'agentic'),  # 检索模式，默认 legacy
+            mode=env_str('RAG_MODE', 'agentic'),  # 检索模式，默认 agentic
             policy_version=env_str('RAG_POLICY_VERSION', 'agentic-v1'),  # 策略版本，默认 agentic-v1
             gray_percent=max(0, min(100, env_int('RAG_GRAY_PERCENT', 0))),  # 灰度放量比例 0-100，默认 0
             decision_model=env_str('AGENT_LLM_MODEL', ''),  # 决策模型名，默认空（复用对话模型）

@@ -84,7 +84,7 @@ query_graph_default_state: QueryGraphState = {
     "agentic_metrics": {},
     "agentic_stop_reason": "",
     "agentic_verified": False,
-    "query_mode": "legacy",
+    "query_mode": "agentic",
     "agentic_revalidation": [],
     "agentic_diagnostics": {},
     "embedding_chunks": [],
