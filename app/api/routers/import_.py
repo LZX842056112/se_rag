@@ -1,8 +1,8 @@
-"""导入服务路由：文件上传与任务状态查询。
+"""导入服务路由：文件上传、任务状态查询、失败重试与记录删除。
 
 加固要点：
 
-1. **鉴权**：上传与状态查询都要求请求头 ``X-Internal-Token`` 与 ``IMPORT_ADMIN_TOKEN`` 一致；
+1. **鉴权**：上传、状态查询、重试与删除都要求请求头 ``X-Internal-Token`` 与 ``IMPORT_ADMIN_TOKEN`` 一致；
    未配置 Token 时 **fail-closed**（503），避免「忘配 Token 等于无鉴权」。
 2. **入口校验**：文件数 → 文件名 → 后缀 → 大小 → 文件头（手写魔数，不依赖 libmagic）。
 3. **状态回退**：内存态未命中时读磁盘快照，进程重启后仍可查到最终状态。
@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import threading
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -21,22 +22,44 @@ import time
 from fastapi import Form, APIRouter, BackgroundTasks, Depends, Header, UploadFile
 
 from app.api.errors import ApiError
-from app.api.schema.import_schema import StatusResponseSchema, UploadResponseSchema
+from app.api.schema.import_schema import (
+    StatusResponseSchema,
+    TaskActionResponseSchema,
+    UploadResponseSchema,
+)
 from app.rag.import_.pipeline import invoke_import_graph
+from app.rag.import_.task_records import (
+    delete_task_artifacts,
+    find_source_file,
+    find_task_dir,
+    is_valid_task_id,
+    load_task_meta,
+    save_task_meta,
+)
 from app.shared.config import settings
 from app.shared.runtime.logger import logger
 from app.shared.utils.paths import PROJECT_ROOT
-from app.shared.utils.task_snapshot import load_snapshot
+from app.shared.utils.task_snapshot import delete_snapshot, load_snapshot, save_snapshot
 from app.shared.utils.task_state import (
+    TASK_STATUS_FAILED,
+    TASK_STATUS_PENDING,
+    TASK_STATUS_PROCESSING,
     add_done_task,
     add_running_task,
+    clear_task,
     get_done_task_list,
     get_running_task_list,
     get_task_error,
     get_task_status,
+    snapshot,
+    update_task_status,
 )
 
 router = APIRouter(prefix="/api/import", tags=["import"])
+
+# 重试与删除的状态检查在同一进程内互斥：同步端点跑在线程池里，
+# 不加锁时双击「重试」可能让两个请求同时通过 failed 检查，把同一文件导入两次。
+_STATE_CHANGE_LOCK = threading.Lock()
 
 _ALLOWED_SUFFIXES = (".md", ".pdf")
 # 文件头嗅探读取的字节数
@@ -156,6 +179,14 @@ def upload(background_tasks: BackgroundTasks, files: list[UploadFile], document_
         add_running_task(task_id, "upload_file")
         with local_file_path.open("wb") as buffer:
             shutil.copyfileobj(upload_file.file, buffer)
+        # 记录上传参数：失败重试时要还原资料类型、版本与失效时间
+        save_task_meta(
+            local_dir,
+            file_name=safe_name,
+            document_kind=document_kind,
+            document_version=document_version,
+            valid_until=valid_until,
+        )
         add_done_task(task_id, "upload_file")
     except OSError as exc:
         logger.exception(f"文件落盘失败：{exc}")
@@ -203,3 +234,101 @@ def task_status(task_id: str) -> StatusResponseSchema:
         error_code=error_code or None,
         message=message or None,
     )
+
+
+def _current_import_status(task_id: str) -> str:
+    """当前任务状态：内存优先，未命中时读磁盘快照；两处都没有返回空串。"""
+    status = get_task_status(task_id)
+    if status:
+        return status
+    saved = load_snapshot(task_id) or {}
+    return str(saved.get("status") or "")
+
+
+@router.post(
+    "/retry/{task_id}",
+    response_model=TaskActionResponseSchema,
+    dependencies=[Depends(require_import_admin_token)],
+)
+def retry_import(task_id: str, background_tasks: BackgroundTasks) -> TaskActionResponseSchema:
+    """重新执行失败的导入任务。
+
+    复用原任务目录与已落盘的原文件：用户不用重新选择文件，已生成的 MinerU 产物也能复用。
+    重试沿用原 task_id，前端无需更换轮询地址。
+    """
+    if not is_valid_task_id(task_id):
+        raise ApiError("invalid_task_id", "任务 ID 不合法", status_code=422)
+
+    with _STATE_CHANGE_LOCK:
+        status = _current_import_status(task_id)
+        if status in (TASK_STATUS_PENDING, TASK_STATUS_PROCESSING):
+            raise ApiError("import_in_progress", "任务正在执行，不能重复提交", status_code=409)
+        if status != TASK_STATUS_FAILED:
+            raise ApiError("import_not_failed", "只有失败的导入可以重试", status_code=409)
+
+        task_dir = find_task_dir(task_id)
+        if task_dir is None:
+            raise ApiError("import_source_missing", "原始文件已不存在，请重新上传", status_code=410)
+
+        meta = load_task_meta(task_dir)
+        file_name = str(meta.get("file_name") or "")
+        source_file = find_source_file(task_dir, file_name)
+        if source_file is None:
+            raise ApiError("import_source_missing", "原始文件已不存在，请重新上传", status_code=410)
+
+        document_kind = str(meta.get("document_kind") or "manual")
+        document_version = str(meta.get("document_version") or "")
+        try:
+            valid_until = float(meta.get("valid_until") or 0.0)
+        except (TypeError, ValueError):
+            valid_until = 0.0
+        if document_kind == "policy" and (
+            not document_version.strip() or valid_until <= time.time()
+        ):
+            raise ApiError(
+                "policy_metadata_expired",
+                "业务政策的版本或有效期已失效，请重新上传",
+                status_code=409,
+            )
+
+        # 清掉上一轮的进度与快照，再把状态置为排队中：第二个重试请求会看到 pending 而被拒绝
+        clear_task(task_id)
+        update_task_status(task_id, TASK_STATUS_PENDING)
+        save_snapshot(task_id, snapshot(task_id))
+
+    background_tasks.add_task(
+        invoke_import_graph,
+        task_id=task_id,
+        local_file_path=str(source_file),
+        local_dir=str(task_dir),
+        document_kind=document_kind,
+        document_version=document_version,
+        valid_until=valid_until,
+    )
+    logger.info(f"导入任务[{task_id}]已重新提交：{source_file.name}")
+    return TaskActionResponseSchema(code=200, message="已重新提交导入", task_id=task_id)
+
+
+@router.delete(
+    "/records/{task_id}",
+    response_model=TaskActionResponseSchema,
+    dependencies=[Depends(require_import_admin_token)],
+)
+def delete_import_record(task_id: str) -> TaskActionResponseSchema:
+    """删除一条导入记录：清理任务状态、磁盘快照与任务目录。
+
+    已入库的向量不会被删除；本接口只处理导入记录与本地中间产物。
+    进行中的任务不允许删除，避免产出无人跟踪的导入。
+    """
+    if not is_valid_task_id(task_id):
+        raise ApiError("invalid_task_id", "任务 ID 不合法", status_code=422)
+
+    with _STATE_CHANGE_LOCK:
+        if get_task_status(task_id) in (TASK_STATUS_PENDING, TASK_STATUS_PROCESSING):
+            raise ApiError("import_in_progress", "任务正在执行，暂不能删除", status_code=409)
+
+        clear_task(task_id)
+        delete_snapshot(task_id)
+        delete_task_artifacts(task_id)
+    logger.info(f"导入记录已删除：task_id={task_id}")
+    return TaskActionResponseSchema(code=200, message="导入记录已删除", task_id=task_id)

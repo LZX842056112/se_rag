@@ -13,12 +13,17 @@
 
   // 与服务端 IMPORT_MAX_UPLOAD_MB 默认值保持一致；本地先拦一次，避免白传超大文件
   const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
+  // 进行中的状态：这些记录不允许删除，重试也只在 failed 时开放
+  const ACTIVE_STATUSES = ['uploading', 'pending', 'processing'];
 
   const dropZone = document.getElementById('dropZone');
   const fileInput = document.getElementById('fileInput');
   const fileList = document.getElementById('fileList');
   const tokenInput = document.getElementById('importToken');
   const saveTokenBtn = document.getElementById('saveToken');
+  const clearRecordsBtn = document.getElementById('clearRecords');
+
+  clearRecordsBtn.addEventListener('click', clearRecords);
 
   // 导入令牌（IMPORT_ADMIN_TOKEN）：仅当前标签页会话有效，与审批令牌相互独立
   tokenInput.value = App.getImportToken();
@@ -50,7 +55,7 @@
 
   function saveTasks() {
     let finished = 0;
-    const active = new Set(['uploading', 'pending', 'processing']);
+    const active = new Set(ACTIVE_STATUSES);
     const rows = Array.from(taskRecords.values()).reverse().filter(row => active.has(row.status) || ++finished <= 50);
     try { sessionStorage.setItem(TASKS_KEY, JSON.stringify(rows)); } catch (_) { warnStorage(); }
   }
@@ -60,6 +65,7 @@
     if (!record) return;
     Object.assign(record, patch);
     saveTasks();
+    syncActions(itemEl);
   }
 
   function savedTasks() {
@@ -231,10 +237,141 @@
             <ul class="log-list"></ul>
           </details>
         </div>
-        <div class="status-badge status-uploading">上传中...</div>
+        <div class="item-side">
+          <div class="status-badge status-uploading">上传中...</div>
+          <div class="item-actions"></div>
+        </div>
       </div>
     `);
-    return document.getElementById(id);
+    const itemEl = document.getElementById(id);
+    buildActions(itemEl);
+    syncActions(itemEl);
+    return itemEl;
+  }
+
+  function buildActions(itemEl) {
+    const actions = itemEl.querySelector('.item-actions');
+    if (!actions) return;
+
+    const retry = App.create('button', 'record-btn', '重试');
+    retry.type = 'button';
+    retry.dataset.act = 'retry';
+    retry.addEventListener('click', () => retryRecord(itemEl));
+
+    const remove = App.create('button', 'record-btn danger', '删除');
+    remove.type = 'button';
+    remove.dataset.act = 'remove';
+    remove.addEventListener('click', () => confirmRemove(itemEl));
+
+    actions.appendChild(retry);
+    actions.appendChild(remove);
+  }
+
+  // 操作按钮只有在「可执行」时才显示：上传/处理中不显示任何按钮，避免误删正在跑的任务
+  function syncActions(itemEl) {
+    const record = taskRecords.get(itemEl.id);
+    const actions = itemEl.querySelector('.item-actions');
+    if (!record || !actions) return;
+
+    const active = ACTIVE_STATUSES.includes(record.status);
+    const retryBtn = actions.querySelector('[data-act="retry"]');
+    const removeBtn = actions.querySelector('[data-act="remove"]');
+    if (retryBtn) retryBtn.hidden = active || record.status !== 'failed' || !record.task_id;
+    if (removeBtn) removeBtn.hidden = active;
+  }
+
+  function removeRecord(itemEl) {
+    const record = taskRecords.get(itemEl.id);
+    if (record && record.task_id && pollTimers.has(record.task_id)) {
+      clearInterval(pollTimers.get(record.task_id));
+      pollTimers.delete(record.task_id);
+    }
+    taskRecords.delete(itemEl.id);
+    itemEl.remove();
+    saveTasks();
+    refreshEmptyHint();
+  }
+
+  async function retryRecord(itemEl) {
+    const record = taskRecords.get(itemEl.id);
+    if (!record || !record.task_id || record.status !== 'failed') return;
+
+    try {
+      const result = await App.fetchJson(App.PATHS.retryImport(record.task_id), {
+        method: 'POST', token: currentToken()
+      });
+      // 服务端沿用原 task_id：进度归零后重新轮询，前端不必更换地址
+      remember(itemEl, { status: 'pending', done_list: [], running_list: [], error_code: '', message: '' });
+      setBadge(itemEl, '处理中...', 'status-processing');
+      renderLogs(itemEl, [], []);
+      updateProgressBar(itemEl.querySelector('.progress-bar'), 0);
+      App.toast((result && result.message) || '已重新提交导入');
+      pollStatus(record.task_id, itemEl);
+    } catch (error) {
+      console.warn(error);
+      if (needsImportToken(error)) highlightTokenInput();
+      App.toast((error && error.message) || '重试失败');
+    }
+  }
+
+  async function confirmRemove(itemEl) {
+    const record = taskRecords.get(itemEl.id);
+    if (!record) return;
+    if (ACTIVE_STATUSES.includes(record.status)) {
+      App.toast('任务进行中，暂不能删除');
+      return;
+    }
+    if (!(await App.confirm(`确认删除「${record.name}」的导入记录？`, { confirmText: '删除', danger: true }))) return;
+    await deleteRecord(itemEl, false);
+  }
+
+  // silent=true 时用于「清空记录」批量删除：不逐条确认，失败原因由调用方汇总
+  async function deleteRecord(itemEl, silent) {
+    const record = taskRecords.get(itemEl.id);
+    if (!record) return true;
+    if (ACTIVE_STATUSES.includes(record.status)) return false;
+
+    if (record.task_id) {
+      try {
+        await App.fetchJson(App.PATHS.importRecord(record.task_id), {
+          method: 'DELETE', token: currentToken()
+        });
+      } catch (error) {
+        console.warn(error);
+        if (needsImportToken(error)) highlightTokenInput();
+        // 服务端已无这条记录时仍允许清理本地展示（404/410 属幂等删除）
+        if (!(error && (error.status === 404 || error.status === 410))) {
+          if (!silent) App.toast((error && error.message) || '删除失败');
+          return false;
+        }
+      }
+    }
+    removeRecord(itemEl);
+    return true;
+  }
+
+  async function clearRecords() {
+    const records = Array.from(taskRecords.values());
+    const removable = records.filter(record => !ACTIVE_STATUSES.includes(record.status));
+    if (!removable.length) {
+      App.toast(records.length ? '进行中的任务不能删除，请等待完成' : '暂无导入记录');
+      return;
+    }
+    if (!(await App.confirm(`确认删除全部 ${removable.length} 条导入记录？`, {
+      confirmText: '全部删除', danger: true
+    }))) return;
+
+    let failed = 0;
+    for (const record of removable) {
+      const itemEl = document.getElementById(record.id);
+      if (!itemEl) continue;
+      if (!(await deleteRecord(itemEl, true))) failed += 1;
+    }
+
+    const kept = taskRecords.size;
+    if (failed) App.toast(`有 ${failed} 条记录删除失败，请稍后重试`);
+    else if (kept) App.toast('已删除可删除的记录，进行中的任务保留');
+    else App.toast('导入记录已清空');
   }
 
   function resumePolling(restart = false) {

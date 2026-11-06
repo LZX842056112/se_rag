@@ -27,7 +27,9 @@
       return '/api/evolution/candidates/' + encodeURIComponent(id);
     },
     upload: '/api/import/upload',
-    taskStatus: function (taskId) { return '/api/import/status/' + encodeURIComponent(taskId); }
+    taskStatus: function (taskId) { return '/api/import/status/' + encodeURIComponent(taskId); },
+    retryImport: function (taskId) { return '/api/import/retry/' + encodeURIComponent(taskId); },
+    importRecord: function (taskId) { return '/api/import/records/' + encodeURIComponent(taskId); }
   };
 
   var state = {

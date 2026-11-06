@@ -36,6 +36,16 @@ def save_snapshot(task_id: str, payload: dict[str, Any]) -> None:
         logger.warning(f"任务快照写入失败（忽略）：task_id={task_id}：{exc}")
 
 
+def delete_snapshot(task_id: str) -> None:
+    """删除任务快照（删除导入记录时清理）；不存在不报错。"""
+    if not task_id:
+        return
+    try:
+        snapshot_path(task_id).unlink(missing_ok=True)
+    except OSError as exc:  # noqa: BLE001 - 清理失败只告警，不影响记录删除
+        logger.warning(f"任务快照删除失败（忽略）：task_id={task_id}：{exc}")
+
+
 def load_snapshot(task_id: str) -> dict[str, Any] | None:
     """读取任务快照；不存在或损坏时返回 ``None``。"""
     if not task_id:

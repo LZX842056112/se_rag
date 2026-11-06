@@ -16,3 +16,9 @@ class StatusResponseSchema(BaseModel):
     # 失败分类：机器码 + 中文提示（成功任务为空）
     error_code:str | None=None
     message:str | None=None
+
+class TaskActionResponseSchema(BaseModel):
+    """重试 / 删除记录的统一响应。"""
+    code:int=200
+    message:str | None=None
+    task_id:str | None=None

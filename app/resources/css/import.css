@@ -29,7 +29,25 @@ body{
 .upload-icon{font-size:40px;line-height:1;margin-bottom:8px}
 .upload-hint{color:var(--muted);font-size:13px;margin:0}
 .file-input{display:none}
-.file-list{margin-top:18px}
+.file-list{margin-top:10px}
+.list-head{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-top:18px;
+}
+.list-title{font-weight:600;font-size:14px}
+.list-clear{
+  padding:6px 12px;
+  border:1px solid var(--border);
+  border-radius:6px;
+  font-size:12px;
+  font-family:var(--font-base);
+  color:var(--muted);
+  background:var(--panel);
+  cursor:pointer;
+}
+.list-clear:hover{border-color:var(--danger);color:var(--danger)}
 .file-item{
   display:flex;
   justify-content:space-between;
@@ -54,6 +72,27 @@ body{
   min-width:82px;
   text-align:center;
 }
+.item-side{
+  flex:0 0 auto;
+  display:flex;
+  flex-direction:column;
+  align-items:flex-end;
+  gap:8px;
+}
+.item-actions{display:flex;gap:6px}
+.record-btn{
+  padding:4px 10px;
+  border:1px solid var(--border);
+  border-radius:6px;
+  font-size:12px;
+  font-family:var(--font-base);
+  color:var(--muted);
+  background:var(--panel);
+  cursor:pointer;
+}
+.record-btn:hover{border-color:var(--brand);color:var(--brand)}
+.record-btn.danger:hover{border-color:var(--danger);color:var(--danger)}
+.record-btn[hidden]{display:none}
 .status-uploading{background:#f2a33c}
 .status-processing{background:var(--brand)}
 .status-completed{background:var(--ok)}
