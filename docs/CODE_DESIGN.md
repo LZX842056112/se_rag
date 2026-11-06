@@ -1,563 +1,502 @@
-# se_rag 代码设计文档
+# 代码设计（CODE_DESIGN）
 
-## 1. 设计基线
+本文说明系统的模块边界、数据契约、关键流程与设计取舍。产品需求见 `docs/PRD.md`，逐段技术讲解与运维手册见 `docs/TECHNICAL_GUIDE.md`。
 
-本文描述 `codex/agentic-rag-next` 分支的当前工作区，包括尚未提交的代码。核对日期为 2026-11-05。
+## 1. 设计目标
 
-本文说明代码当前如何工作。未实现的扩展只在第 14 节列出。产品要求见 [PRD](PRD.md)。安装步骤见 [README](../README.md)。概念解释见[技术讲解](TECHNICAL_GUIDE.md)。
+1. **可追溯**：每个答案都能回到原始文档、切片、页码与版本。
+2. **可控**：模型只能使用服务端授权的主体范围；价格/售后只认有效政策。
+3. **可恢复**：导入、发布、缺口处理都可重试；中断不丢状态。
+4. **可演进**：知识缺口能沉淀为候选，经人工审批后上线。
+5. **可测试**：主要流程可在离线环境验证，不依赖真实外部服务。
 
-## 2. 模块与职责
+## 2. 运行视图
 
-### 2.1 HTTP 层：`app/api`
-
-- `http/import_server.py`：创建导入 FastAPI 应用。
-- `http/query_server.py`：创建查询应用，管理单 worker 租约和知识改进调度器。
-- `routers/`：处理查询、导入、历史、审批、待办、页面和健康检查。
-- `schema/`：定义查询与导入接口模型。
-- `session_access.py`：绑定浏览器 Cookie 与会话归属。
-- `errors.py`：把异常转换成统一错误响应。
-
-HTTP 层负责输入校验和调用边界。重试、检索和发布规则主要位于业务模块。
-
-### 2.2 流程层：`app/process`
-
-流程层使用 LangGraph。图声明节点顺序与条件分支。节点将状态交给业务服务，并更新进度。
-
-- [导入图](../app/process/import_/agent/main_graph.py)编译为 `import_app`。
-- [查询图](../app/process/query/agent/main_graph.py)编译为 `query_app`。
-- 两个 `state.py` 定义图内传递的字典字段。
-
-### 2.3 业务层：`app/rag`
-
-- `import_/`：文件读取、解析、图像增强、切分、主体识别、向量化和索引写入。
-- `query/`：意图识别、主体确认、检索、融合、重排、父块回溯、作答和引用。
-- `agentic/`：工具契约、证据契约、预算和检索控制器。
-- `item_name/`：共享主体名目录、别名对齐和匹配规则。
-
-`pipeline.py` 是业务执行入口。它管理一次任务的开始、结束和异常处理。
-
-### 2.4 知识管理层：`app/evolution`
-
-该模块处理反馈、缺口、候选、审批、发布、下架、上线观察和有限参数调整。`repositories.py` 提供 Mongo 集合访问器。
-
-### 2.5 基础能力与界面
-
-- `app/shared/config/`：配置加载与配置对象。
-- `app/shared/clients/`：MongoDB、Milvus、MinIO、MCP 和父块仓储。
-- `app/shared/models/`：对话、视觉、向量和重排模型入口。
-- `app/shared/runtime/`：日志、截止时间、单 worker 锁和查询指标。
-- `app/shared/utils/`：任务状态、SSE、快照和公共函数。
-- `app/resources/`：网页、脚本、样式和提示词。
-- `app/rag_eval/`：检索、答案、Agentic 和网页试用评测。
-
-当前代码存在业务服务导入图状态类型的依赖。它不是完全单向的分层结构。修改状态字段时，需要同时检查流程层和业务层。
-
-## 3. 进程与调用关系
-
-```mermaid
-flowchart TD
-    Browser[浏览器] --> Routes[FastAPI 路由]
-    Routes --> ImportPipeline[导入 pipeline]
-    Routes --> QueryPipeline[查询 pipeline]
-    Routes --> AdminService[审批与问题服务]
-    ImportPipeline --> ImportGraph[LangGraph 导入图]
-    QueryPipeline --> QueryGraph[LangGraph 查询图]
-    ImportGraph --> ImportServices[导入业务服务]
-    QueryGraph --> QueryServices[传统查询业务服务]
-    QueryGraph --> Agentic[Agentic 控制器]
-    Agentic --> ReadTools[只读检索工具]
-    ImportServices --> Shared[客户端与模型]
-    QueryServices --> Shared
-    ReadTools --> Shared
-    AdminService --> Governance[发布治理]
-    Scheduler[进程内调度器] --> Governance
-    Governance --> Shared
-```
-
-两个应用分别监听端口。导入任务通过 FastAPI `BackgroundTasks` 启动。查询可以同步执行，也可以先返回任务标识后在后台执行。
-
-当前没有独立的消息队列或通用任务服务。知识发布任务例外：它们在 Mongo 中持久化，并由治理逻辑重试。
-
-## 4. 配置和模型设计
-
-### 4.1 配置加载
-
-[common.py](../app/shared/config/common.py)加载 `.env`，并提供布尔、整数、浮点和字符串解析函数。`load_dotenv(override=True)` 允许 `.env` 覆盖进程中的同名配置。
-
-[settings.py](../app/shared/config/settings.py)构造聚合配置对象。
-
-模型子对象为 `llm`、`embedding`、`reranker` 和 `evaluation`。存储及外部服务子对象为 `milvus`、`mongo`、`minio`、`mineru` 和 `mcp`。其余主要子对象为 `api`、`import_`、`evolution`、`agentic` 和 `runtime`。
-
-部分调优参数仍在领域 `config.py` 中读取。审批令牌在路由中读取环境变量。因此，不能只检查 `settings.py` 就认定已找到全部配置。
-
-`PROJECT_ROOT` 优先使用环境变量。没有该变量时，路径工具向上查找 `.env`。找不到根标识时会抛错。
-
-### 4.2 模型能力入口
-
-[LLMProvider](../app/shared/models/providers.py)提供以下方法：
-
-- `chat()`：创建对话客户端。可以指定 JSON 输出和请求超时。
-- `vision_chat()`：创建视觉客户端。
-- `generate_embeddings()`、`embed_text()`：生成 BGE-M3 向量。
-- `reranker_model()`：获取 BGE-Reranker。
-
-向量模型与重排模型在首次使用时加载，并在进程内复用。对话和视觉使用外部兼容接口。
-
-Agentic 决策、覆盖检查和答案核验使用 `AGENT_LLM_MODEL`。该值为空时复用默认对话模型。答案起草使用默认对话模型。当前没有备用模型或供应商自动切换逻辑。
-
-### 4.3 关键默认值
-
-- HTTP 端口：导入 `8000`，查询 `8001`。
-- 浏览器会话归属检查：开启。
-- 文件上限：`50 MB`。导入并发：每进程 `2` 个。
-- 导入执行次数上限：`3` 次。名额等待上限：`600` 秒。
-- 切分参数：目标 `600` 字符，拆分上限参数 `1000` 字符，拆分重叠 `50` 字符，短块合并阈值 `400` 字符。
-- 闲聊分类：开启。默认等待 `2` 秒。
-- HyDE 短事实分流：关闭。
-- RRF：`k=60`，默认 Top `5`。
-- 重排：默认最多选择 `6` 条。FAQ 补回后可能超过该数值。
-- 父块背景：单块 `1200` 字符，总计 `4000` 字符。
-- Agentic：工具 `4` 次，联网 `1` 次，修复 `1` 次，证据计量 `8000`，时间预算 `60` 秒。
-- 知识改进总开关：关闭。自动调参：关闭。
-- 调度周期：`30` 分钟。指标周期：`60` 分钟。回测周期：`24` 小时。
-
-这些值是源码默认值。它们不是当前机器的实际配置，也不是性能验收值。
-
-## 5. 导入流程设计
-
-### 5.1 状态和入口
-
-[ImportGraphState](../app/process/import_/agent/state.py)保存四组数据：
-
-- 输入：`task_id`、文件路径、任务目录和资料类型。
-- 解析：`md_path`、`pdf_path`、`md_content` 和文件类型标记。
-- 知识：`file_title`、`item_name`、`chunks` 和 `parent_chunks`。
-- 写入：`embeddings_content`、`document_version` 和 `valid_until`。
-
-`create_default_state()` 对默认字典进行深拷贝。每个任务获得独立的列表。
-
-执行入口为：
-
-```python
-def invoke_import_graph(
-    task_id: str,
-    local_file_path: str,
-    local_dir: str,
-    document_kind: str = "manual",
-    document_version: str = "",
-    valid_until: float = 0.0,
-) -> None:
-    ...
-```
-
-### 5.2 节点顺序
-
-```mermaid
-flowchart TD
-    Entry[node_entry] --> Kind{文件类型}
-    Kind -->|PDF| PDF[node_pdf_to_md]
-    Kind -->|Markdown| Images[node_md_img]
-    PDF --> Images
-    Images --> Split[node_document_split]
-    Split --> Item[node_item_name_recognition]
-    Item --> Embed[node_bge_embedding]
-    Embed --> Index[node_import_milvus]
-```
-
-PDF 解析向 MinerU 申请上传地址，上传文件，再按批次轮询。完成后下载 ZIP 并选择主 Markdown。
-
-图像增强只处理 Markdown 同目录 `images/` 中被引用的本地图像。它为图像生成视觉摘要，再上传到 MinIO。单图失败可以降级。上传接口没有提供图像目录或 ZIP 的独立上传协议。
-
-### 5.3 结构切分
-
-[split_service.py](../app/rag/import_/split_service.py)优先读取 `*_content_list.json`。文件缺失、JSON 读取失败、列表校验失败或归一化结果为空时，回退到 Markdown 解析。其他归一化异常仍可能导致导入失败。
-
-[section_splitter.py](../app/rag/import_/section_splitter.py)按标题结构组织父块与子块：
-
-1. 父块保存章节正文及子节正文。
-2. 子块只使用本节正文，避免重复包含子节内容。
-3. 段落、图像、表格和代码作为原子块参与打包。
-4. 原子块过长时，再执行内部拆分。
-5. 长表格拆分重复表头。长代码拆分补齐围栏。
-6. 同章节短块尝试合并。不同章节保持来源边界。
-
-切分长度按正文字符比较。标题前缀不计入这些阈值。特殊结构可能带来额外长度，因此不能把配置值当作所有输出的绝对字节上限。
-
-### 5.4 主体识别与向量化
-
-主体识别默认读取前 `10` 个子块。空结果回退到文件标题。匹配服务再将名称对齐到已有主体目录，并回填父块和子块。
-
-向量化输入包含主体名和正文。BGE-M3 同时返回 `dense` 和 `sparse`。默认每批处理 `6` 个子块。
-
-### 5.5 写入顺序和一致性
-
-主体名记录在主体识别阶段更新。子块在最终索引阶段按批次 upsert。默认每批 `500` 条。
-
-子块全部写入后，代码清理相同 `file_title` 下已经不存在的旧子块 ID。随后写入 Mongo 父块，并清理旧父块。最后执行跨存储对账。
-
-父块写入错误只记录日志。对账只记录差异，不执行补写或回滚。导入成功状态不等于已证明三个存储完全一致。
-
-任务失败后可能已留下图像、主体名或部分向量批次。当前没有跨库事务，也没有全局导入孤儿数据修复任务。
-
-## 6. 查询流程设计
-
-### 6.1 状态和生命周期
-
-[QueryGraphState](../app/process/query/agent/state.py)保存：
-
-- 请求：`session_id`、`turn_id`、`original_query`、`rewrite_hint`、`is_stream`。
-- 路由：`intent`、`item_names`、`item_name_options`、`rewritten_query`、`query_mode`。
-- 检索：普通、HyDE、网页、FAQ、RRF 和重排结果。
-- 答案：正文、图像、引用、接地性、答案 ID 和实际答案上下文。
-- 业务：业务标签、转交标记、问题类型和问题 ID。
-- Agentic：轨迹、证据清单、停止原因、核验结果和指标。
-
-`create_query_default_state()` 深拷贝默认状态。内部字段不全部对外公开。
-
-[reserve_query()](../app/rag/query/lifecycle.py)先登记轮次，再启动后台任务。`finally` 中释放该轮准入，并记录执行指标。同一会话已有活动任务时返回 `409`。
-
-### 6.2 主体与模式路由
-
-```mermaid
-flowchart TD
-    Intent[意图识别] --> IsChat{闲聊}
-    IsChat -->|是| Chat[闲聊作答]
-    IsChat -->|否| Subject[主体确认]
-    Subject --> Clarify{已有澄清或兜底答案}
-    Clarify -->|是| Answer[答案节点]
-    Clarify -->|否| Mode{会话灰度选择}
-    Mode -->|legacy| Legacy[传统流程]
-    Mode -->|agentic| Agent[Agentic 控制器]
-```
-
-规则可直接识别纯寒暄和业务问题。其余问题可以调用分类模型。分类超时、繁忙或输出非法时，降级为 RAG。
-
-`rewrite_hint` 表示用户选择主体前的问题意图。存在该值时，主体服务优先确定性拼装问题，避免历史改写改变问题。
-
-模式选择使用会话 ID 的 SHA-256 分桶。`RAG_MODE=agentic` 且桶值小于灰度比例时，才选择 Agentic。代码默认比例为 `0`。
-
-### 6.3 传统检索流程
-
-```mermaid
-flowchart LR
-    Subject[已确认主体] --> KB[普通检索与可选 FAQ 召回]
-    Subject --> HyDE[HyDE 检索]
-    Subject --> Web[MCP 联网搜索]
-    KB --> RRF[RRF 融合]
-    HyDE --> RRF
-    RRF --> Rank[重排并合入网页]
-    Web --> Rank
-    Rank --> Parent[父块回溯]
-    Parent --> Answer[业务检查与作答]
-```
-
-图运行时，三路召回都完成后进入后续节点。网页不参与 RRF 分数计算。
-
-普通检索使用稠密与稀疏混合检索。默认权重为 `0.6` 和 `0.4`。主体过滤还放行全局条目。FAQ 召回可以复用同一查询向量。
-
-RRF 按各路排名计算分数：
+系统由两个独立 FastAPI 进程组成，共用一套代码与配置。
 
 ```text
-某个子块的分数 = 各召回路的 weight / (k + rank) 之和
-rank 从 1 开始；默认 k = 60
+导入进程 :8000
+  ├─ 上传 / 状态 / 重试 / 删除接口
+  ├─ 导入图（LangGraph）
+  └─ 进程内并发闸门 + 磁盘任务快照
+
+问答进程 :8001
+  ├─ 提问 / SSE / 历史 / 反馈 / 自进化接口
+  ├─ 查询图（LangGraph）
+  ├─ Agentic 控制器
+  ├─ 自进化调度器
+  └─ 单 worker 租约 + 模型预热
 ```
 
-重排合入网页结果，并对长文本进行压缩。动态截断后可以补回 FAQ。本地有结果时，网页默认最多保留 `2` 条。该规则不保证所有本地结果都排在所有网页之前。
+设计取舍：
 
-父块只作为背景。默认单父块最多使用 `1200` 字符，全部父块最多 `4000` 字符，同一父块只注入一次。
+- 导入与查询分离，重任务不会阻塞在线问答。
+- 查询服务用文件锁保证单 worker。任务状态、SSE 频道、每个会话的并发锁都在进程内，多 worker 会失去一致性。
+- 导入并发用 `BoundedSemaphore` 限制，避免后台线程池被打满。
 
-## 7. Agentic 控制器设计
+## 3. 分层与模块职责
 
-### 7.1 数据契约
+| 层 | 路径 | 职责 |
+|---|---|---|
+| 接入层 | `app/api/http/` | 服务入口、生命周期、路由挂载 |
+| 路由层 | `app/api/routers/` | 参数校验、鉴权、响应封装 |
+| 编排层 | `app/process/import_/agent/`、`app/process/query/agent/` | LangGraph 图与节点 |
+| 业务层 | `app/rag/import_/`、`app/rag/query/`、`app/rag/agentic/`、`app/rag/item_name/` | 解析、切分、检索、作答、Agentic、主体匹配 |
+| 进化层 | `app/evolution/` | 反馈、缺口、候选、审批、索引、调度、指标、调参、回测 |
+| 共享层 | `app/shared/` | 配置、存储客户端、模型、日志、SSE、任务状态、通用工具 |
+| 页面层 | `app/resources/` | 对话页、导入页、审批页与静态资源 |
+| 评估层 | `app/rag_eval/` | 离线评估、切分评估、答案质量、Agentic 对比、隔离联调 |
 
-[contracts.py](../app/rag/agentic/contracts.py)定义三个 Pydantic 模型：
+## 4. 数据契约
 
-- `RetrievalScope`：服务器确认的主体、可选语料版本和文档类型。
-- `EvidenceRef`：证据 ID、正文、来源、内容 SHA-256、页码、文档版本、政策有效期和来源状态。
-- `ToolResult`：状态、证据、耗时、计量值和错误。
+### 4.1 Milvus
 
-工具状态为 `ok`、`empty`、`timeout`、`unavailable` 或 `invalid`。空结果与服务故障有不同语义。
+#### `kb_chunks`（子块主集合）
 
-### 7.2 执行循环
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `chunk_id` | VARCHAR(40)，主键 | 确定性哈希：`doc_key#heading_path#occurrence#part` |
+| `doc_id` | VARCHAR(64) | 文档级稳定标识 |
+| `parent_id` | VARCHAR(40) | 章节父块标识 |
+| `file_title` | VARCHAR(512) | 文件标题 |
+| `item_name` | VARCHAR(512) | 主体标准名 |
+| `title` | VARCHAR(512) | 子块标题 |
+| `parent_title` | VARCHAR(512) | 父块标题 |
+| `heading_path` | VARCHAR(1024) | 标题面包屑 |
+| `content` | VARCHAR(65535) | 子块正文 |
+| `content_hash` | VARCHAR(40) | 正文指纹 |
+| `document_kind` | VARCHAR(16) | `manual` / `policy` |
+| `document_version` | VARCHAR(128) | 文档版本 |
+| `part` | INT16 | 章节内子块序号 |
+| `seq` | INT32 | 文档内顺序 |
+| `page` | INT32 | 页码 |
+| `valid_until` | DOUBLE | 政策失效时间戳 |
+| `dense_vector` | 稠密向量 | BGE-M3 dense |
+| `sparse_vector` | 稀疏向量 | BGE-M3 sparse |
 
-```mermaid
-flowchart TD
-    Initial[初始语义检索] --> Assess[检查覆盖情况]
-    Assess --> Coverage{证据结论}
-    Coverage -->|充分且已读取| Draft[起草答案]
-    Coverage -->|缺失或冲突| Choose[选择下一工具]
-    Choose --> Budget{预算允许}
-    Budget -->|是| Tool[执行只读工具]
-    Tool --> Assess
-    Budget -->|否| Stop[补充资料或负责人核实提示]
-    Draft --> Verify[核验答案与来源]
-    Verify -->|通过| Final[发布答案]
-    Verify -->|允许修复| Draft
-    Verify -->|无法修复| Stop
-```
+索引：`dense` 使用 COSINE，`sparse` 使用 IP。`auto_id=False`，主键由业务生成。
 
-进入检索循环后，初始语义检索必执行，并计入工具预算。投诉分支直接应用业务规则，不执行检索循环。覆盖结论为 `supported`、`missing` 或 `conflicting`。
+#### `kb_item_names`（主体名目录）
 
-### 7.3 五个工具
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `pk` | INT64，自增主键 | 无业务含义 |
+| `file_title` | VARCHAR(512) | 来源文档 |
+| `item_name` | VARCHAR(512) | 主体标准名 |
+| `dense_vector` / `sparse_vector` | 向量 | 主体名向量 |
 
-- `semantic_search`：在允许范围内执行混合检索。
-- `keyword_search`：有界扫描后执行字面包含匹配。默认扫描上限为 `500`。结果是未读取摘要，必须再读取原文。
-- `read_chunk`：读取指定块，可附加同文档、同版本邻块和父块。
-- `search_approved_faq`：检索已发布知识，并以 Mongo 当前状态和正文为准。
-- `web_search`：调用 MCP，保留抓取时间和网页来源。
+写入策略：先插入新行并取回自增 pk，再删除该 `file_title` 下其他 pk。避免“先删后插”造成主体名丢失。
 
-搜索工具的结果数默认是 `5`，允许范围为 `1～20`。`read_chunk` 按 `1～20` 个指定 ID 读取，还可加入邻块。因此，读取结果数可能超过 `20`。邻块窗口默认为 `1`，配置范围为 `0～2`。
+#### `kb_evolution_items`（已审批 FAQ）
 
-关键词扫描不是 BM25。超过扫描上限时，工具可以返回不可用，并提示需要词法索引。
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `evo_doc_id` | VARCHAR(128)，主键 | 由发布任务 ID 派生 |
+| `faq_question` | VARCHAR(512) | 规范问题 |
+| `faq_answer` | VARCHAR(65535) | 答案正文 |
+| `source_refs` | VARCHAR(2048) | 来源切片 |
+| `item_name` | VARCHAR(512) | 主体标准名 |
+| `status` | VARCHAR(32) | `active` 等 |
+| `file_title` | VARCHAR(512) | 固定为 `__evolution__` |
 
-### 7.4 预算与停止
+扩展字段：`source_version`、`document_version`、`publication_status`、`knowledge_origin`、`index_version`、`source_versions`、`manual_edited_at`、`approved_at`、`approved_content_sha256`、`dense_vector`、`sparse_vector`。
 
-预算累计工具次数、联网次数、证据计量和经过时间。重复工具与参数、连续两次没有新证据、预算耗尽和截止时间到达，都会停止循环。
+索引：`dense` 使用 IP（稠密向量已 L2 归一化）。
 
-未配置本地 tokenizer 时，证据计量使用 UTF-8 字节数上界。计量对象为工具返回的可见证据 JSON。它不是完整模型输入的 token 数量，也不是完整上下文窗口保证。
+### 4.2 MongoDB 集合
 
-截止时间向模型请求和支持超时的客户端传递。模型 SDK 重试关闭。同步本地推理只在执行前后检查时间，不能强制中断。
+| 集合 | 用途 | 关键索引 |
+|---|---|---|
+| `chat_message` | 会话消息 | `(session_id, ts desc)` |
+| `query_sessions` | 会话归属 | `_id = session_id` |
+| `query_runs` | 查询指标 | `turn_id` 唯一、`ts desc` |
+| `query_feedback` | 显式反馈 | `answer_id` 唯一 |
+| `query_issues` | 未解决问题 | `(status, created_at desc)`；`_id` 由固定键派生，重复登记幂等 |
+| `fb_events` | 反馈事件 | `(session_id, ts desc)`、`ts desc` |
+| `k_gaps` | 知识缺口 | `(session_id, ts desc)`、来源唯一约束 |
+| `k_candidates` | 知识候选 | `faq_question`、`status` |
+| `k_candidates_publication_tasks` | 发布任务队列 | 任务状态与租约 |
+| `k_metrics` | 指标快照 | `ts desc` |
+| `param_registry` | 自调参数 | `key` 唯一 |
+| `kb_parent_chunks` | 章节父块 | `parent_id` 唯一、`doc_id` |
 
-### 7.5 发布前检查
+### 4.3 MinIO
 
-起草前检查证据是否已读取。起草前和核验后复查本地知识与 FAQ。检查包括当前正文、版本、审批状态和政策有效期。
+- 对象键：`<image_dir>/<stem>/<image_name>`
+- 访问地址：`<scheme>://<endpoint>/<bucket>/<object_key>`
+- 导入时先上传新图，再清理本次未引用的旧对象。
 
-网页证据保留为带时间戳的搜索快照。复查不重新抓取网页，也不能证明网页此刻仍未变化。
-
-模型草稿通过核验后，控制器一次发送完整正文 `delta`。固定失败提示和业务处理提示可以直接发送。
-
-内部 `agentic_trace` 和 `evidence_manifest` 不直接加入公开 HTTP 答案。公开 `metrics` 可以包含 Agentic 指标。
-
-失败后没有自动切换回传统流程。最终可以返回资料补充提示，并设置 `handoff_required=true`。
-
-## 8. 存储和标识设计
-
-### 8.1 文档与块标识
-
-[ids.py](../app/rag/import_/ids.py)生成确定性标识：
-
-- `file_title`：文件名去后缀。
-- `doc_id`：标题去首尾空白并转小写后，计算 SHA-1。
-- `parent_id`：加入标题路径和重复路径序号。
-- `chunk_id`：再加入章节内块序号。
-- `content_hash`：单独表示正文内容变化。
-
-ID 不包含租户、目录或完整文件内容。同名文档共享文档标识。大小写不同的标题也可能共享 `doc_id`，但旧子块清理按精确 `file_title` 匹配。重导时需要检查这一边界。
-
-位置 ID 稳定，不表示正文永远不变。插入章节或改变块序号，也可能改变后续块的 ID。
-
-### 8.2 Milvus
-
-主集合使用字符串 `chunk_id` 主键，关闭自动 ID。核心字段包括：
+### 4.4 本地目录
 
 ```text
-身份：chunk_id, doc_id, parent_id, file_title, item_name
-结构：title, parent_title, heading_path, part, seq, page
-内容：content, content_hash
-政策：document_kind, document_version, valid_until
-向量：dense_vector, sparse_vector
+output/
+├─ <YYYYMMDD>/
+│  └─ <task_id>/
+│     ├─ <原文件>
+│     ├─ <stem>.zip                # MinerU 结果压缩包
+│     ├─ <stem>/                   # 解压后的 Markdown、content_list、images
+│     ├─ <stem>_new.md             # 图片增强后的 Markdown
+│     └─ _import_meta.json         # 重试用的上传参数
+└─ tasks/
+   └─ <task_id>.json               # 任务状态磁盘快照
 ```
 
-稠密向量为 `1024` 维，使用 HNSW/COSINE。稀疏向量使用 SPARSE_INVERTED_INDEX/IP。主体名集合另用自增 INT64 主键。
+## 5. 导入子系统
 
-写入前对齐字段、补默认值，并按 UTF-8 字节截断字符串。正文 VARCHAR 上限为 `65535` 字节。
+### 5.1 入口
 
-已有集合不会自动增加字段或更换主键。`schema_migration.py` 中强制迁移会删除并重建集合。执行前需要数据备份和重导方案。
+`app/api/routers/import_.py`：
 
-### 8.3 MongoDB
+1. `require_import_admin_token` 校验 `X-Internal-Token`。
+2. `validate_upload_files` 校验文件数量、名称、后缀、大小、文件头。
+3. 业务政策校验版本与有效期。
+4. 创建 `task_id` 与任务目录，保存文件与 `_import_meta.json`。
+5. `BackgroundTasks` 调用 `invoke_import_graph`。
 
-主要集合与默认名称：
+### 5.2 执行器
 
-- `chat_message`：用户与助手消息、引用、主体、轮次和答案信息。
-- `query_sessions`：浏览器归属哈希。
-- `query_runs`：执行指标和问题哈希。
-- `query_feedback`：每个回答合并后的帮助与解决反馈。
-- `query_issues`：业务问题、负责人、处理状态和历史。
-- `kb_parent_chunks`：完整父块正文。
-- `fb_events`：显式反馈与服务器自动失败信号。
-- `k_gaps`：强缺口、来源键和处理关联。
-- `k_candidates`：候选、人工编辑、审批指纹和发布状态。
-- `k_candidates_publication_tasks`：默认候选集合对应的持久发布与撤回任务。
-- `k_metrics`、`param_registry`：指标快照与检索参数版本。
+`app/rag/import_/pipeline.py`：
 
-集合名以配置和仓储访问器为准。发布任务集合名由候选集合名加后缀得到。
+- 抢并发名额 `IMPORT_MAX_CONCURRENT_TASKS`，超时则失败为 `import_busy`。
+- 状态置为 `processing` 并写快照。
+- 按 `IMPORT_MAX_RETRY_ATTEMPTS` 重试；只重试可重试错误码。
+- 成功置 `completed`，失败置 `failed` 并记录 `error_code` 与中文消息。
+- 状态落盘 `output/tasks/<task_id>.json`。
 
-重要唯一约束包括 `turn_id`、反馈 `answer_id`、父块 `parent_id`、参数 `key` 和非空缺口来源键。索引初始化失败只告警，因此健康检查不能证明这些约束已建立。
+### 5.3 导入图
 
-### 8.4 MinIO 与本地磁盘
-
-MinIO 图像键为 `<image_dir>/<stem>/<image_name>`。客户端返回直接对象 URL。已有桶需要自行具备可读取策略。代码没有使用预签名读取 URL。
-
-本地 `output/` 保存上传文件、解析结果、任务快照和部分评测产物。该目录不进入 Git。
-
-## 9. 知识改进与治理设计
-
-### 9.1 反馈到缺口
-
-显式反馈先查服务端答案记录，再保存问题、产品、引用和业务范围。自动失败信号不能覆盖用户明确解决状态。
-
-缺口分类使用反馈、引用和 Agentic 诊断。当前只有强信号进入 `k_gaps`。权重默认为用户 `0.4`、检索 `0.3`、生成 `0.3`。强阈值为 `0.65`，弱阈值为 `0.45`。
-
-来源键约束同一反馈来源只能绑定一个缺口。合并还检查问题和已知上下文。扫描游标使用严格的时间比较；相同时间戳事件存在扫描延迟边界，见第 15 节。
-
-### 9.2 策略待办与知识候选
-
-`retrieval_miss`、`reading_miss` 和 `generation_error` 进入策略处理。`knowledge_missing` 才进入候选生成。
-
-缺口使用持久租约。跨集合登记先写 `staged`，完成绑定后转为 `ready`。未绑定记录不进入正常审批列表。`reconcile_registrations()` 负责恢复这一登记过程。
-
-这项登记对账不同于导入后的存储对账。后者只记录差异。
-
-### 9.3 编辑、审批与发布
-
-候选具有内容版本、内容摘要、来源版本、人工编辑时间和审批指纹。文档来源候选检查来源当前状态与支持度。人工候选需要明确保存和审批。
-
-审批调用 `approve_candidate()`。发布任务键包含候选、内容版本、摘要和索引版本。执行使用租约、确定性向量 ID、幂等 upsert 和退避重试。
-
-```mermaid
-flowchart LR
-    Gap[知识缺失] --> Candidate[候选草稿或待补充]
-    Candidate -->|有效文档草稿| Approve[人工审批]
-    Candidate -->|待补充或人工来源| Edit[补充并人工保存]
-    Edit --> Approve
-    Approve --> Task[持久发布任务]
-    Task --> Active[已发布且可召回]
-    Active --> Observe[上线观察]
-    Active --> Revoke[编辑或下架]
-    Revoke --> Block[先禁止召回]
-    Block --> Remove[重试删除向量]
-```
-
-候选 `status` 与 `publication_status` 表达不同状态。只有状态、版本、摘要和来源检查均通过时，条目才可召回。
-
-当前回滚能力主要是下架条目或恢复检索参数。它不提供完整的上一版 FAQ 自动恢复入口。
-
-### 9.4 调度与上线回测
-
-每轮调度先处理发布任务，再扫描缺口。指标和回测按各自周期运行。周期时间戳保存在进程内。重启后首轮可视为到期。
-
-回测只读取已发布候选。默认观察 `7` 天，至少 `3` 次带引用的反馈命中后才判断下架。拒绝率超过 `0.30` 可下架。采纳率至少 `0.60` 可得到 `promote` 结论。
-
-这里的命中是反馈事件数。它不是全量曝光数。`promote` 当前不触发额外发布动作。
-
-自动调参只涉及 `RRF_K`、`RRF_TOP` 和 `RERANK_TOP_K`。它要求有效历史基线和足量反馈。默认关闭。`EVOLUTION_GRAY_ENABLED` 当前只见配置声明，未接入实际行为。
-
-## 10. HTTP 接口契约
-
-两个服务均提供 `GET /api/health`。OpenAPI 位于各服务的 `/docs`。
-
-### 10.1 导入服务
-
-- `POST /api/import/upload`：multipart 字段 `files`、`document_kind`、`document_version`、`valid_until`。响应含 `task_ids`。
-- `GET /api/import/status/{task_id}`：返回状态、阶段列表、错误码和提示。
-- `GET /import`：导入页面。
-
-上传与状态接口均要求 `X-Internal-Token`。令牌使用 `IMPORT_ADMIN_TOKEN`。配置为空时为 503，不匹配时为 401。源码包含非空默认回退值，部署必须显式覆盖。
-
-### 10.2 查询服务
-
-- `POST /api/query`：请求字段 `query`、可选 `session_id`、`is_stream` 和 `rewrite_hint`。
-- `GET /api/query/status/{session_id}`：返回当前轮次和进度。
-- `GET /api/stream/{session_id}`：SSE。
-- `GET /api/history/{session_id}`：历史，`limit` 限制在 `1～100`。
-- `DELETE /api/history/{session_id}`：清空消息。活动查询期间拒绝。
-- `GET /`、`GET /approval`：对话页和后台页。
-
-非流式答案主要字段为：
+`app/process/import_/agent/main_graph.py`：
 
 ```text
-answer, answer_id, session_id, turn_id, intent,
-item_names, item_name_options, citations, image_urls,
-groundedness, retrieval_signals, business_tag,
-handoff_required, issue_id, metrics
+node_entry
+  ├─ .md  → node_md_img
+  └─ .pdf → node_pdf_to_md → node_md_img
+node_md_img → node_document_split → node_item_name_recognition
+            → node_bge_embedding → node_import_milvus → END
 ```
 
-历史项还包含已保存的反馈。`answer_contexts`、完整 Agentic 轨迹和证据清单属于内部数据。
+| 节点 | 实际服务 | 职责 |
+|---|---|---|
+| `node_entry` | `entry_service.resolve_input_file` | 分派 md/pdf，写 `file_title` |
+| `node_pdf_to_md` | `pdf_parse_service.parse_pdf_to_markdown` | MinerU 上传、轮询、下载、解压、重命名 |
+| `node_md_img` | `enrich_markdown_images.enrich_markdown_images` | 图片说明、MinIO 上传、链接替换、写 `_new.md` |
+| `node_document_split` | `split_service.split_document` | 结构解析、章节识别、父块/子块 |
+| `node_item_name_recognition` | `item_name_service.recognize_and_index_item_name` | 主体识别、归并、写索引、回填 |
+| `node_bge_embedding` | `embedding_service.generate_chunk_embeddings` | 批量向量化 |
+| `node_import_milvus` | `index_service.index_chunks` | 建集合、对齐、upsert、清理旧块、写父块、对账 |
 
-### 10.3 知识管理接口
+### 5.4 MinerU 解析
 
-统一前缀为 `/api/evolution`。
+- 默认 `model_version=vlm`。
+- `vlm` 对超大单页排版稿（如 A3）可能连续失败。失败时自动改用 `pipeline` 再解析一次。
+- 轮询默认每 3 秒一次，最长 600 秒。
+- 下载 zip 后选择主 Markdown：优先与文件同名，否则 `full.md`，再否则第一个 Markdown。
+- 断点续传：若 `<stem>.md` 比 PDF 新，直接复用。
+- 失败原因取自服务端 `err_msg`，不只记录 `batch_id`。
 
-- `POST /feedback`：提交帮助或解决反馈，检查会话归属。
-- `GET /candidates`：按状态查询候选。
-- `POST /candidates/{id}/edit`：编辑候选。
-- `POST /candidates/{id}/approve`：审批发布。
-- `POST /candidates/{id}/reject`：驳回。
-- `DELETE /candidates/{id}`：下架并保留记录。
-- `GET /gaps`、`POST /gaps/{id}/review`：缺口列表与复核。
-- `GET /issues`、`POST /issues/{id}`：问题列表与处理。
-- `GET /status`：闭环运行状态。
-- `GET /trial-metrics`：试用指标。
+### 5.5 切分
 
-反馈之外的上述管理接口要求 `EVOLUTION_ADMIN_TOKEN`。它们没有逐人登录身份。
+`app/rag/import_/split_service.py` + `section_splitter.py`：
 
-### 10.4 统一错误
+1. 读取 Markdown（优先 `_new.md`）。
+2. `resolve_blocks`：优先 `*_content_list.json`，缺失回退 Markdown。
+3. `build_sections`：按标题层级构建章节树，记录 `heading_path` 与 `occurrence`。
+4. 每个章节产出父块：整棵子树文本。
+5. 每个章节产出子块：仅本章节自身原子块，避免与子章节重复。
+6. 长度按正文口径计算：
+   - `CHUNK_SIZE`：软目标，用于打包多个原子块。
+   - `CHUNK_MAX_SIZE`：硬上限，单块超过才切。
+   - `CHUNK_MIN`：短块合并阈值。
+   - `CHUNK_OVERLAP`：仅超长原子块切分时保留尾部重叠。
+7. 表格：HTML 转 Markdown；切分时复制表头与分隔行。
+8. 代码：只按行切分。
+9. 图片：使用增强后的 Markdown 引用，说明可被检索。
 
-错误结构为：
+### 5.6 确定性 ID
 
-```json
-{"code": "query_in_progress", "message": "当前会话仍在处理上一条问题"}
+`app/rag/import_/ids.py`：
+
+- `doc_id = sha1(规范化 file_title)`
+- `parent_id = sha1(doc_key#heading_path#occurrence)`
+- `chunk_id = sha1(doc_key#heading_path#occurrence#part)`
+- `content_hash = sha1(content)`
+
+ID 只编码结构，不编码内容。内容变化由 `content_hash` 感知，因此重复导入、标注、反馈、引用都稳定。
+
+### 5.7 写入与一致性
+
+`app/rag/import_/index_service.py`：
+
+1. 集合不存在时创建。
+2. `_align_to_schema`：补齐缺省字段、按 UTF-8 字节截断 VARCHAR、忽略未知字段。
+3. `upsert` 分批写入确定性主键。
+4. `_delete_stale_chunks` 删除该文档本次未再产出的旧块。
+5. 父块写入 Mongo；失败只告警，不阻断导入。
+6. `reconcile_after_import` 只读对账：Milvus 按 `chunk_id` 集合比对，Mongo 比对父块，MinIO 只统计对象数。
+
+写入顺序为“先写新、后清旧”，避免“删成功、插失败”的数据空窗。
+
+### 5.8 重试与删除
+
+- `POST /api/import/retry/{task_id}`：仅允许 `failed`；复用原任务目录与原文件；清空旧进度；状态置 `pending` 后重新提交。业务政策重试前检查有效期。
+- `DELETE /api/import/records/{task_id}`：清理内存状态、磁盘快照、任务目录。进行中任务返回 409。已入库向量不删除。
+- 两者共用进程内锁，避免双击重试导致同一文件并发导入两次。
+
+## 6. 查询子系统
+
+### 6.1 查询图
+
+`app/process/query/agent/main_graph.py`：
+
+```text
+node_intent_route
+  ├─ chitchat → node_chitchat_answer → END
+  └─ rag → node_item_name_confirm
+              ├─ 有答案（反问/兜底）→ node_answer_output → END
+              ├─ agentic → node_agentic → END
+              └─ legacy → 三路召回 → node_rrf → node_rerank
+                        → node_parent_expand → node_answer_output → END
 ```
 
-HTTP 状态码表达调用结果。JSON `code` 表达稳定业务原因。客户端应保留这两个维度。
+### 6.2 意图与主体
 
-## 11. 会话、SSE 与前端恢复
+- 意图识别：LLM 二分类，超时或异常一律兜底为 `rag`；并发受信号量限制。
+- 主体确认：
+  1. `rewrite_hint` 存在时，先做确定性主体对齐。
+  2. 上一轮反问且本轮是候选主体名时，用挂起意图复原问句。
+  3. 否则读历史 + LLM 改写 + 主体匹配。
+  4. 未确认时返回候选、反问或兜底。
 
-浏览器保存 `kb_owner` HttpOnly Cookie。Mongo 只保存归属哈希。旧历史不能由首次访问者直接认领。
+### 6.3 Legacy 检索
 
-Cookie 默认为 SameSite Strict，有效期 `7` 天。在 HTTPS 或 `APP_ENV=prod` 下启用 Secure。生产配置需要匹配 HTTPS 部署。
+1. 向量召回：BGE-M3 混合检索，权重 0.6 / 0.4，候选 10、返回 5。
+2. HyDE：生成假设答案后拼入查询；可对短事实型问题跳过。
+3. 联网：MCP 搜索，定价/售后禁用，最终上下文最多保留 2 条。
+4. RRF：`weight / (k + rank)`，`k=60`，Top 5；自进化条目不因融合被挤出。
+5. 重排：BGE-Reranker 打分；动态截断，范围 2~6；本地知识优先，自进化条目保底。
+6. 父块回溯：按重排分数分配字符预算，单块 1200、总量 4000。
+7. 作答：组装上下文与历史；流式或非流式；回填引用、页码、章节、接地性，落库历史。
 
-SSE 事件名为 `ready`、`progress`、`delta`、`final`、`error` 和 `close`。进度含 `status`、`done_list` 和 `running_list`。成功最终事件含答案字段、`turn_id` 和状态。
+### 6.4 Agentic
 
-通道在进程内保存。未连接客户端时，最多缓冲 `512` 条事件。空闲通道约 `30` 分钟回收。实现每个会话只保存一个当前订阅队列，不能视为多订阅者广播总线。
+入口 `app/rag/agentic/controller.py`：
 
-前端用 `localStorage` 保存当前会话 ID。导入任务和管理令牌使用 `sessionStorage`。导入任务键还包含 API 地址，避免不同服务之间串用卡片。
+- 业务标签分类；投诉类直接应用策略并终止。
+- 工具集：`RetrievalTools`。
+- 预算：工具 4 次、联网 1 次、token 8000、时长取配置与外部剩余时间的最小值。
+- 状态：证据字典、轨迹、覆盖度、动作、最终证据、计数器。
 
-刷新恢复依赖任务仍在原进程执行，或结果已经保存。导入磁盘快照只恢复显示状态。它不会重启图执行。
+状态机：
 
-静态资源使用内容指纹。HTML 使用 `no-cache`。资源使用带版本号的长缓存。健康接口返回资源版本，供旧页面提示刷新。
+```text
+bootstrap → assess
+              ├─ supported 且证据已读 → draft → verify
+              │                              ├─ 通过 → answered
+              │                              └─ 不通过 → draft（一次）→ 兜底
+              └─ missing / conflicting → select → execute → assess
+```
 
-## 12. 故障和观测
+关键约束：
 
-任务整体状态为 `pending`、`processing`、`completed` 和 `failed`。节点阶段列表只是执行进度。节点装饰器在退出时结束阶段，因此不能仅凭 `done_list` 判断业务成功。
+- `assess`：只有覆盖度 `supported`、引用的证据都存在且已读，才进入 `draft`。
+- `select`：严格 `Action` Schema；非法动作允许修正一次。
+- `execute`：预算记账、主体范围校验、证据合并、连续两轮无新证据则终止。
+- `draft`：发布前复核证据仍有效；空答案判失败。
+- `verify`：事实与来源 ID 必须由最终证据支持；核验通过才发布。
+- 任何异常都转成终止原因；唯一正常出口是 `finish`。
 
-查询异常经 `classify_query_error()` 分类。导入有独立分类与重试。流式错误通过 `error` 事件返回。非流式查询失败时，HTTP 返回业务错误。
+工具与安全：
 
-可选检索、历史保存和在线接地性评估有局部降级。主体识别、重排、答案模型和必要的归属存储仍可能阻断请求。
+| 工具 | 来源 | 约束 |
+|---|---|---|
+| `semantic_search` | `kb_chunks` | 主体过滤 |
+| `keyword_search` | `kb_chunks` | 有界扫描，超过上限报错 |
+| `read_chunk` | `kb_chunks` | 指定块 + 邻居 + 父块 |
+| `search_approved_faq` | `kb_evolution_items` + Mongo | 发布状态、来源、主体三重校验 |
+| `web_search` | MCP | 定价/售后禁用 |
 
-`QueryMetrics` 记录总耗时、首段文本时间、分类耗时、模型次数、token 用量、费用和降级原因。未知费用保持 `null`。
+证据：`evidence_id = 来源:标识:版本哈希:正文哈希`。发布前 `revalidate` 校验切片仍存在、版本/类型/有效期/父块一致。
 
-Agentic 的核验后整段输出会影响首段文本时间。与传统流式模式比较时，应同时比较完整答案耗时。
+### 6.5 会话、SSE 与恢复
 
-## 13. 部署约束
+- Cookie `kb_owner` → `owner_hash` 绑定 `query_sessions`。
+- `reserve_query` 保证同一会话同时只有一个查询。
+- SSE 事件：`ready`、`progress`、`delta`、`final`、`error`、`close`。
+- 页面刷新：先读 `/api/query/status/{sid}`，再读历史；进行中则重建进度并重连 SSE。
+- 查询指标写入 `query_runs`；反馈写入 `query_feedback` 与 `fb_events`。
 
-查询应用启动时获取 `SingleWorkerLease`。默认锁文件按查询端口命名，并放在主机临时目录。第二个相同端口配置的查询 worker 会启动失败。
+## 7. 自进化子系统
 
-该锁不是跨主机锁。多个主机或不同端口实例仍可能同时运行调度器。当前部署应使用一个查询 worker，并保留任务状态所在进程。
+### 7.1 数据流
 
-导入并发信号量也在进程内。扩大导入 worker 数量会改变总并发上限和状态可见性。
+```text
+用户反馈 / 未解决信号
+        ↓
+   fb_events
+        ↓ 调度器扫描（游标升序，去重）
+   k_gaps（缺口分级）
+        ├─ 非知识缺失 → query_issues（策略待办）
+        └─ 知识缺失 → k_candidates
+                          ├─ need_info（待人工补充）
+                          └─ draft → 审批
+                                        ↓
+                              publication_tasks
+                                        ↓
+                              kb_evolution_items
+                                        ↓
+                                查询召回 + 指标 + 回测
+```
 
-Mongo 索引初始化失败不阻止服务启动。`/api/health` 不执行数据库和模型全链路检查。上线前需要独立连通性与业务验证。
+### 7.2 缺口
 
-## 14. 扩展位置
+- 信号：用户差评、检索未命中、生成未达标。
+- 权重：用户 0.4、检索 0.3、生成 0.3；强 0.65、弱 0.45。
+- 分类：`retrieval_miss`、`reading_miss`、`generation_error`、`knowledge_missing`。
+- 去重：会话 + 产品 + 问题；窗口 1 小时；已忽略问题不再登记。
+- 状态：`pending`、`candidate`、`processing`、`strategy_pending`、`reviewing`、`resolved`、`rejected`、`dismissed`。
 
-以下为后续设计入口，不表示已经实现：
+### 7.3 候选
 
-- 新文档格式：先扩展上传校验，再扩展入口分流、解析服务和测试。
-- 新检索工具：扩展工具参数、结果契约、范围检查、预算和控制器可选动作。
-- 新模型服务：扩展模型入口，并验证用量、超时和 JSON 输出契约。
-- 多租户：先改变文档 ID 与查询范围契约，再改存储与接口授权。
-- 多实例：将准入、任务状态和 SSE 移到共享存储，并增加调度选主。
-- 索引升级：制定版本迁移流程，避免把删除重建当作自动升级。
+`app/evolution/candidate/generator.py`：
 
-## 15. 验证范围与已知问题
+- 只处理 `knowledge_missing`。
+- 无检索证据 → `need_info`。
+- LLM 生成 JSON，答案 60~300 字。
+- 疑似“无信息”答案 → `need_info`。
+- PII 命中或问题重复 → 留痕，不进入可审批队列。
+- 状态：`draft`、`need_info`、`active`、`rejected`、`hold`、`deprecated`。
+- 发布状态：`draft`、`indexing`、`active`、`deprecated`、`revoked`。
 
-测试目录覆盖接口、切分、召回、预算、来源变更、治理和页面恢复。真实 E2E 默认排除，并要求完整隔离资源配置。
+### 7.4 审批与发布
 
-2026-11-05 的 Python 离线全量运行得到：`850 passed, 6 skipped, 1 deselected, 1 failed`。失败位于 `test_gap_replay.py` 的 `different0` 参数。
+`app/evolution/governance.py`：
 
-定向复核发现两条反馈可能具有相同 `ts`。扫描条件使用 `ts > cursor_ts`，因此后一条可能被该轮排除。空扫描后游标归零，后续轮次可能再次读取它。当前不能承诺每条新反馈都在下一轮被扫描。
+1. 校验候选存在、状态可审批、答案含事实、来源可验证。
+2. 状态置 `indexing`，计算内容哈希，写入发布任务队列。
+3. 消费发布任务：校验租约、内容哈希、来源；写入 `kb_evolution_items`；候选置 `active`。
+4. 失败按指数退避重试；任务可恢复。
+5. 驳回/下架：撤销发布状态，删除索引记录。
+6. 编辑：内容版本 +1，撤销旧索引，重新审批后发布。
 
-该证据不证明跨产品错误合并。它也不能支持“缺口回放已全部通过”。本次仅编写文档，未修复这段逻辑。
+发布任务使用租约，避免多实例并发发布同一条知识。
 
-前端测试 `38` 项通过。三个默认评测 CLI 的本地校验执行成功。题库仍为未复核草稿。当前未执行真实数据库、模型和网页端到端验收。
+### 7.5 召回与保护
+
+- 已审批 FAQ 进入 RRF，权重 `EVOLUTION_RRF_WEIGHT`。
+- 若 FAQ 未被 RRF Top-N 收录，强制并入，最多 `EVOLUTION_RECALL_LIMIT` 条。
+- 重排阶段保留自进化权威条目，避免被普通切片挤出。
+- `is_retrievable` 要求状态、发布状态、来源版本、内容哈希全部一致。
+
+### 7.6 指标、调参与回测
+
+- `k_metrics`：采纳率、缺口率、参数快照。
+- 自调：`RRF_K`、`RRF_TOP`、`RERANK_TOP_K`；有上下限；样本 ≥ 100 且采纳率变化明显才动作。
+- 回测：观察窗内统计 FAQ 命中、采纳、拒绝；命中不足只观察；拒绝率超限下架。
+- 问题：同一会话/产品/问题的未完成登记合并；支持负责人与处理记录。
+- 试用指标：解决率、重复提问率、转人工率、知识补全时长、各路由耗时。
+
+## 8. API 设计
+
+### 8.1 统一约定
+
+- 错误响应体：`{"code": "<机器码>", "message": "<中文提示>"}`。
+- 业务错误使用 4xx；依赖不可用使用 503；未处理异常统一 500。
+- 写接口要求 `X-Internal-Token`。
+- 查询与会话接口依赖浏览器归属 Cookie。
+- 文件上传为 multipart；其余为 JSON。
+
+### 8.2 鉴权矩阵
+
+| 范围 | 机制 | 失败行为 |
+|---|---|---|
+| 导入 | `IMPORT_ADMIN_TOKEN` | 未配置 503；不一致 401 |
+| 审批 | `EVOLUTION_ADMIN_TOKEN` | 未配置 503；不一致 401 |
+| 会话 | `kb_owner` Cookie → `owner_hash` | 无归属 404；存储异常 503 |
+| 页面 | 无 | 静态资源白名单 |
+
+## 9. 横切设计
+
+### 9.1 配置
+
+- 唯一读取环境变量入口：`app/shared/config/common.py`。
+- 业务模块只使用 `settings.<domain>`。
+- `.env` 以 `override=True` 加载。
+
+### 9.2 日志
+
+- 基于 loguru；控制台与文件双通道。
+- 节点日志记录开始、耗时、异常堆栈。
+- 步骤日志为 DEBUG 级，避免刷屏。
+- 查询指标单独落库，不依赖日志。
+
+### 9.3 超时与重试
+
+- `retry_call` 默认只重试 `OSError`；业务错误转成非 OSError，避免误重试。
+- MinerU 申请、上传、轮询各有超时。
+- Milvus 每次 RPC 都传 `timeout`，并与请求剩余时间取较小值。
+- Mongo 使用 `pymongo.timeout` 绑定请求预算。
+- Agentic 总预算用 `ContextVar` 传递，线程池中不泄漏。
+
+### 9.4 并发
+
+- 导入：进程内信号量。
+- 查询：每会话互斥 + 单 worker 租约。
+- 意图识别：独立线程池 + 信号量。
+- 图片说明：线程池，上限可配。
+- 发布任务：Mongo 租约。
+- 缺口处理：Mongo 租约与领取令牌。
+
+### 9.5 幂等与一致性
+
+- 子块确定性主键 + upsert。
+- 主体名先插后删。
+- 发布任务唯一键 + 租约。
+- 缺口来源唯一约束。
+- 对账只读，不阻断主流程。
+
+### 9.6 安全
+
+- 文件头嗅探，防改后缀。
+- 路径只取 basename，防穿越。
+- 任务 ID 必须是 UUID，防目录穿越。
+- Milvus 过滤值统一转义。
+- 模型输出严格 Schema 校验。
+- 引用 URL 仅 http/https。
+
+## 10. 测试策略
+
+| 层 | 位置 | 特点 |
+|---|---|---|
+| 离线单测 | `tests/unit/` | 默认执行；`offline_guard` 禁止真实外部连接 |
+| 真机端到端 | `tests/e2e/` | `E2E_ENABLED=1`；真实 Milvus/Mongo/MinIO/模型；测试数据带前缀并清理 |
+| 前端脚本 | `tests/frontend/` | `node:test`；用 VM 模拟 DOM 与存储 |
+| 静态守卫 | `tests/unit/test_frontend_pages.py` | 页面不得内联脚本/样式；资源必须带指纹 |
+
+默认命令：
+
+```bash
+uv run pytest
+node --test tests/frontend
+E2E_ENABLED=1 uv run pytest -m e2e tests/e2e -s
+```
+
+## 11. 扩展点
+
+| 需求 | 扩展位置 |
+|---|---|
+| 新增导入格式 | `entry_service`、导入图分支、解析服务 |
+| 新增检索工具 | `app/rag/agentic/tools.py` 与 `Action.tool` 枚举 |
+| 新增业务策略 | `app/rag/query/business.py` |
+| 新增闭环指标 | `app/evolution/online_eval/` 与 `k_metrics` |
+| 新增自调参数 | `app/evolution/tuning/controller.py` 与 `param_registry` |
+| 新增页面 | `app/resources/` + `pages.py` 白名单 |
+| 替换 LLM/向量模型 | `app/shared/models/` |
+
+## 12. 已知限制
+
+1. 查询服务只能单 worker 运行。
+2. 导入任务状态与并发控制是进程内语义。
+3. Milvus / Mongo / MinIO 无事务；只能依靠幂等与对账。
+4. 本地模型在 CPU 上较慢；首次启动需要预热。
+5. 鉴权为共享令牌 + Cookie 归属，不是企业级账号体系。
+6. 联网检索依赖外部 MCP 服务，未配置时自动降级。
