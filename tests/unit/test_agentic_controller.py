@@ -338,3 +338,60 @@ def test_independent_write_flag_starts_publication_worker(monkeypatch):
             assert warmed, "启动时必须先预热检索模型，否则首个查询会耗尽 Agentic 预算"
             assert started
     asyncio.run(check())
+
+
+def test_terminal_action_drops_empty_tool():
+    """clarify/handoff 不需要 tool；模型补空字符串时不得判成非法动作。"""
+    from app.rag.agentic.controller import Action, _normalize_action
+
+    action = Action.model_validate(_normalize_action({'action': 'Clarify', 'tool': '', 'arguments': {}}))
+
+    assert action.action == 'clarify'
+
+
+def test_clarify_with_empty_tool_still_reaches_approved_faq():
+    """空 tool 不再消耗修复次数，控制器能补查已审批 FAQ 并正常作答。"""
+    tools = Tools([evidence()])
+    assess_calls = {'n': 0}
+
+    def model(kind, payload, timeout):
+        if kind == 'assess':
+            assess_calls['n'] += 1
+            if assess_calls['n'] == 1:
+                return {'coverage': 'missing', 'evidence_ids': []}
+            return {'coverage': 'supported', 'evidence_ids': ['a']}
+        if kind == 'select':
+            return {'action': 'clarify', 'tool': '', 'arguments': {}}
+        if kind == 'draft':
+            return {'answer': 'HAK180 不支持蓝牙连接。'}
+        if kind == 'verify':
+            return {'supported': True, 'evidence_ids': ['a']}
+        raise AssertionError(kind)
+
+    result = run_agentic({'item_names': ['HAK180'], 'rewritten_query': '怎么连蓝牙'},
+                         tools=tools, model=model, persist=False)
+
+    assert result['agentic_stop_reason'] == 'answered'
+    assert [name for name, _, _ in tools.calls] == ['semantic_search', 'search_approved_faq']
+
+
+def test_assess_prompt_accepts_negative_answer(monkeypatch):
+    """“不支持某功能”也是答案：评估提示词必须明确允许否定结论判 supported。"""
+    from types import SimpleNamespace
+
+    from app.shared.models import llm_providers
+    from app.rag.agentic import controller
+
+    captured = {}
+
+    class _Client:
+        def invoke(self, messages):
+            captured['prompt'] = messages[0].content
+            return SimpleNamespace(content='{"coverage":"missing","evidence_ids":[]}')
+
+    monkeypatch.setattr(llm_providers, 'chat', lambda *args, **kwargs: _Client())
+
+    controller._model('assess', {'question': 'hak180烫金机怎么连蓝牙', 'evidence': []}, 10)
+
+    assert '否定结论' in captured['prompt']
+    assert 'supported' in captured['prompt']

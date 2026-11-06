@@ -65,7 +65,11 @@ def _model(kind, payload, timeout):
         # 覆盖度评估：要求重新判断、只看原文是否直接支持，缺信息判 missing，冲突才判 conflicting
         prompt += ('\n请重新判断当前evidence能否回答question，不参考以前的覆盖结论。'
                    '原文已给出所问的全部事实时返回supported和直接支持的evidence_id；缺少所问信息才返回missing。'
-                   '只有相同条件下对同一事实存在不相容的明确结论才返回conflicting。不要选择下一步工具。')
+                   '只有相同条件下对同一事实存在不相容的明确结论才返回conflicting。不要选择下一步工具。'
+                   # 否定结论同样是答案：FAQ 常说“不支持某功能”，不能因为问题预设了能力就判 missing
+                   '证据可以给出否定结论。若证据明确说明该型号不具备所问功能、无法执行所问操作，'
+                   '或明确否定问题中的前提，这属于对问题的直接回答，应判定supported并引用该证据。'
+                   '不要因为缺少操作步骤而判missing；只要结论明确且无相反证据，就按supported处理。')
     elif kind == 'draft':
         prompt += '\n按answer_prompt生成答案。引用已另存结构化来源，正文不需要展示内部证据哈希。'
     elif kind == 'verify':
@@ -83,6 +87,25 @@ def _model(kind, payload, timeout):
                                   timeout_seconds=min(timeout, settings.import_.llm_timeout_seconds),
                                   max_retries=0).invoke([HumanMessage(content=prompt)])
     return parse_json_object(response.content)
+
+
+def _normalize_action(payload):
+    """修正模型输出中「无意义但会触发校验失败」的字段。
+
+    clarify/handoff 不需要 tool 与 arguments，提示词也明确「只需输出 action」。
+    但模型经常补一个 ``tool: ""``，严格枚举校验会把它当成非法动作并消耗修复次数。
+    终止类动作直接丢弃这两个字段，交给 Action 的默认值处理。
+    """
+    if not isinstance(payload, dict):
+        return payload
+    normalized = {**payload}
+    action = str(normalized.get('action') or '').strip().lower()
+    if action:
+        normalized['action'] = action
+    if action in ('clarify', 'handoff'):
+        normalized.pop('tool', None)
+        normalized.pop('arguments', None)
+    return normalized
 
 
 class LoopState(TypedDict):
@@ -235,7 +258,7 @@ class Run:
 
     def select(self):
         """决策下一步动作：search/read 继续执行工具；answer 进入生成；clarify/handoff 终结。"""
-        action = Action.model_validate(self.call('select'))  # 解析不合法会抛 ValidationError
+        action = Action.model_validate(_normalize_action(self.call('select')))  # 解析不合法会抛 ValidationError
         self.validation_feedback = []  # 本次动作合法，清掉上次的校验反馈
         if action.action in ('clarify', 'handoff'):
             # 模型想终结但覆盖仍缺资料时：若预算未用尽且还没查过已审批 FAQ，先补查一次，
