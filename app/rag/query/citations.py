@@ -59,12 +59,19 @@ def build_citations(
             continue
         seen.add(key)
         meta = meta_map.get(key) or {}
-        heading = str(meta.get("heading_path") or meta.get("title") or "").strip()
+        # 自进化 FAQ 没有章节路径；heading 复用 title 会在界面出现重复标题
+        heading = "" if key in evolution_set else str(meta.get("heading_path") or meta.get("title") or "").strip()
         page = meta.get("page")
         citations.append(CitationModel(
             faq_id=key,
             source="evolution" if key in evolution_set else "kb",
-            title=str(meta.get("file_title") or meta.get("title") or ""),
+            # 自进化条目的 file_title 固定为内部标记 __evolution__，对外应展示 FAQ 问题
+            title=str(
+                (meta.get("title") if key in evolution_set else meta.get("file_title"))
+                or meta.get("title")
+                or meta.get("file_title")
+                or ""
+            ),
             version=str(meta.get("document_version") or ""),
             page=page if isinstance(page, int) and page > 0 else None,
             heading=heading,

@@ -303,8 +303,8 @@ def _build_settings() -> Settings:
         ),
         api=ApiSettings(
             session_ownership_enabled=env_bool("SESSION_OWNERSHIP_ENABLED", True),  # 会话属主校验，默认开启
-            import_app_name=env_str("IMPORT_APP_NAME", "Enterprise RAG Import Service"),  # 导入服务名，默认 "Enterprise RAG Import Service"
-            query_app_name=env_str("QUERY_APP_NAME", "Enterprise RAG Query Service"),  # 问答服务名，默认 "Enterprise RAG Query Service"
+            import_app_name=env_str("IMPORT_APP_NAME", "知汇导入服务"),  # 导入服务名，默认 "知汇导入服务"
+            query_app_name=env_str("QUERY_APP_NAME", "知汇问答服务"),  # 问答服务名，默认 "知汇问答服务"
             app_env=env_str("APP_ENV", "dev"),  # 运行环境，默认 dev
             host=env_str("APP_HOST", "0.0.0.0"),  # 监听地址，默认 0.0.0.0
             import_port=env_int("IMPORT_APP_PORT", 8000),  # 导入端口，默认 8000

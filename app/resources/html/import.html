@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1.0" />
-  <title>知识库文件导入</title>
+  <title>知汇 · 知识导入</title>
   <link rel="stylesheet" href="/static/app.css?v={{ASSET_V}}" />
   <link rel="stylesheet" href="/static/import.css?v={{ASSET_V}}" />
 </head>
@@ -12,10 +12,10 @@
   <div class="page narrow">
     <div class="topbar">
       <div class="brand">
-        <div class="logo"></div>
+        <div class="logo" aria-hidden="true">知</div>
         <div class="title">
-          <strong>知识库文件导入</strong>
-          <span>支持 Markdown / PDF，解析后自动切分、识别主体并写入向量库</span>
+          <strong>知汇</strong>
+          <span>知识导入 · 解析、切分、入库</span>
         </div>
       </div>
       <div class="top-actions">
@@ -27,15 +27,37 @@
     </div>
 
     <div class="panel">
-      <label>资料类型 <select id="documentKind"><option value="manual">产品手册</option><option value="policy">业务政策</option></select></label>
-      <label>资料版本 <input id="documentVersion" maxlength="128" placeholder="例如 2026-10"></label>
-      <label>政策失效时间 <input id="policyUntil" type="datetime-local"></label>
-      <p>业务政策必须填写版本和失效时间。请只上传已确认的政策。</p>
+      <div class="form-grid">
+        <label class="field">
+          <span class="field-label">资料类型</span>
+          <select id="documentKind"><option value="manual">产品手册</option><option value="policy">业务政策</option></select>
+        </label>
+        <label class="field">
+          <span class="field-label">资料版本</span>
+          <input id="documentVersion" maxlength="128" placeholder="例如 2026-10">
+        </label>
+        <label class="field">
+          <span class="field-label">政策失效时间</span>
+          <input id="policyUntil" type="datetime-local">
+        </label>
+      </div>
+      <p class="form-hint">业务政策必须填写版本和失效时间。请只上传已确认的政策。</p>
+
       <div class="upload-area" id="dropZone">
-        <div class="upload-icon">☁️</div>
-        <p class="upload-hint">点击或拖拽文件到此处（PDF / MD）</p>
+        <div class="upload-icon" aria-hidden="true">
+          <svg class="upload-svg" viewBox="0 0 24 24" fill="none">
+            <path d="M12 16V4m0 0 4 4m-4-4-4 4" stroke="currentColor" stroke-width="1.8"
+                  stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M5 15v4h14v-4" stroke="currentColor" stroke-width="1.8"
+                  stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <p class="upload-title">点击或拖拽文件到此处</p>
+        <p class="upload-hint">支持 PDF / Markdown，单文件最大 50 MB</p>
         <input type="file" id="fileInput" class="file-input" multiple accept=".pdf,.md">
       </div>
+
+      <div class="panel-divider"></div>
 
       <div class="list-head">
         <span class="list-title">导入记录</span>

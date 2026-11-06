@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1.0" />
-  <title>自进化候选审批 · 掌柜智库</title>
+  <title>知汇 · 自进化审批</title>
   <link rel="stylesheet" href="/static/app.css?v={{ASSET_V}}" />
   <link rel="stylesheet" href="/static/approval.css?v={{ASSET_V}}" />
 </head>
@@ -12,10 +12,10 @@
   <div class="page">
     <div class="topbar">
       <div class="brand">
-        <div class="logo"></div>
+        <div class="logo" aria-hidden="true">知</div>
         <div class="title">
-          <strong>自进化候选审批</strong>
-          <span>闭环 · 候选 → 审批 → 入库</span>
+          <strong>知汇</strong>
+          <span>自进化审批 · 候选 → 审批 → 入库</span>
         </div>
       </div>
       <div class="filters">
@@ -37,29 +37,44 @@
         <button class="btn" id="refresh">刷新</button>
       </div>
     </div>
-    <div class="greet">说明：待审候选（draft）可「通过」（写入知识库并置为 active）、「驳回」（置为 rejected）或先「编辑」内容再审批。</div>
-    <section class="greet"><h2>内部试用指标</h2><div id="trialMetrics">输入管理令牌后刷新。</div></section>
-    <section class="greet"><h2>未解决问题</h2>
-      <p>用于分配负责人、排查原因和记录处理结果。保存处理记录不会修改知识库。需要补充知识时，请到“缺口处理”复核，再审批知识候选。</p>
-      <p>同一会话、同一产品、同一问题的未完成登记合并为一个待办，各次登记和处理历史保留。</p>
-      <label>显示范围
-        <select id="issueStatusFilter">
-          <option value="unresolved">未完成</option>
-          <option value="in_progress">处理中</option>
-          <option value="resolved">已解决</option>
-          <option value="dismissed">已忽略</option>
-          <option value="all">全部</option>
-        </select>
-      </label>
+
+    <section class="section-block">
+      <h2>内部试用指标</h2>
+      <div id="trialMetrics" class="metric-panel">输入管理令牌后刷新。</div>
+    </section>
+
+    <section class="section-block">
+      <div class="section-head">
+        <h2>未解决问题</h2>
+        <label class="greet">显示范围
+          <select id="issueStatusFilter">
+            <option value="unresolved">未完成</option>
+            <option value="in_progress">处理中</option>
+            <option value="resolved">已解决</option>
+            <option value="dismissed">已忽略</option>
+            <option value="all">全部</option>
+          </select>
+        </label>
+      </div>
+      <p class="greet">用于分配负责人、排查原因和记录处理结果。保存处理记录不会修改知识库。需要补充知识时，请到“缺口处理”复核，再审批知识候选。</p>
+      <p class="greet">同一会话、同一产品、同一问题的未完成登记合并为一个待办，各次登记和处理历史保留。</p>
       <div id="issueList"></div>
     </section>
-    <section class="greet"><h2>缺口处理</h2>
-      <p>强缺口会先区分处理原因。检索、阅读和生成问题进入策略待办。核对资料后，可确认为知识缺失，登记待补充候选。</p>
-      <p>人工忽略后，本会话中同一产品、同一问题不再自动登记待办或缺口。失败信号仍保留。忽略不会补充答案或修改知识库。</p>
+
+    <section class="section-block">
+      <h2>缺口处理</h2>
+      <p class="greet">强缺口会先区分处理原因。检索、阅读和生成问题进入策略待办。核对资料后，可确认为知识缺失，登记待补充候选。</p>
+      <p class="greet">人工忽略后，本会话中同一产品、同一问题不再自动登记待办或缺口。失败信号仍保留。忽略不会补充答案或修改知识库。</p>
       <div id="gapList"></div>
     </section>
-    <h2>知识候选</h2>
-    <div id="list"></div>
+
+    <section class="section-block">
+      <div class="section-head">
+        <h2>知识候选</h2>
+        <span class="greet">待审候选可编辑、通过或驳回；通过后写入知识库并置为 active。</span>
+      </div>
+      <div id="list"></div>
+    </section>
   </div>
 
   <script src="/static/app.js?v={{ASSET_V}}"></script>

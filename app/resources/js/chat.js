@@ -77,7 +77,7 @@
     const id = 'bot-his-' + Math.random().toString(36).slice(2);
     chatEl.insertAdjacentHTML('beforeend', `
       <div class="msg bot" id="${id}">
-        <div class="avatar bot">掌柜智库</div>
+        <div class="avatar bot">知</div>
         <div>
           <div class="bubble"><div class="answer"></div></div>
           <div class="meta">${formatTime(ts)}</div>
@@ -99,7 +99,7 @@
     const id = 'bot-' + Math.random().toString(36).slice(2);
     chatEl.insertAdjacentHTML('beforeend', `
       <div class="msg bot" id="${id}">
-        <div class="avatar bot">掌柜智库</div>
+        <div class="avatar bot">知</div>
         <div class="msg-body">
           <div class="bubble">
             <span class="typing"><span class="dot"></span><span class="dot"></span><span class="dot"></span></span>

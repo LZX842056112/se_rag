@@ -1,5 +1,5 @@
 /*
- * 客服对话页样式（视觉基础见 /static/app.css，页内不再写内联 <style>）。
+ * 客服对话页样式（视觉基础见 /static/app.css）。
  */
 body{
   margin:0;
@@ -7,15 +7,16 @@ body{
   display:flex;
   justify-content:center;
   align-items:center;
-  padding:18px;
+  padding:24px;
+  overflow:hidden;
 }
 .app{
   width:100%;
-  max-width:980px;
-  height:min(820px, 92vh);
+  max-width:1080px;
+  height:min(900px, calc(100vh - 48px));
   background:var(--panel);
   border:1px solid var(--border);
-  border-radius:16px;
+  border-radius:var(--radius-xl);
   box-shadow:var(--shadow);
   overflow:hidden;
   display:flex;
@@ -24,24 +25,24 @@ body{
 .chat{
   flex:1;
   overflow:auto;
-  padding:16px 14px 10px;
-  background:linear-gradient(180deg, rgba(26,167,255,.05), transparent 40%),
-             linear-gradient(0deg, rgba(91,124,250,.05), transparent 45%);
+  padding:22px max(20px, calc((100% - 820px) / 2)) 14px;
+  background:var(--panel-soft);
+  scrollbar-gutter:stable;
 }
 .dayline{
   text-align:center;
   color:var(--muted);
   font-size:12px;
-  margin:6px 0 14px;
+  margin:4px 0 18px;
 }
 .msg{
   display:flex;
-  gap:10px;
-  margin:10px 0;
+  gap:12px;
+  margin:14px 0;
   align-items:flex-end;
 }
 .msg.user{justify-content:flex-end}
-/* 关键：只让“消息内容容器”(排除头像)在 flex 中可伸缩，避免被压到“1 个字宽”导致竖排换行 */
+/* 只让消息内容容器可伸缩，避免被压成单字宽 */
 .msg > div:not(.avatar){
   flex:1;
   min-width:0;
@@ -52,41 +53,52 @@ body{
   align-items:flex-end;
 }
 .avatar{
-  width:34px;height:34px;border-radius:10px;
-  background:#e9eef7;
+  width:36px;height:36px;border-radius:12px;
+  background:#eef1f6;
   display:flex;align-items:center;justify-content:center;
-  font-size:14px;
-  color:#3b4a5a;
+  font-size:13px;
+  font-weight:600;
+  color:var(--info-text);
   flex:0 0 auto;
 }
-.avatar.bot{background:linear-gradient(135deg, rgba(26,167,255,.18), rgba(91,124,250,.18))}
+.avatar.bot{
+  background:var(--brand-soft);
+  color:var(--brand);
+  border:1px solid var(--brand-soft-strong);
+}
+.avatar.bot{font-size:14px}
 .bubble{
-  max-width:min(720px, 76%);
+  max-width:min(720px, 74%);
   display:inline-block;
-  border-radius:14px;
-  padding:10px 12px;
+  border-radius:16px;
+  padding:12px 16px;
   border:1px solid var(--border);
   background:var(--bubble-bot);
   position:relative;
-  line-height:1.55;
+  line-height:1.62;
   font-size:14px;
-  white-space:pre-wrap;
-  overflow-wrap: break-word;
+  white-space:normal;
+  overflow-wrap:break-word;
+  box-shadow:var(--shadow-sm);
 }
+/* 答案正文保留换行；气泡容器本身不能 pre-wrap，否则模板缩进会变成空白行 */
+.bubble .answer,
+.bubble .answer-text{white-space:pre-wrap}
 .msg.user .bubble{
   background:var(--bubble-user);
   color:#fff;
   border-color:transparent;
+  box-shadow:none;
 }
 .meta{
-  font-size:11px;
+  font-size:11.5px;
   color:var(--muted);
-  margin-top:6px;
+  margin-top:7px;
 }
-.msg.user .meta{color:rgba(255,255,255,.85)}
+.msg.user .meta{color:rgba(255,255,255,.82)}
 
 .answer-images{
-  margin-top:10px;
+  margin-top:12px;
   display:flex;
   flex-direction:column;
   gap:10px;
@@ -97,7 +109,7 @@ body{
   max-height:600px;
   width:auto;
   height:auto;
-  border-radius:12px;
+  border-radius:14px;
   border:1px solid var(--border);
   background:#fff;
 }
@@ -109,111 +121,125 @@ body{
 }
 
 .cit-wrap{
-  margin-top:10px;
-  border-top:1px dashed var(--border);
-  padding-top:8px;
+  margin-top:12px;
+  border-top:1px solid var(--border);
+  padding-top:10px;
 }
 .cit-header{
-  font-size:11px;
+  font-size:11.5px;
   color:var(--muted);
-  margin-bottom:6px;
+  margin-bottom:8px;
+  font-weight:500;
 }
-.cit-list{display:flex;flex-direction:column;gap:5px}
+.cit-list{display:flex;flex-direction:column;gap:6px}
 .cit-item{
   display:flex;
   align-items:center;
   gap:8px;
   font-size:12px;
-  background:rgba(122,134,154,.07);
+  background:var(--panel-soft);
   border:1px solid var(--border);
-  border-radius:8px;
-  padding:5px 8px;
+  border-radius:10px;
+  padding:7px 10px;
 }
 .cit-tag{
   flex:0 0 auto;
   font-size:11px;
-  line-height:1;
-  padding:3px 6px;
-  border-radius:6px;
-  color:#fff;
+  line-height:1.2;
+  padding:3px 7px;
+  border-radius:var(--radius-full);
+  color:var(--info-text);
+  background:var(--info-soft);
+  border:1px solid var(--border);
 }
-.cit-tag.evolution{background:var(--brand2)}
-.cit-tag.kb{background:#8aa0b4}
-.cit-tag.web{background:#6d7f96}
-.cit-id{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted)}
-.cit-link{color:var(--brand);text-decoration:underline;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cit-tag.evolution{
+  background:var(--brand-soft);
+  color:var(--brand-text);
+  border-color:var(--brand-soft-strong);
+}
+.cit-tag.kb{background:var(--info-soft);color:var(--info-text)}
+.cit-tag.web{background:var(--ok-soft);color:var(--ok-text);border-color:#c6f0da}
+.cit-id{font-family:var(--font-mono);color:var(--muted);font-size:11.5px}
+.cit-link{color:var(--link);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cit-link:hover{text-decoration:underline}
 .groundedness{
   display:flex;
   align-items:center;
-  gap:8px;
+  gap:10px;
   font-size:12px;
   color:var(--muted);
-  margin-top:8px;
+  margin-top:10px;
 }
-.groundedness.unknown{opacity:.75}
+.groundedness.unknown{opacity:.8}
 .gauge{
   flex:1;
   height:6px;
-  border-radius:99px;
-  background:#e9eef7;
+  border-radius:var(--radius-full);
+  background:#eef1f6;
   overflow:hidden;
 }
 .gauge > i{
   display:block;
   height:100%;
-  border-radius:99px;
-  background:linear-gradient(90deg, var(--brand), var(--brand2));
+  border-radius:var(--radius-full);
+  background:linear-gradient(90deg, var(--brand), var(--brand-2));
 }
-.feedback-bar{display:flex;align-items:center;gap:8px;margin-top:8px}
+.feedback-bar{display:flex;align-items:center;gap:8px;margin-top:10px}
 .fb-btn{
   border:1px solid var(--border);
   background:#fff;
   color:var(--muted);
-  font-size:13px;
-  line-height:1;
-  padding:5px 9px;
-  border-radius:8px;
+  font-size:12.5px;
+  line-height:1.2;
+  padding:6px 10px;
+  border-radius:var(--radius-full);
   cursor:pointer;
-  transition:all .15s;
+  transition:border-color .16s ease, color .16s ease, background-color .16s ease;
 }
-.fb-btn:hover:not(:disabled){border-color:var(--brand);color:var(--brand)}
-.fb-btn.active{background:var(--brand);border-color:var(--brand);color:#fff}
+.fb-btn:hover:not(:disabled){border-color:var(--brand);color:var(--brand);background:var(--brand-soft)}
+.fb-btn.active{background:var(--brand-soft);border-color:var(--brand);color:var(--brand-text)}
 .fb-btn:disabled{opacity:.55;cursor:not-allowed}
-.fb-done{font-size:11px;color:var(--muted)}
+.fb-done{font-size:11.5px;color:var(--muted)}
 
-/* 相似主体选项：用户点一下即以该主体重新提问 */
-.option-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px}
+/* 相似主体选项 */
+.option-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:12px}
 .option-hint{font-size:12px;color:var(--muted)}
 .option-btn{
-  border:1px solid rgba(26,167,255,.5);
-  background:rgba(26,167,255,.08);
-  color:var(--brand);
-  font-size:13px;
-  padding:6px 12px;
-  border-radius:999px;
+  border:1px solid var(--brand-soft-strong);
+  background:var(--brand-soft);
+  color:var(--brand-text);
+  font-size:12.5px;
+  font-weight:500;
+  padding:7px 13px;
+  border-radius:var(--radius-full);
   cursor:pointer;
-  transition:all .15s;
+  transition:background-color .16s ease, color .16s ease, border-color .16s ease;
 }
 .option-btn:hover{background:var(--brand);border-color:var(--brand);color:#fff}
 
-/* 顶栏「流式输出」开关：原为行内 style，统一收敛到样式表 */
+/* 顶栏“流式输出”开关 */
 .stream-toggle{
-  font-size:12px;
-  display:flex;
+  display:inline-flex;
   align-items:center;
-  gap:4px;
+  gap:6px;
+  font-size:12px;
+  color:var(--muted);
+  background:var(--panel-soft);
+  border:1px solid var(--border);
+  border-radius:var(--radius-full);
+  padding:6px 11px;
   cursor:pointer;
   user-select:none;
-  color:var(--muted);
 }
+.stream-toggle input{accent-color:var(--brand);margin:0}
+.stream-toggle:hover{border-color:var(--border-strong);color:var(--text-soft)}
 
-/* 等待回答时的占位气泡：给个最小宽度，避免三点动画把气泡压成一条 */
+/* 等待回答时的占位气泡 */
 .msg-body{min-width:180px}
-
-.typing{display:inline-flex;gap:6px;align-items:center}
+.typing{display:inline-flex;gap:6px;align-items:center;padding:2px 0}
 .dot{
   width:7px;height:7px;border-radius:50%;
-  background:#9aa6b2;
+  background:#98a2b3;
   animation:bounce 1.2s infinite ease-in-out;
 }
 .dot:nth-child(2){animation-delay:.15s}
@@ -225,59 +251,90 @@ body{
 
 .composer{
   border-top:1px solid var(--border);
-  padding:12px 14px;
+  padding:16px max(20px, calc((100% - 820px) / 2));
   display:flex;
-  gap:10px;
+  gap:12px;
   align-items:flex-end;
-  background:#fff;
+  background:var(--panel);
 }
 .composer textarea{
   flex:1;
   resize:none;
-  min-height:44px;
+  min-height:48px;
   max-height:140px;
-  padding:10px 12px;
-  border-radius:12px;
+  padding:12px 14px;
+  border-radius:14px;
   border:1px solid var(--border);
   outline:none;
   font-size:14px;
-  line-height:1.5;
+  line-height:1.55;
   font-family:inherit;
-}
-.composer textarea:focus{border-color:rgba(26,167,255,.6); box-shadow:0 0 0 3px rgba(26,167,255,.12)}
-.send{
-  width:88px;
-  height:44px;
-  border:none;
-  border-radius:12px;
-  cursor:pointer;
-  font-size:14px;
-  color:#fff;
-  background:linear-gradient(135deg, var(--brand), var(--brand2));
-}
-.send:disabled{opacity:.6;cursor:not-allowed}
-.hint{
-  padding:0 14px 12px;
-  color:var(--muted);
-  font-size:12px;
   background:#fff;
 }
+.composer textarea:focus{
+  border-color:rgba(47,107,255,.65);
+  box-shadow:0 0 0 3px rgba(47,107,255,.12);
+}
+.send{
+  min-width:96px;
+  height:48px;
+  border:none;
+  border-radius:14px;
+  cursor:pointer;
+  font-size:14px;
+  font-weight:600;
+  color:#fff;
+  background:var(--brand);
+  transition:background-color .16s ease;
+}
+.send:hover:not(:disabled){background:var(--brand-strong)}
+.send:disabled{opacity:.55;cursor:not-allowed}
+.hint{
+  padding:0 max(20px, calc((100% - 820px) / 2)) 16px;
+  color:var(--muted);
+  font-size:12px;
+  background:var(--panel);
+}
 .kbd{
-  font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-family:var(--font-mono);
   border:1px solid var(--border);
   padding:1px 6px;
   border-radius:6px;
-  background:#f7f9fc;
-  color:#3b4a5a;
+  background:var(--panel-soft);
+  color:var(--info-text);
+  font-size:11.5px;
 }
+
 /* 闲聊徽标：意图识别为闲聊的回答，与知识库作答区分 */
 .chat-badge{
-  display:inline-block;
+  display:inline-flex;
+  align-items:center;
   font-size:11px;
-  line-height:1;
-  padding:3px 6px;
-  margin-bottom:6px;
-  border-radius:6px;
-  color:#fff;
-  background:#7c8b9c;
+  line-height:1.2;
+  padding:3px 8px;
+  margin-bottom:8px;
+  border-radius:var(--radius-full);
+  color:var(--info-text);
+  background:var(--info-soft);
+  border:1px solid var(--border);
+}
+
+/* 小屏：弹层占满、气泡放宽、顶栏紧凑 */
+@media (max-width:720px){
+  body{padding:0}
+  .app{
+    max-width:none;
+    height:100vh;
+    border:0;
+    border-radius:0;
+    box-shadow:none;
+  }
+  .topbar.attached{padding:14px 16px}
+  .brand{min-width:0}
+  .title span{display:none}
+  .chat{padding:18px 14px 10px}
+  .bubble{max-width:86%}
+  .composer{padding:12px 14px}
+  .hint{padding:0 14px 14px}
+  .hint .kbd{display:none}
 }

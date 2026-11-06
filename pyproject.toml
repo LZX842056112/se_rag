@@ -1,7 +1,7 @@
 [project]
 name = "se_rag"
 version = "0.1.0"
-description = "企业化 RAG 知识库客服系统（含知识自进化闭环）"
+description = "知汇：企业知识问答与知识自进化平台"
 requires-python = ">=3.11"
 dependencies = [
     "beautifulsoup4>=4.12.0",
