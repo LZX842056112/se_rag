@@ -13,6 +13,7 @@ import requests
 from app.process.import_.agent.state import ImportGraphState
 from app.rag.import_.config import (
     MINERU_DOWNLOAD_TIMEOUT_SECONDS,
+    MINERU_FALLBACK_MODEL_VERSION,
     MINERU_MODEL_VERSION,
     MINERU_POLL_INTERVAL_SECONDS,
     MINERU_POLL_TIMEOUT_SECONDS,
@@ -56,9 +57,15 @@ def validate_pdf_paths(state: ImportGraphState) -> tuple[Path, Path]:
     return pdf_path_obj, local_dir_obj
 
 
-@step_log("upload_pdf_and_poll")
-def upload_pdf_and_poll(pdf_path_obj: Path) -> str:
-    """上传 PDF 到 MinerU 并轮询解析结果，返回结果 zip 的下载地址。"""
+class _MineruTaskFailed(RuntimeError):
+    """MinerU 后台任务判定为 failed（服务端未能解析该文件）。
+
+    单独成类：只有「文件解析失败」才值得换后端重试，申请地址/上传阶段的确定性错误不换。
+    """
+
+
+def _run_extract(pdf_path_obj: Path, model_version: str) -> str:
+    """按指定 ``model_version`` 完成一次「申请→上传→轮询」，返回结果 zip 的下载地址。"""
     base_url = settings.mineru.base_url
 
     # 1. 申请批量上传的预签名地址
@@ -67,7 +74,7 @@ def upload_pdf_and_poll(pdf_path_obj: Path) -> str:
         resp = requests.post(
             url=f"{base_url}/file-urls/batch",
             headers=_headers(),
-            json={"files": [{"name": pdf_path_obj.name}], "model_version": MINERU_MODEL_VERSION},
+            json={"files": [{"name": pdf_path_obj.name}], "model_version": model_version},
             timeout=MINERU_REQUEST_TIMEOUT_SECONDS,
         )
         if resp.status_code >= 500:
@@ -95,7 +102,7 @@ def upload_pdf_and_poll(pdf_path_obj: Path) -> str:
     file_upload_urls = data.get("file_urls", [])
     if not batch_id:
         raise ValueError("申请 MinerU 解析失败：返回的 batch_id 为空")
-    logger.info(f"MinerU 上传申请完成：batch_id={batch_id}")
+    logger.info(f"MinerU 上传申请完成：batch_id={batch_id}，model_version={model_version}")
 
     # 2. 向预签名地址上传 PDF
     # 预签名地址对请求头敏感，故使用 trust_env=False 的会话，避免系统代理注入额外头
@@ -165,8 +172,28 @@ def upload_pdf_and_poll(pdf_path_obj: Path) -> str:
                 raise ValueError("MinerU 任务已完成但未返回 full_zip_url")
             return zip_url
         if state == "failed":
-            raise ValueError(f"MinerU 解析任务失败：batch_id={batch_id}")
+            # err_msg 是服务端给出的失败原因（如 retry limit reached），丢掉了就只能看 batch_id 猜
+            raise _MineruTaskFailed(
+                f"MinerU 解析任务失败（model_version={model_version}）："
+                f"{extract_result.get('err_msg') or '服务端未返回原因'}，batch_id={batch_id}"
+            )
         time.sleep(MINERU_POLL_INTERVAL_SECONDS)
+
+
+@step_log("upload_pdf_and_poll")
+def upload_pdf_and_poll(pdf_path_obj: Path) -> str:
+    """上传 PDF 到 MinerU 并轮询解析结果，返回结果 zip 的下载地址。
+
+    vlm 后端对超大单页排版稿会连续重试后失败（err_msg: retry limit reached），
+    此时自动改用 pipeline 后端再解析一次，避免整条导入链路直接中断。
+    """
+    try:
+        return _run_extract(pdf_path_obj, MINERU_MODEL_VERSION)
+    except _MineruTaskFailed as exc:
+        logger.warning(
+            f"MinerU {MINERU_MODEL_VERSION} 后端解析失败，改用 {MINERU_FALLBACK_MODEL_VERSION} 重试：{exc}"
+        )
+    return _run_extract(pdf_path_obj, MINERU_FALLBACK_MODEL_VERSION)
 
 
 @step_log("download_and_extract_markdown")

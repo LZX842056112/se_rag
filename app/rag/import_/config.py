@@ -10,6 +10,9 @@ from app.shared.config.common import env_int
 
 # MinerU 模型版本（pipeline / vlm 等）
 MINERU_MODEL_VERSION = "vlm"
+# 主模型判定失败时的回退版本：vlm 后端对超大单页排版稿（如 A3 单页）会连续重试后失败，
+# pipeline 后端可以解析同一文件，故失败后自动换后端再试一次
+MINERU_FALLBACK_MODEL_VERSION = "pipeline"
 # MinerU 任务轮询最长等待时间（秒），超过判定失败
 MINERU_POLL_TIMEOUT_SECONDS = env_int("MINERU_POLL_TIMEOUT_SECONDS", 600)
 # MinerU 任务轮询间隔（秒）

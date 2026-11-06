@@ -97,6 +97,53 @@ def test_upload_pdf_passes_timeout(monkeypatch):
     assert recorded["put_timeout"] is not None, "上传 PDF 缺少 timeout"
 
 
+def test_fallback_backend_when_task_failed(monkeypatch):
+    """vlm 后端判定失败时改用回退后端；失败原因要带上服务端 err_msg。
+
+    回归背景：A3 单页排版稿在 vlm 后端连续重试 5 次仍失败（retry limit reached），
+    pipeline 后端可正常解析，此前整条导入只能看到 batch_id。
+    """
+    versions: list[str] = []
+
+    class _Resp:
+        status_code = 200
+
+        def __init__(self, payload):
+            self._payload = payload
+
+        def json(self):
+            return self._payload
+
+    def _post(**kwargs):
+        versions.append(kwargs["json"]["model_version"])
+        return _Resp({"code": 0, "data": {"batch_id": f"b{len(versions)}", "file_urls": []}})
+
+    polls = {"n": 0}
+
+    def _get(url=None, headers=None, timeout=None):
+        polls["n"] += 1
+        if polls["n"] == 1:
+            return _Resp({
+                "code": 0,
+                "data": {"extract_result": [
+                    {"state": "failed", "err_msg": "retry limit reached (5 attempts)"}
+                ]},
+            })
+        return _Resp({
+            "code": 0,
+            "data": {"extract_result": [{"state": "done", "full_zip_url": "http://x/z.zip"}]},
+        })
+
+    monkeypatch.setattr(svc.requests, "post", _post)
+    monkeypatch.setattr(svc.requests, "get", _get)
+    monkeypatch.setattr(svc, "MINERU_POLL_INTERVAL_SECONDS", 0)
+
+    zip_url = svc.upload_pdf_and_poll(_FakePdfPath())
+
+    assert zip_url == "http://x/z.zip"
+    assert versions == [svc.MINERU_MODEL_VERSION, svc.MINERU_FALLBACK_MODEL_VERSION]
+
+
 def test_reuses_existing_markdown_when_newer(monkeypatch, tmp_path):
     """断点续传：已有比 PDF 更新的解析产物时跳过 MinerU。"""
     pdf = tmp_path / "manual.pdf"
