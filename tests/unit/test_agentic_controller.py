@@ -325,6 +325,9 @@ def test_independent_write_flag_starts_publication_worker(monkeypatch):
         await asyncio.Event().wait()
     monkeypatch.setattr(query_server, 'SingleWorkerLease', Lease)
     monkeypatch.setattr(query_server, 'ensure_indexes', lambda: None)
+    # 离线用例不加载真实模型：预热逻辑由 test_query_server_warmup 单独覆盖
+    warmed = []
+    monkeypatch.setattr(query_server, 'warmup_models', lambda: warmed.append(True))
     monkeypatch.setattr(query_server, 'evolution_scheduler_loop', worker)
     monkeypatch.setattr(settings.evolution, 'enabled', False)
     monkeypatch.setattr(settings.evolution, 'write_enabled', True)
@@ -332,5 +335,6 @@ def test_independent_write_flag_starts_publication_worker(monkeypatch):
     async def check():
         async with query_server.lifespan(None):
             await asyncio.sleep(0)
+            assert warmed, "启动时必须先预热检索模型，否则首个查询会耗尽 Agentic 预算"
             assert started
     asyncio.run(check())

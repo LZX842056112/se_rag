@@ -26,6 +26,26 @@ from app.shared.config import settings
 from app.shared.runtime.logger import logger
 
 
+def warmup_models() -> None:
+    """预热检索模型：把冷启动成本移出首个请求的 60 秒预算。
+
+    BGE-M3 与重排模型都是进程内单例，首次调用才导入 torch 并加载权重。
+    本机 CPU 实测 BGE-M3 冷启动约 28 秒。该耗时若发生在请求内，会直接耗尽
+    Agentic 的总时限（见 app/rag/agentic/deadline.py），导致检索与作答全部失败。
+    预热失败只告警，不影响服务启动。
+    """
+    try:
+        from app.shared.models.embedding import get_bge_m3_ef
+        from app.shared.models.reranker import get_reranker_model
+
+        logger.info("开始预热检索模型（BGE-M3 / 重排）")
+        get_bge_m3_ef()
+        get_reranker_model()
+        logger.info("检索模型预热完成")
+    except Exception as exc:  # noqa: BLE001 - 模型缺失或显存不足时仍允许服务启动
+        logger.warning(f"检索模型预热失败（不影响启动）：{exc}")
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     """服务生命周期：确保 Mongo 索引就绪，并按开关启停自进化调度器。"""
@@ -35,6 +55,8 @@ async def lifespan(_app: FastAPI):
     try:
         # 确保数据库索引/集合结构就绪，后续读写才有正确约束。
         ensure_indexes()
+        # 接收请求前先加载模型：否则第一个查询会把 60 秒预算耗在冷启动上
+        await asyncio.to_thread(warmup_models)
         scheduler_task = None
         # 仅当允许写入且调度器开关开启时才启动后台循环（只读/导入进程不启动）。
         if writes_enabled() and settings.evolution.scheduler_enabled:
