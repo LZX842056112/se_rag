@@ -133,6 +133,7 @@ def record_query(metrics: QueryMetrics, state: dict, status: str, query: str):
     doc = metrics.document(state.get("intent", "rag"), status)
     doc.update({
         "answer_id": state.get("answer_id") or "",
+        "case_id": state.get("case_id", ""),
         "business_tag": state.get("business_tag", ""),
         "handoff": bool(state.get("handoff_required")),
         "query_hash": hashlib.sha256("".join(query.lower().split()).encode()).hexdigest(),

@@ -44,7 +44,8 @@ def test_collection_saves_internal_provenance_without_leaking_gold(eval_corpus):
     from app.rag_eval.answer_collection import collect_answers
     _, _, cases, _ = eval_corpus
     def invoke(**kwargs):
-        assert set(kwargs) == {"session_id", "original_query", "is_stream"}
+        assert set(kwargs) == {"session_id", "original_query", "is_stream", "case_id"}
+        assert kwargs["case_id"] == "one"
         return {"intent": "rag", "answer": "1 to 3", "answer_contexts": ["parent"],
                 "agentic_trace": [{"tool": "read", "status": "ok"}],
                 "evidence_manifest": [{"evidence_id": "a"}], "agentic_stop_reason": "supported",
@@ -109,7 +110,8 @@ def test_failed_queries_remain_in_latency_cost_and_quality_denominators(eval_cor
     pair["runs"]["agentic"]["results"][0].update(error="TimeoutError", elapsed_ms=60)
     class Metric:
         async def ascore(self, **kw): return SimpleNamespace(value=.8)
-    scorers = {n: Metric() for n in ("faithfulness", "answer_relevancy", "factual_correctness")}
+    scorers = {n: Metric() for n in ("faithfulness", "answer_relevancy", "context_precision",
+                                    "context_recall", "factual_correctness")}
     result = score_pair(pair, cases, manifest, scorers, {"judge_model": "judge"})
     assert result["runs"]["agentic"]["summary"]["query_errors"] == 1
     assert result["runs"]["agentic"]["runtime"]["latency_ms"]["p95"] == 60
@@ -228,14 +230,15 @@ def test_saved_pair_rescores_both_modes_with_one_judge_and_no_query(eval_corpus,
     backends = []
     def backend(config):
         backends.append(config.model)
-        return {name: Metric() for name in ("faithfulness", "answer_relevancy", "factual_correctness")}, None
+        return {name: Metric() for name in ("faithfulness", "answer_relevancy", "context_precision",
+                                            "context_recall", "factual_correctness")}, None
     def forbidden(*a, **kw): raise AssertionError("query pipeline called")
     monkeypatch.setattr(module, "_build_backend", backend)
     monkeypatch.setattr(module, "_collect_pair", forbidden)
     report = module.run_comparison(path, root / "report.json", snapshots_path=snapshot_path,
                                    allow_external=True, allow_unreviewed=True, project_root=root)
     assert backends == ["judge"]
-    assert len(calls) == 6
+    assert len(calls) == 10
     assert report["comparison"]["faithfulness"]["mean_delta"] == 0
     assert report["ready_for_baseline"] is False
     assert json.loads((root / "report.json").read_text())["scoring_config"]["judge_model"] == "judge"

@@ -14,6 +14,8 @@ class QueryGraphState(TypedDict):
     # 点选主体时前端附带的意图原句：用户点选前问过的那句话。
     # 非空时，主体消解直接用它拼出完整问句，不再让模型推断意图（避免被历史对话改写）。
     rewrite_hint: str
+    # 评测对齐标识：离线题库的 case_id；线上回放时透传，用于关联离线与线上指标。
+    case_id: str
 
     # 意图识别结果："rag"=知识库问答（默认）/"chitchat"=闲聊；
     # 由图入口 node_intent_route 回填，决定走检索链路还是闲聊作答分支。
@@ -72,6 +74,7 @@ query_graph_default_state: QueryGraphState = {
     "session_id": "",
     "original_query": "",
     "rewrite_hint": "",
+    "case_id": "",
     "intent": "rag",
     "turn_id": "",
     "answer_id": "",

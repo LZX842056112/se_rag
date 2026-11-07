@@ -375,3 +375,4 @@ node --test tests/frontend
 - 产品需求：[docs/PRD.md](docs/PRD.md)
 - 代码设计：[docs/CODE_DESIGN.md](docs/CODE_DESIGN.md)
 - 技术讲解与运维：[docs/TECHNICAL_GUIDE.md](docs/TECHNICAL_GUIDE.md)
+- 评测标准与门禁：[docs/EVAL_STANDARD.md](docs/EVAL_STANDARD.md)

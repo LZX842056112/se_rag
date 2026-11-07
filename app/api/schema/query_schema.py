@@ -26,6 +26,9 @@ class QueryRequestSchema(BaseModel):
     rewrite_hint: Annotated[
         str | None, StringConstraints(strip_whitespace=True, max_length=4096)
     ] = None
+    # 评测对齐标识：线上流量回放同一道离线题时携带该 case_id。
+    # 普通用户请求不填；它只用于把离线标注与线上反馈关联起来。
+    case_id: str | None = Field(default=None, max_length=64)
 
 # 查询模块流式响应结果
 class QueryStreamResponseSchema(BaseModel):

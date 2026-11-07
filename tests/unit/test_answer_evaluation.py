@@ -51,9 +51,10 @@ def test_collection_uses_real_question_and_unique_sessions_only(corpus):
     _, cases = corpus
     cases.append({**cases[0], "case_id": "two"})
     sessions = []
-    def invoke(*, session_id, original_query, is_stream):
+    def invoke(*, session_id, original_query, is_stream, case_id=None):
         assert original_query == "HAK 180 的范围是多少？"
         assert is_stream is False
+        assert case_id in ("one", "two")
         sessions.append(session_id)
         return {"intent": "rag", "answer": "范围是 50 到 170 mm。",
                 "answer_contexts": ["实际父章节和子块"], "metrics": {"llm_calls": 2}}
@@ -93,6 +94,7 @@ def test_zero_score_is_valid_and_not_confused_with_judge_error(corpus):
     _, cases = corpus
     report = score_snapshots(cases, [row()], {
         "faithfulness": FixedMetric(0.0), "answer_relevancy": FixedMetric(.75),
+        "context_precision": FixedMetric(.8), "context_recall": FixedMetric(.8),
         "factual_correctness": FixedMetric(ValueError("secret")),
     })
     assert report["summary"]["metrics"]["faithfulness"] == {"mean": 0.0, "valid_count": 1, "coverage": 1.0}
@@ -106,7 +108,7 @@ def test_invalid_scores_are_null_with_a_reason(corpus, value):
     from app.rag_eval.answer_scoring import score_snapshots
     _, cases = corpus
     report = score_snapshots(cases, [row()], {name: FixedMetric(value) for name in (
-        "faithfulness", "answer_relevancy", "factual_correctness")})
+        "faithfulness", "answer_relevancy", "context_precision", "context_recall", "factual_correctness")})
     result = report["results"][0]["metrics"]["faithfulness"]
     assert result == {"value": None, "status": "error", "reason": "invalid_score"}
     json.dumps(report, allow_nan=False)
@@ -116,7 +118,8 @@ def test_empty_evidence_and_missing_reference_do_not_invent_scores(corpus):
     from app.rag_eval.answer_scoring import score_snapshots
     _, cases = corpus
     cases[0]["reference"] = ""
-    metrics = {name: FixedMetric(.8) for name in ("faithfulness", "answer_relevancy", "factual_correctness")}
+    metrics = {name: FixedMetric(.8) for name in (
+        "faithfulness", "answer_relevancy", "context_precision", "context_recall", "factual_correctness")}
     report = score_snapshots(cases, [row(retrieved_contexts=[])], metrics)
     scores = report["results"][0]["metrics"]
     assert scores["faithfulness"]["reason"] == "missing_contexts"
@@ -129,7 +132,8 @@ def test_failures_and_wrong_routing_remain_in_report_denominator(corpus):
     _, cases = corpus
     cases = [{**cases[0], "case_id": str(i)} for i in range(4)]
     rows = [row("0"), row("1", error="query_failed"), row("2", actual_intent="chitchat"), row("3", response="")]
-    metrics = {name: FixedMetric(1) for name in ("faithfulness", "answer_relevancy", "factual_correctness")}
+    metrics = {name: FixedMetric(1) for name in (
+        "faithfulness", "answer_relevancy", "context_precision", "context_recall", "factual_correctness")}
     report = score_snapshots(cases, rows, metrics)
     assert report["summary"]["case_count"] == 4
     assert report["summary"]["query_errors"] == 1
@@ -147,7 +151,8 @@ def test_judge_timeout_is_per_metric_and_does_not_abort_batch(corpus):
             return SimpleNamespace(value=1)
     _, cases = corpus
     report = score_snapshots(cases, [row()], {"faithfulness": SlowMetric(),
-        "answer_relevancy": FixedMetric(1), "factual_correctness": FixedMetric(1)}, timeout_seconds=.01)
+        "answer_relevancy": FixedMetric(1), "context_precision": FixedMetric(1),
+        "context_recall": FixedMetric(1), "factual_correctness": FixedMetric(1)}, timeout_seconds=.01)
     scores = report["results"][0]["metrics"]
     assert scores["faithfulness"]["reason"] == "TimeoutError"
     assert scores["factual_correctness"]["value"] == 1

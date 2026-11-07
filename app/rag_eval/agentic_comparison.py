@@ -282,7 +282,12 @@ def run_comparison(cases_path=DEFAULT_CASES, report_path="output/agentic-compari
         return report
     finally:
         if client is not None:
-            asyncio.run(client.close())
+            try:
+                asyncio.run(client.close())
+            except RuntimeError:
+                # AsyncOpenAI 的 httpx 连接绑定在评分循环上；CLI 收尾时新 loop 可能已关闭。
+                # 进程即将退出，连接由操作系统回收；这里不能掩盖已写入的报告。
+                pass
 
 
 def main(argv=None):

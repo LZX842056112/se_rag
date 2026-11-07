@@ -31,6 +31,7 @@ def invoke_query_graph(
     is_stream: bool,
     rewrite_hint: str | None = None,
     turn_id: str | None = None,
+    case_id: str | None = None,
 ) -> QueryGraphState | None:
     """执行一次查询：清空旧进度 → 跑图 → 推送最终事件 → 写入未解决信号。
 
@@ -58,6 +59,7 @@ def invoke_query_graph(
             original_query=original_query,
             is_stream=is_stream,
             rewrite_hint=rewrite_hint or "",
+            case_id=case_id or "",
         )
         result_state = query_app.invoke(query_state)
         result_state["issue_id"] = register_unresolved(result_state)

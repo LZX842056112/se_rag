@@ -1,0 +1,37 @@
+name: eval-gate
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: uv sync --group dev
+      - name: Run offline tests
+        run: uv run pytest -q
+
+  dataset-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: uv sync --group dev
+      - name: Audit evaluation dataset
+        run: uv run python -m app.rag_eval.dataset_audit --warn-only
+
+# 真实 RAG 回归需要 Milvus / Mongo / MinIO 与模型密钥，不能放在 GitHub 托管 runner。
+# 在自托管 runner 上运行：
+#   python scripts/run_eval_regression.py --baseline <baseline.json> --current <current.json> --strict-dataset

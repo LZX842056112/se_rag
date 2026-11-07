@@ -51,6 +51,7 @@ def query(background_tasks: BackgroundTasks, query_params: QueryRequestSchema, r
             original_query=query_params.query,
             is_stream=is_stream,
             rewrite_hint=query_params.rewrite_hint,
+            case_id=query_params.case_id,
             turn_id=turn_id,
         )
         return QueryStreamResponseSchema(message=f"已开始查询:{query_params.query}", session_id=session_id, turn_id=turn_id)
@@ -60,6 +61,7 @@ def query(background_tasks: BackgroundTasks, query_params: QueryRequestSchema, r
         original_query=query_params.query,
         is_stream=is_stream,
         rewrite_hint=query_params.rewrite_hint,
+        case_id=query_params.case_id,
         turn_id=turn_id,
     )
     if state is None:

@@ -316,6 +316,11 @@ def summarize_eval_results(eval_results: list[dict]) -> dict:
                 mean(result["layers"][layer_name]["must_hit_rate"] for result in eval_results),
                 4,
             ),
+            "avg_recall_at_5": round(mean(result["layers"][layer_name]["recall_at_5"] for result in eval_results), 4),
+            "avg_recall_at_10": round(mean(result["layers"][layer_name]["recall_at_10"] for result in eval_results), 4),
+            "avg_mrr": round(mean(result["layers"][layer_name]["mrr"] for result in eval_results), 4),
+            "avg_ndcg_at_5": round(mean(result["layers"][layer_name]["ndcg_at_5"] for result in eval_results), 4),
+            "avg_ndcg_at_10": round(mean(result["layers"][layer_name]["ndcg_at_10"] for result in eval_results), 4),
         }
 
     return summary
@@ -340,6 +345,11 @@ def _to_chinese_case_result(eval_result: dict) -> dict:
             "精确率": layer_result.get("precision", 0.0),
             "召回率": layer_result.get("recall", 0.0),
             "必命中率": layer_result.get("must_hit_rate", 0.0),
+            "Recall@5": layer_result.get("recall_at_5", 0.0),
+            "Recall@10": layer_result.get("recall_at_10", 0.0),
+            "MRR": layer_result.get("mrr", 0.0),
+            "NDCG@5": layer_result.get("ndcg_at_5", 0.0),
+            "NDCG@10": layer_result.get("ndcg_at_10", 0.0),
         }
 
     return {
@@ -362,6 +372,11 @@ def _to_chinese_summary(summary: dict) -> dict:
             "平均精确率": layer_summary.get("avg_precision", 0.0),
             "平均召回率": layer_summary.get("avg_recall", 0.0),
             "平均必命中率": layer_summary.get("avg_must_hit_rate", 0.0),
+            "平均Recall@5": layer_summary.get("avg_recall_at_5", 0.0),
+            "平均Recall@10": layer_summary.get("avg_recall_at_10", 0.0),
+            "平均MRR": layer_summary.get("avg_mrr", 0.0),
+            "平均NDCG@5": layer_summary.get("avg_ndcg_at_5", 0.0),
+            "平均NDCG@10": layer_summary.get("avg_ndcg_at_10", 0.0),
         }
 
     return {

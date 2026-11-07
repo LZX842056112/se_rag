@@ -13,6 +13,8 @@ from app.evolution.repositories import evolution_repo
 from app.evolution.feedback.state import is_unresolved
 from app.rag.query.business import classify_business
 from app.shared.clients.history_repository import history_repository
+from app.shared.clients.mongo import get_collection
+from app.shared.config import settings
 from app.shared.runtime.logger import logger
 from app.shared.utils.answer import is_no_answer
 
@@ -98,8 +100,15 @@ def record_feedback(event: FeedbackEvent) -> None:
     if intent not in ("", "rag", "chitchat"):
         return
     query = answer.get("query") or answer.get("rewritten_query") or ""
+    try:
+        run_case = get_collection(settings.mongo.query_runs_collection).find_one(
+            {"answer_id": event.answer_id}, {"case_id": 1}
+        )
+    except Exception:
+        run_case = None
     canonical = event.model_copy(update={
         "query": query,
+        "case_id": str((run_case or {}).get("case_id") or ""),
         "business_tag": answer.get("business_tag") or classify_business(query),
         "rewritten_query": answer.get("rewritten_query") or "",
         "item_names": answer.get("item_names") or [],

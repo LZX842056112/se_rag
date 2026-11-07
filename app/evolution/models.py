@@ -19,6 +19,7 @@ class FeedbackEvent(BaseModel):
     session_id: str
     business_tag: str = ""
     answer_id: str = Field(default="", max_length=24)
+    case_id: str = ""                            # 离线题库对齐标识；普通线上请求为空
     resolved: bool | None = None
     query: str = ""
     rewritten_query: str = ""

@@ -8,6 +8,7 @@
       "session_id": "session-a",
       "business_tag": "",
       "answer_id": "",
+      "case_id": "",
       "resolved": null,
       "query": "",
       "rewritten_query": "",

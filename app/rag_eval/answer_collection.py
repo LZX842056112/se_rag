@@ -45,7 +45,8 @@ def collect_answers(cases: list[dict], invoke) -> list[dict]:
                "query_metrics": {}, "agentic_trace": [], "evidence_manifest": [],
                "agentic_metrics": {}, "agentic_stop_reason": None, "error": None}
         try:
-            state = invoke(session_id=session, original_query=case["query"], is_stream=False)
+            state = invoke(session_id=session, original_query=case["query"], is_stream=False,
+                           case_id=case["case_id"])
             if state is None:
                 row["error"] = "query_failed"
             else:

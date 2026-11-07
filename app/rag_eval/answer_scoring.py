@@ -7,7 +7,8 @@ import math
 from numbers import Real
 from statistics import mean
 
-METRICS = ("faithfulness", "answer_relevancy", "factual_correctness")
+METRICS = ("faithfulness", "answer_relevancy", "context_precision", "context_recall",
+           "factual_correctness")
 
 
 def validate_snapshot_rows(cases: list[dict], rows: list[dict]) -> dict[str, dict]:
@@ -35,6 +36,21 @@ def _unscored(reason: str, status: str = "not_evaluated") -> dict:
     return {"value": None, "status": status, "reason": reason}
 
 
+async def _score_metric(scorer, arguments: dict, timeout_seconds: float):
+    """单个指标最多尝试两次；只重试瞬时失败，不改变指标定义。"""
+    last = None
+    for attempt in range(2):
+        try:
+            return await asyncio.wait_for(scorer.ascore(**arguments), timeout=timeout_seconds)
+        except TimeoutError:
+            raise
+        except Exception as exc:
+            last = exc
+            if attempt == 0:
+                await asyncio.sleep(0.2)
+    raise last
+
+
 async def _score(cases, by_id, scorers, timeout_seconds):
     results = []
     for case in cases:
@@ -54,10 +70,11 @@ async def _score(cases, by_id, scorers, timeout_seconds):
             if status != "completed":
                 row["metrics"][name] = _unscored(status)
                 continue
-            if name == "faithfulness" and not any(c.strip() for c in snapshot["retrieved_contexts"]):
+            if name in ("faithfulness", "context_precision", "context_recall") and not any(
+                    c.strip() for c in snapshot["retrieved_contexts"]):
                 row["metrics"][name] = _unscored("missing_contexts")
                 continue
-            if name == "factual_correctness" and not row["reference"].strip():
+            if name in ("context_precision", "context_recall", "factual_correctness") and not row["reference"].strip():
                 row["metrics"][name] = _unscored("missing_reference")
                 continue
             if name not in scorers:
@@ -68,10 +85,17 @@ async def _score(cases, by_id, scorers, timeout_seconds):
                              "retrieved_contexts": snapshot["retrieved_contexts"]}
             elif name == "answer_relevancy":
                 arguments = {"user_input": case["query"], "response": snapshot["response"]}
+            elif name == "context_precision":
+                arguments = {"user_input": case["query"], "reference": row["reference"],
+                             "retrieved_contexts": snapshot["retrieved_contexts"]}
+            elif name == "context_recall":
+                arguments = {"user_input": case["query"],
+                             "retrieved_contexts": snapshot["retrieved_contexts"],
+                             "reference": row["reference"]}
             else:
                 arguments = {"response": snapshot["response"], "reference": row["reference"]}
             try:
-                result = await asyncio.wait_for(scorers[name].ascore(**arguments), timeout=timeout_seconds)
+                result = await _score_metric(scorers[name], arguments, timeout_seconds)
                 value = result.value
                 minimum = -1 if name == "answer_relevancy" else 0
                 if isinstance(value, bool) or not isinstance(value, Real) or not math.isfinite(value) or not minimum <= value <= 1:

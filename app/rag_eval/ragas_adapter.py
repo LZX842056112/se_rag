@@ -9,6 +9,7 @@ import math
 import os
 
 RAGAS_VERSION = "0.4.3"
+RUBRIC_VERSION = "ragas-0.4.3-default-v1"
 
 
 def evaluation_config(settings):
@@ -24,6 +25,7 @@ def evaluation_config(settings):
         raise ValueError("EVAL_LLM_TIMEOUT_SECONDS 必须是大于零的有限数值")
     return config, {
         "ragas_version": RAGAS_VERSION, "judge_model": config.model,
+        "rubric_version": RUBRIC_VERSION, "rubric_source": "ragas.metrics.collections.default",
         "provider_sha256": hashlib.sha256(config.base_url.encode()).hexdigest(),
         "embedding_model": settings.embedding.model_path or settings.embedding.model_name or "BAAI/bge-m3",
         "embedding_device": settings.embedding.device or "cpu", "embedding_fp16": settings.embedding.fp16,
@@ -96,7 +98,7 @@ def create_ragas_scorers(config):
         raise RuntimeError(f"评测要求 ragas=={RAGAS_VERSION}，当前为 {installed}")
     from openai import AsyncOpenAI
     from ragas.llms import llm_factory
-    from ragas.metrics.collections import AnswerRelevancy, FactualCorrectness, Faithfulness
+    from ragas.metrics.collections import AnswerRelevancy, ContextPrecision, ContextRecall, FactualCorrectness, Faithfulness
 
     client = AsyncOpenAI(base_url=config.base_url, api_key=config.api_key,
                          timeout=config.timeout_seconds, max_retries=0)
@@ -106,5 +108,7 @@ def create_ragas_scorers(config):
     return {
         "faithfulness": Faithfulness(llm=llm),
         "answer_relevancy": AnswerRelevancy(llm=llm, embeddings=embeddings, strictness=3),
+        "context_precision": ContextPrecision(llm=llm),
+        "context_recall": ContextRecall(llm=llm),
         "factual_correctness": FactualCorrectness(llm=llm, mode="f1", atomicity="low", coverage="low"),
     }, _EvaluationResources(client, embeddings)

@@ -106,7 +106,8 @@ def test_saved_answers_can_be_rescored_without_querying(corpus, monkeypatch, tmp
     monkeypatch.setattr(settings.evaluation, "model", "judge")
     monkeypatch.setattr(settings.llm, "base_url", "http://model.invalid/v1")
     monkeypatch.setattr(settings.llm, "api_key", "test-key")
-    metrics = {n: FixedMetric(.8) for n in ("faithfulness", "answer_relevancy", "factual_correctness")}
+    metrics = {n: FixedMetric(.8) for n in (
+        "faithfulness", "answer_relevancy", "context_precision", "context_recall", "factual_correctness")}
     monkeypatch.setattr(answer_quality, "_build_backend", lambda config: (metrics, None))
     output = root / "report.json"
     report = answer_quality.run_answer_eval(case_path, output, allow_external=True,
@@ -182,7 +183,8 @@ def test_partial_scoring_report_is_saved_when_a_baseline_was_requested(corpus, m
     from test_answer_evaluation import FixedMetric
     root, case_path, snapshot_path = _saved_fixture(corpus)
     _configured_settings(monkeypatch)
-    metrics = {n: FixedMetric(.8) for n in ("faithfulness", "answer_relevancy", "factual_correctness")}
+    metrics = {n: FixedMetric(.8) for n in (
+        "faithfulness", "answer_relevancy", "context_precision", "context_recall", "factual_correctness")}
     monkeypatch.setattr(answer_quality, "_build_backend", lambda config: (metrics, None))
     baseline = root / "baseline.json"
     answer_quality.run_answer_eval(case_path, baseline, allow_external=True,

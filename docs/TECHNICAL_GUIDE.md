@@ -639,20 +639,25 @@ curl http://127.0.0.1:8001/api/health
 
 ```bash
 uv run python -m app.rag_eval.answer_quality \
-  --cases app/rag_eval/artifacts/eval_cases.json \
-  --output output/answer-quality-report.json
+  --cases app/rag_eval/artifacts/answer_quality_draft.json \
+  --output output/answer-quality-report.json \
+  --allow-external
 ```
 
 可选参数：`--allow-external`、`--allow-unreviewed`、`--snapshots`、`--baseline`、`--limit`。
+报告包含 `faithfulness`、`answer_relevancy`、`context_precision`、`context_recall`、`factual_correctness`。
 
 ### 9.3 Agentic 对比
 
 ```bash
 uv run python -m app.rag_eval.agentic_comparison \
+  --cases app/rag_eval/artifacts/answer_quality_draft.json \
+  --eval-snapshot output/eval-snapshot.json \
+  --allow-external --allow-unreviewed \
   --output output/agentic-comparison.json
 ```
 
-用于对比 legacy 与 agentic 的答案质量与成本。
+用于对比 legacy 与 agentic 的答案质量、检索指标与运行成本。真实采集要求 `eval_` 前缀的隔离资源。
 
 ### 9.4 全流程实验
 
@@ -669,6 +674,46 @@ uv run python -m app.rag_eval.ui_trial prepare --run ui_test_YYYYMMDD_xxxxxxxx
 命令：`prepare`、`serve-query`、`serve-import`、`inspect`、`cycle`、`e2e`、`configure-images`。
 
 隔离资源使用独立的 Mongo 库、Milvus 集合、MinIO 桶；代码会校验资源名，拒绝连接非隔离资源。
+
+### 9.6 评测集审计
+
+```bash
+uv run python -m app.rag_eval.dataset_audit \
+  --cases app/rag_eval/artifacts/answer_quality_draft.json \
+  --min 100 --max 300 --require-reviewed
+```
+
+检查样本规模、复核状态、标准答案覆盖、来源文档与重复问题。未通过时报告只作探索性。
+
+### 9.7 Judge 人工校准
+
+```bash
+uv run python -m app.rag_eval.calibration \
+  --report output/answer-quality-report.json \
+  --labels output/human_labels.json \
+  --metric faithfulness --output output/calibration.json
+```
+
+要求固定 judge 模型与 `rubric_version`；默认至少 30 条人工样本，一致率 ≥ 0.8，Cohen's kappa ≥ 0.6。
+
+### 9.8 离线与线上对齐
+
+```bash
+uv run python -m app.rag_eval.alignment \
+  --cases app/rag_eval/artifacts/answer_quality_draft.json \
+  --online output/online_runs.json
+```
+
+线上回放请求携带 `case_id`；`query_runs` 与反馈事件保存该字段。也支持 `--mongo-hours 24` 直接读取近 24 小时记录。
+
+### 9.9 回归门禁
+
+```bash
+python scripts/run_eval_regression.py
+python scripts/run_eval_regression.py --baseline output/baseline.json --current output/current.json --strict-dataset
+```
+
+CI 在 push / PR 上运行离线单测与数据集审计（`.github/workflows/eval-gate.yml`）。真实 RAG 回归需要自托管 runner 与 Milvus / Mongo / MinIO。
 
 ## 10. 性能与容量
 

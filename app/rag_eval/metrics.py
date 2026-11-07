@@ -3,13 +3,17 @@
 
 这个文件只做“怎么算分”。
 
-读这个文件时可以抓住 4 个指标：
+读这个文件时可以抓住 7 个指标：
 1. `item_name_hit_rate`：主体识别对不对；
 2. `precision`：检索出来的内容准不准；
 3. `recall`：该召回的内容有没有召回到；
-4. `must_hit_rate`：关键 chunk 有没有打中。
+4. `must_hit_rate`：关键 chunk 有没有打中；
+5. `recall_at_k`：前 k 条里召回了多少相关 chunk；
+6. `mrr`：第一个相关 chunk 的平均倒数排名；
+7. `ndcg_at_k`：前 k 条的排序质量。
 """
 
+import math
 from typing import Any
 
 
@@ -100,31 +104,69 @@ def compute_item_name_hit_rate(
     return len(predicted & expected) / len(expected)
 
 
+def compute_recall_at_k(
+    retrieved_chunk_ids: list[Any] | None,
+    gold_chunk_ids: list[Any] | None,
+    k: int,
+) -> float:
+    """计算 Recall@k：前 k 条中命中的相关 chunk 数 / 全部相关 chunk 数。"""
+    retrieved = _deduplicate_keep_order(_normalize_chunk_ids(retrieved_chunk_ids))
+    gold = set(_deduplicate_keep_order(_normalize_chunk_ids(gold_chunk_ids)))
+    if not gold or k <= 0:
+        return 0.0
+    return len(set(retrieved[:k]) & gold) / len(gold)
+
+
+def compute_mrr(
+    retrieved_chunk_ids: list[Any] | None,
+    gold_chunk_ids: list[Any] | None,
+) -> float:
+    """计算 MRR：第一个相关 chunk 的排名倒数；没有命中返回 0。"""
+    retrieved = _deduplicate_keep_order(_normalize_chunk_ids(retrieved_chunk_ids))
+    gold = set(_deduplicate_keep_order(_normalize_chunk_ids(gold_chunk_ids)))
+    if not gold:
+        return 0.0
+    for rank, chunk_id in enumerate(retrieved, start=1):
+        if chunk_id in gold:
+            return 1.0 / rank
+    return 0.0
+
+
+def compute_ndcg_at_k(
+    retrieved_chunk_ids: list[Any] | None,
+    gold_chunk_ids: list[Any] | None,
+    k: int,
+) -> float:
+    """计算 NDCG@k：二值相关性下的归一化折损累计增益。"""
+    retrieved = _deduplicate_keep_order(_normalize_chunk_ids(retrieved_chunk_ids))
+    gold = set(_deduplicate_keep_order(_normalize_chunk_ids(gold_chunk_ids)))
+    if not gold or k <= 0:
+        return 0.0
+    dcg = sum(1.0 / math.log2(rank + 1)
+              for rank, chunk_id in enumerate(retrieved[:k], start=1) if chunk_id in gold)
+    ideal = sum(1.0 / math.log2(rank + 1)
+                for rank in range(1, min(len(gold), k) + 1))
+    return dcg / ideal if ideal else 0.0
+
+
 def compute_chunk_metrics(
     retrieved_chunk_ids: list[Any] | None,
     gold_chunk_ids: list[Any] | None,
     must_hit_chunk_ids: list[Any] | None = None,
+    *,
+    k_values: tuple[int, ...] = (5, 10),
 ) -> dict[str, Any]:
     """
-    计算单层结果的 3 个核心指标。
+    计算单层结果的检索指标。
 
     参数：
     - retrieved_chunk_ids：这一层实际检索到的 chunk_id
     - gold_chunk_ids：题库标注的相关 chunk_id
     - must_hit_chunk_ids：题库标注的关键 chunk_id
+    - k_values：Recall@k 与 NDCG@k 的 k 取值
 
     返回值：
-    - dict：包含命中列表、命中数量、precision、recall、must_hit_rate
-
-    指标说明：
-    1. `precision`
-       检索出来的 chunk 里，有多少真的是相关内容。
-
-    2. `recall`
-       标注相关的 chunk 里，有多少被成功找回来了。
-
-    3. `must_hit_rate`
-       标注为关键内容的 chunk，有多少被成功命中。
+    - dict：包含命中列表、precision、recall、must_hit_rate、Recall@k、MRR、NDCG@k
     """
     retrieved = _deduplicate_keep_order(_normalize_chunk_ids(retrieved_chunk_ids))
     gold = _deduplicate_keep_order(_normalize_chunk_ids(gold_chunk_ids))
@@ -139,7 +181,7 @@ def compute_chunk_metrics(
     recall = len(hit_chunk_ids) / len(gold_set) if gold_set else 0.0
     must_hit_rate = len(must_hit_ids) / len(must_hit_set) if must_hit_set else 0.0
 
-    return {
+    result = {
         # 这一层实际检索到的 chunk_id 列表。
         # 例如：["101", "102", "103"]
         "retrieved_chunk_ids": retrieved,
@@ -174,6 +216,11 @@ def compute_chunk_metrics(
         # 反映“最关键的内容有没有打中”。
         "must_hit_rate": round(must_hit_rate, 4),
     }
+    for k in k_values:
+        result[f"recall_at_{k}"] = round(compute_recall_at_k(retrieved, gold, k), 4)
+        result[f"ndcg_at_{k}"] = round(compute_ndcg_at_k(retrieved, gold, k), 4)
+    result["mrr"] = round(compute_mrr(retrieved, gold), 4)
+    return result
 
 
 def evaluate_query_state(result_state: dict[str, Any], expected: dict[str, Any]) -> dict[str, Any]:

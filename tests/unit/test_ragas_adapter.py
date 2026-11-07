@@ -56,9 +56,10 @@ def test_real_ragas_scores_correct_wrong_incomplete_and_irrelevant_answers(backe
             "reference": "reference", "source": {}, "annotation_status": "reviewed"}
     row = {"case_id": "one", "query": "question", "response": "answer", "actual_intent": "rag",
            "retrieved_contexts": ["actual evidence"], "error": None}
-    report = score_snapshots([case], [row], metrics, close=client.close)
+    selected = {name: metrics[name] for name in ("faithfulness", "answer_relevancy", "factual_correctness")}
+    report = score_snapshots([case], [row], selected, close=client.close)
     scores = report["results"][0]["metrics"]
-    assert tuple(scores[n]["value"] for n in metrics) == pytest.approx(expected)
+    assert tuple(scores[n]["value"] for n in selected) == pytest.approx(expected)
     assert queue == []
 
 

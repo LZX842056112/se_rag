@@ -25,10 +25,15 @@ def db(monkeypatch):
     return database
 
 
+_EVENT_SEQUENCE = [0]
+
+
 def event(db, **changes):
+    _EVENT_SEQUENCE[0] += 1
     row = {"session_id": "s", "query": "烫金机有蓝牙吗", "item_names": ["HAK180"],
            "business_tag": "product_knowledge", "answer_id": str(ObjectId()),
-           "cited_chunk_ids": ["c1"], "adopt": False, "thumbs": -1, "ts": time.time(), **changes}
+           "cited_chunk_ids": ["c1"], "adopt": False, "thumbs": -1,
+           "ts": time.time() + _EVENT_SEQUENCE[0] * 1e-6, **changes}
     row["_id"] = db[settings.mongo.fb_events_collection].insert_one(row).inserted_id
     return row
 
