@@ -10,6 +10,13 @@ from app.evolution.models import KnowledgeCandidate
 from app.shared.config import settings
 
 
+@pytest.fixture(autouse=True)
+def evolution_writes(monkeypatch):
+    """审批写操作测试不依赖本地 .env 的 EVOLUTION_ENABLED。"""
+    monkeypatch.setattr(settings.evolution, "enabled", True)
+    monkeypatch.setattr(settings.evolution, "write_enabled", True)
+
+
 @pytest.fixture
 def fake_mongo(monkeypatch):
     client = mongomock.MongoClient()

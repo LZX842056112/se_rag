@@ -5,12 +5,16 @@ import pytest
 from bson import ObjectId
 
 from app.evolution import governance as g, repositories
+from app.shared.config import settings
 
 
 @pytest.fixture
 def db(monkeypatch):
     db = mongomock.MongoClient().test_governance
     monkeypatch.setattr(repositories, "get_collection", lambda name: db[name])
+    monkeypatch.setattr(settings.evolution, "enabled", True)
+    monkeypatch.setattr(settings.evolution, "write_enabled", True)
+    monkeypatch.setattr(settings.evolution, "recall_enabled", True)
     monkeypatch.setattr(g, "writes_enabled", lambda: True)
     monkeypatch.setattr(g, "resolve_source", lambda ref: {
         "chunk_id": ref, "doc_id": "manual", "document_version": "v1",
