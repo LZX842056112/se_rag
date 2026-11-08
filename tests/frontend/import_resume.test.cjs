@@ -37,6 +37,12 @@ function harness({ storage = new Map(), requests = [], status, upload, base = 'h
     ['.file-name', '.file-size', '.progress-bar-container', '.progress-bar', '.log-details', '.log-details summary', '.log-list', '.status-badge'].forEach(selector => {
       item.selectors[selector] = element('div', selector.slice(1));
     });
+    const reason = element('div', 'failure-reason');
+    const reasonText = element('span', 'failure-reason-text');
+    reason.appendChild(reasonText);
+    reason.selectors = { '.failure-reason-text': reasonText };
+    item.selectors['.failure-reason'] = reason;
+    item.selectors['.failure-reason-text'] = reasonText;
     nodes.set(item.id, item); item.parent = fileList; fileList.children.unshift(item);
   };
   const context = {
@@ -93,7 +99,10 @@ for (const state of ['completed', 'failed']) {
     assert.equal(second.cards().length, 1);
     assert.match(second.cards()[0].querySelector('.status-badge').textContent, state === 'completed' ? /已完成/ : /失败/);
     assert.equal(second.timers.size, 0);
-    if (state === 'failed') assert.match(second.cards()[0].querySelector('.log-list').children[0].textContent, /测试失败原因/);
+    if (state === 'failed') {
+      assert.match(second.cards()[0].querySelector('.log-list').children[0].textContent, /测试失败原因/);
+      assert.match(second.cards()[0].querySelector('.failure-reason-text').textContent, /测试失败原因/);
+    }
   });
 }
 
@@ -228,6 +237,7 @@ test('a rejected batch marks every file failed without polling', async () => {
   for (const card of h.cards()) {
     assert.match(card.querySelector('.status-badge').textContent, /失败/);
     assert.match(card.querySelector('.log-list').children[0].textContent, /bad\.txt/);
+    assert.match(card.querySelector('.failure-reason-text').textContent, /bad\.txt/);
   }
   assert.equal(h.requests.filter(path => path.startsWith('/status/')).length, 0);
 });
@@ -256,4 +266,18 @@ test('a queued import shows queued state and keeps polling', async () => {
   assert.match(h.cards()[0].querySelector('.status-badge').textContent, /排队中/);
   assert.ok(h.requests.includes('/status/task-1'));
   assert.equal(h.timers.size, 1);
+});
+
+test('a failed import shows a readable reason without expanding the log', async () => {
+  const h = harness({ status: () => ({
+    status: 'failed', done_list: [], running_list: [],
+    error_code: 'mineru_failed', message: 'MinerU 解析任务失败（model_version=pipeline）'
+  }) });
+  await h.upload();
+  const card = h.cards()[0];
+  assert.match(card.querySelector('.status-badge').textContent, /失败/);
+  const reason = card.querySelector('.failure-reason');
+  assert.equal(reason.hidden, false);
+  assert.match(card.querySelector('.failure-reason-text').textContent, /加密/);
+  assert.match(card.querySelector('.log-list').children[0].textContent, /MinerU/);
 });

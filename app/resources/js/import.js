@@ -18,6 +18,29 @@
   // 进行中的状态：这些记录不允许删除，重试也只在 failed 时开放
   const ACTIVE_STATUSES = ['uploading', 'pending', 'processing'];
 
+  // 失败原因提示：优先显示可读的中文说明，原始错误放在可展开的日志里
+  const FAILURE_HINTS = {
+    mineru_failed: 'PDF 解析失败。请检查文件是否加密、损坏或页数过多。',
+    mineru_timeout: 'PDF 解析超时。请稍后重试，或拆分文件。',
+    parse_failed: '解析结果不完整。请重试。',
+    split_empty: '文档没有可切分的正文。请检查文件内容。',
+    import_busy: '导入任务较多，等待超时。请稍后重试。',
+    storage_unavailable: '存储服务不可用。请检查 MinIO、Milvus 或 MongoDB。',
+    embedding_failed: '向量生成失败。请稍后重试。',
+    item_name_failed: '主体名称识别失败。请稍后重试。',
+    index_failed: '写入知识库失败。请检查存储服务。',
+    index_count_mismatch: '入库数量不一致。请重试。',
+    import_source_missing: '原始文件不存在。请重新上传。',
+    policy_metadata_required: '业务政策必须填写版本和未来的失效时间。',
+    policy_metadata_expired: '业务政策的版本或有效期已失效。请重新上传。',
+    unsupported_type: '文件类型不支持。仅支持 md / pdf。',
+    file_too_large: '文件超过大小上限。',
+    file_content_mismatch: '文件内容与扩展名不匹配。',
+    save_failed: '文件保存失败。请重试。',
+    invalid_filename: '文件名不合法。',
+    too_many_files: '一次上传文件过多。'
+  };
+
   const dropZone = document.getElementById('dropZone');
   const fileInput = document.getElementById('fileInput');
   const fileList = document.getElementById('fileList');
@@ -126,6 +149,28 @@
     badge.className = 'status-badge ' + cls;
   }
 
+  // 服务端消息通常更具体（例如点名哪个文件）。任务失败时优先用中文提示，
+  // 因为原始异常文本对用户不可读，细节仍放在可展开的日志里。
+  function failureText(errorCode, message, preferHint) {
+    const hint = errorCode ? FAILURE_HINTS[errorCode] : '';
+    if (preferHint) return hint || message || errorCode || '导入失败';
+    return message || hint || errorCode || '导入失败';
+  }
+
+  // 失败原因常驻显示，用户不用展开日志就能看到原因；空字符串表示隐藏
+  function setFailureReason(itemEl, text) {
+    const box = itemEl.querySelector('.failure-reason');
+    if (!box) return;
+    const textEl = box.querySelector('.failure-reason-text');
+    if (!text) {
+      box.hidden = true;
+      if (textEl) textEl.textContent = '';
+      return;
+    }
+    if (textEl) textEl.textContent = text;
+    box.hidden = false;
+  }
+
   function normalizeDoneLog(text) {
     // 后端可能返回中文节点名，也可能已拼接“已完成”
     if (typeof text !== 'string') return String(text);
@@ -172,6 +217,7 @@
         if (!current()) return;
         if (!data.status) {
           setBadge(itemEl, '状态不可用', 'status-error');
+          setFailureReason(itemEl, '无法读取任务状态。请确认导入服务正常，并检查导入令牌。');
           remember(itemEl, { status: 'unavailable' });
           stop();
           return;
@@ -181,16 +227,20 @@
         renderLogs(itemEl, data.done_list, data.running_list);
         if (data.status === 'completed') {
           setBadge(itemEl, '已完成', 'status-completed');
+          setFailureReason(itemEl, '');
           updateProgressBar(itemEl.querySelector('.progress-bar'), 100);
           stop();
         } else if (data.status === 'pending') {
           // 任务在进程内队列里等待执行，继续轮询，不能当成失败
           setBadge(itemEl, '排队中...', 'status-processing');
+          setFailureReason(itemEl, '');
         } else if (data.status === 'processing') {
           // 进度由日志反映，不造假百分比
           setBadge(itemEl, '处理中...', 'status-processing');
+          setFailureReason(itemEl, '');
         } else if (data.status === 'failed') {
           setBadge(itemEl, '失败', 'status-error');
+          setFailureReason(itemEl, failureText(data.error_code, data.message, true));
           if (data.error_code) {
             const logListEl = itemEl.querySelector('.log-list');
             logListEl.innerHTML = '';
@@ -205,6 +255,7 @@
         if (needsImportToken(e)) {
           highlightTokenInput();
           setBadge(itemEl, '等待验证导入令牌', 'status-error');
+          setFailureReason(itemEl, '导入令牌无效或未配置。请保存正确的导入令牌。');
           stop();
         } else {
           const record = taskRecords.get(itemEl.id);
@@ -221,8 +272,9 @@
     poll();
   }
 
-  function failItem(itemEl, logSummary, logListEl, logDetails, message, status = 'failed') {
+  function failItem(itemEl, logSummary, logListEl, logDetails, message, status = 'failed', errorCode = '', preferHint = false) {
     setBadge(itemEl, status === 'interrupted' ? '上传中断' : '失败', 'status-error');
+    setFailureReason(itemEl, failureText(errorCode, message, preferHint));
     remember(itemEl, { status, message });
     logSummary.textContent = '日志（失败，点击展开）';
     logListEl.innerHTML = '';
@@ -239,6 +291,10 @@
           <span class="file-name">${App.escapeHtml(name)}</span>
           <span class="file-size">${(size / 1024).toFixed(2)} KB</span>
           <div class="progress-bar-container"><div class="progress-bar"></div></div>
+          <div class="failure-reason" hidden>
+            <span class="failure-reason-title">失败原因</span>
+            <span class="failure-reason-text"></span>
+          </div>
           <details class="log-details">
             <summary>日志（点击展开）</summary>
             <ul class="log-list"></ul>
@@ -309,7 +365,8 @@
       });
       // 服务端沿用原 task_id：进度归零后重新轮询，前端不必更换地址
       remember(itemEl, { status: 'pending', done_list: [], running_list: [], error_code: '', message: '' });
-      setBadge(itemEl, '处理中...', 'status-processing');
+      setBadge(itemEl, '排队中...', 'status-processing');
+      setFailureReason(itemEl, '');
       renderLogs(itemEl, [], []);
       updateProgressBar(itemEl.querySelector('.progress-bar'), 0);
       App.toast((result && result.message) || '已重新提交导入');
@@ -402,7 +459,8 @@
       if (record.task_id) {
         if (record.status === 'failed') {
           failItem(itemEl, itemEl.querySelector('.log-details summary'), itemEl.querySelector('.log-list'),
-            itemEl.querySelector('.log-details'), record.message || record.error_code || '导入失败');
+            itemEl.querySelector('.log-details'), record.message || record.error_code || '导入失败',
+            'failed', record.error_code, true);
         } else {
           const completed = record.status === 'completed';
           const queued = record.status === 'pending';
@@ -476,7 +534,8 @@
       console.warn(error);
       if (needsImportToken(error)) highlightTokenInput();
       const message = (error && error.message) ? error.message : String(error);
-      items.forEach(item => failItem(item.itemEl, item.logSummary, item.logListEl, item.logDetails, message));
+      items.forEach(item => failItem(item.itemEl, item.logSummary, item.logListEl, item.logDetails,
+        message, 'failed', error && error.code));
     } finally {
       refreshEmptyHint();
     }
