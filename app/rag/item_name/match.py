@@ -2,8 +2,10 @@
 
 - ``search_by_item_names``：对主体名做 BGE-M3 混合检索，取 top-N 候选；
 - ``select_item_names``：按「top1 下限 + top1/top2 间距」判定"确认 / 可选 / 丢弃"；
-- ``resolve_existing_item_name``：写入端入口 —— 新识别的主体名若与库内某实体同一，
-  则复用库内标准名，从源头避免近重复主体名（读取端的 ``expand_item_names`` 只兜底存量）。
+- ``resolve_existing_item_name``：写入端入口 —— 只按词法规则复用库内同一实体的标准名
+  （精确同名 / 品牌前缀后缀）。**不再用向量相似度自动归并**：库内只有一个主体时，
+  不同型号的相似名会被误判为同一实体（实测 HL-3040CN 被并入 HAK 180）。
+  语义相似留给读取端的用户确认，写入端只做可解释的词法归并。
 """
 from __future__ import annotations
 
@@ -298,21 +300,21 @@ def select_item_names(milvus_result: dict[str, list[dict]]) -> dict[str, list]:
 
 
 def resolve_existing_item_name(raw_name: str) -> tuple[str, dict | None]:
-    """写入端主体归并：把新识别的主体名对齐到库内已存在的同一实体。
+    """写入端主体归并：只复用词法上的同一实体。
 
-    命中则返回库内标准名与判定证据；未命中返回原名与 None。
-    与读取端共用同一套阈值/间距口径，保证"写入怎么归并"与"读取怎么确认"一致。
+    历史问题：写入端曾复用读取端的向量相似判定。库内只有 ``Brother HAK 180 烫金机``
+    时，``Brother HL-3040CN网络打印服务器`` 的向量分 0.6537 刚过下限，且没有第二个
+    主体可算间距（间距为无穷大），于是被错误归并成 HAK 180，污染主体名索引与切片。
+
+    现在只用可解释的词法规则：
+    - 归一化精确同名；
+    - 「短名是长名后缀」的品牌前缀差异（``HAK 180 烫金机`` → ``Brother HAK 180 烫金机``）。
+    其余情况保留新名字。语义相似交给读取端向用户确认，宁可多一条主体名，也不写错。
     """
     name = str(raw_name or "").strip()
     if not name:
         return raw_name, None
-    # 1. 目录命中（归一化精确同名或同一实体）：直接复用，省一次向量检索
     hit = match_catalog_name(name)
     if hit:
         return hit[0], {"item_name": hit[0], "score": None, "matched_by": hit[1]}
-    # 2. 向量检索 + 相对判定
-    confirmed = select_item_names(search_by_item_names([name])).get("confirmed_list") or []
-    if not confirmed:
-        return name, None
-    resolved = confirmed[0]
-    return str(resolved.get("item_name") or name), resolved
+    return name, None

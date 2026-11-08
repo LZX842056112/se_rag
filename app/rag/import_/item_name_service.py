@@ -44,10 +44,10 @@ def recognize_item_name_by_chunks(chunks: list[dict], file_title: str) -> str:
 
 @step_log("resolve_item_name_against_catalog")
 def resolve_item_name_against_catalog(item_name: str) -> str:
-    """写入端主体归并：库内已有同一实体时复用其标准名，避免多次导入产生近重复主体名。
+    """写入端主体归并：只复用词法上的同一实体（精确同名 / 品牌前缀后缀）。
 
-    与读取端共用同一套阈值/间距口径（见 ``app/rag/item_name/match.py``），因此
-    「导入时归并到什么名字」与「提问时能确认到什么名字」天然一致。
+    写入端不再用向量相似度自动合并，避免「库内只有一个主体时，不同型号被误并」。
+    语义相似由读取端向用户确认；写入端宁可保留新名字，也不写错主体。
     """
     resolved, evidence = resolve_existing_item_name(item_name)
     if evidence and normalize_item_name(resolved) != normalize_item_name(item_name):

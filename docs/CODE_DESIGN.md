@@ -85,7 +85,7 @@
 | `item_name` | VARCHAR(512) | 主体标准名 |
 | `dense_vector` / `sparse_vector` | 向量 | 主体名向量 |
 
-写入策略：先插入新行并取回自增 pk，再删除该 `file_title` 下其他 pk。避免“先删后插”造成主体名丢失。
+写入策略：先插入新行并取回自增 pk，再删除该 `file_title` 下其他 pk。避免“先删后插”造成主体名丢失。写入端只做词法归并（精确同名 / 品牌前缀后缀），不用向量相似度自动合并。
 
 #### `kb_evolution_items`（已审批 FAQ）
 
@@ -182,7 +182,7 @@ node_md_img → node_document_split → node_item_name_recognition
 | `node_pdf_to_md` | `pdf_parse_service.parse_pdf_to_markdown` | MinerU 上传、轮询、下载、解压、重命名 |
 | `node_md_img` | `enrich_markdown_images.enrich_markdown_images` | 图片说明、MinIO 上传、链接替换、写 `_new.md` |
 | `node_document_split` | `split_service.split_document` | 结构解析、章节识别、父块/子块 |
-| `node_item_name_recognition` | `item_name_service.recognize_and_index_item_name` | 主体识别、归并、写索引、回填 |
+| `node_item_name_recognition` | `item_name_service.recognize_and_index_item_name` | 主体识别、词法归并、写索引、回填 |
 | `node_bge_embedding` | `embedding_service.generate_chunk_embeddings` | 批量向量化 |
 | `node_import_milvus` | `index_service.index_chunks` | 建集合、对齐、upsert、清理旧块、写父块、对账 |
 
