@@ -13,6 +13,8 @@
 
   // 与服务端 IMPORT_MAX_UPLOAD_MB 默认值保持一致；本地先拦一次，避免白传超大文件
   const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
+  // 与服务端 MAX_BATCH_FILES 保持一致；一次请求最多携带的文件数
+  const MAX_BATCH_FILES = 20;
   // 进行中的状态：这些记录不允许删除，重试也只在 failed 时开放
   const ACTIVE_STATUSES = ['uploading', 'pending', 'processing'];
 
@@ -98,7 +100,9 @@
   fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
 
   function handleFiles(files) {
-    Array.from(files).forEach(uploadFile);
+    const selected = Array.from(files);
+    if (!selected.length) return;
+    uploadBatch(selected);
   }
 
   // 任务区空态提示
@@ -179,7 +183,10 @@
           setBadge(itemEl, '已完成', 'status-completed');
           updateProgressBar(itemEl.querySelector('.progress-bar'), 100);
           stop();
-        } else if (data.status === 'processing' || data.status === 'pending') {
+        } else if (data.status === 'pending') {
+          // 任务在进程内队列里等待执行，继续轮询，不能当成失败
+          setBadge(itemEl, '排队中...', 'status-processing');
+        } else if (data.status === 'processing') {
           // 进度由日志反映，不造假百分比
           setBadge(itemEl, '处理中...', 'status-processing');
         } else if (data.status === 'failed') {
@@ -397,8 +404,10 @@
           failItem(itemEl, itemEl.querySelector('.log-details summary'), itemEl.querySelector('.log-list'),
             itemEl.querySelector('.log-details'), record.message || record.error_code || '导入失败');
         } else {
-          setBadge(itemEl, record.status === 'completed' ? '已完成' : '处理中...',
-            record.status === 'completed' ? 'status-completed' : 'status-processing');
+          const completed = record.status === 'completed';
+          const queued = record.status === 'pending';
+          setBadge(itemEl, completed ? '已完成' : (queued ? '排队中...' : '处理中...'),
+            completed ? 'status-completed' : 'status-processing');
         }
         if (record.status === 'completed') updateProgressBar(itemEl.querySelector('.progress-bar'), 100);
         if (!['completed', 'failed'].includes(record.status)) pollStatus(record.task_id, itemEl);
@@ -412,26 +421,38 @@
     });
   }
 
-  async function uploadFile(file) {
-    const record = { id: 'file-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 11),
-      name: file.name, size: file.size, task_id: '', status: 'uploading', done_list: [], running_list: [] };
-    const itemEl = createTaskItem(record);
-    saveTasks();
-    const progressContainer = itemEl.querySelector('.progress-bar-container');
-    const logDetails = itemEl.querySelector('.log-details');
-    const logSummary = itemEl.querySelector('.log-details summary');
-    const logListEl = itemEl.querySelector('.log-list');
+  async function uploadBatch(files) {
+    if (files.length > MAX_BATCH_FILES) {
+      App.toast(`一次最多上传 ${MAX_BATCH_FILES} 个文件`);
+      return;
+    }
 
-    // 本地先做大小校验：避免把超大文件白传到服务端再被 413 拒绝
-    if (file.size > MAX_UPLOAD_BYTES) {
-      failItem(itemEl, logSummary, logListEl, logDetails,
-        `文件过大（上限 ${Math.round(MAX_UPLOAD_BYTES / 1024 / 1024)}MB）`);
+    // 先按选择顺序建记录；响应里的 task_ids 也按同一顺序返回
+    const items = files.map(file => {
+      const record = { id: 'file-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 11),
+        name: file.name, size: file.size, task_id: '', status: 'uploading', done_list: [], running_list: [] };
+      const itemEl = createTaskItem(record);
+      return {
+        itemEl,
+        progressContainer: itemEl.querySelector('.progress-bar-container'),
+        logDetails: itemEl.querySelector('.log-details'),
+        logSummary: itemEl.querySelector('.log-details summary'),
+        logListEl: itemEl.querySelector('.log-list')
+      };
+    });
+    saveTasks();
+
+    // 本地先做大小校验：任一文件超限即整批不发送，与服务端「整批拒绝」一致
+    const oversize = files.find(file => file.size > MAX_UPLOAD_BYTES);
+    if (oversize) {
+      const message = `文件过大（上限 ${Math.round(MAX_UPLOAD_BYTES / 1024 / 1024)}MB）：${oversize.name}`;
+      items.forEach(item => failItem(item.itemEl, item.logSummary, item.logListEl, item.logDetails, message));
       refreshEmptyHint();
       return;
     }
 
     const formData = new FormData();
-    formData.append('files', file);
+    files.forEach(file => formData.append('files', file));
     const kind = document.getElementById('documentKind').value;
     formData.append('document_kind', kind);
     formData.append('document_version', document.getElementById('documentVersion').value.trim());
@@ -439,21 +460,23 @@
     if (until) formData.append('valid_until', String(new Date(until).getTime() / 1000));
 
     try {
-      progressContainer.style.display = 'block';
+      items.forEach(item => { item.progressContainer.style.display = 'block'; });
       const result = await App.fetchJson(App.PATHS.upload, {
         method: 'POST', body: formData, token: currentToken()
       });
       const ids = Array.isArray(result.task_ids) ? result.task_ids : [];
-      if (!ids.length) throw new Error('上传接口未返回 task_id');
-      remember(itemEl, { task_id: ids[0], status: 'processing' });
-      setBadge(itemEl, '处理中...', 'status-processing');
-      pollStatus(ids[0], itemEl);
+      if (!ids.length || ids.length !== files.length) throw new Error('上传接口返回的任务数量与文件数量不一致');
+      items.forEach((item, index) => {
+        remember(item.itemEl, { task_id: ids[index], status: 'pending' });
+        setBadge(item.itemEl, '排队中...', 'status-processing');
+        pollStatus(ids[index], item.itemEl);
+      });
     } catch (error) {
-      // 业务拒绝（如 422 仅支持 md/pdf）属预期路径，用 warn 避免污染错误监控
+      // 业务拒绝（如 422 整批含非法文件）属预期路径，用 warn 避免污染错误监控
       console.warn(error);
       if (needsImportToken(error)) highlightTokenInput();
-      failItem(itemEl, logSummary, logListEl, logDetails,
-        (error && error.message) ? error.message : String(error));
+      const message = (error && error.message) ? error.message : String(error);
+      items.forEach(item => failItem(item.itemEl, item.logSummary, item.logListEl, item.logDetails, message));
     } finally {
       refreshEmptyHint();
     }

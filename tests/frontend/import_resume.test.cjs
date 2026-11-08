@@ -6,7 +6,7 @@ const source = fs.readFileSync('app/resources/js/import.js', 'utf8');
 const flush = () => new Promise(resolve => setImmediate(resolve));
 
 function harness({ storage = new Map(), requests = [], status, upload, base = 'http://127.0.0.1:8010', blockedStorage = false } = {}) {
-  const nodes = new Map(), timers = new Map(), windowEvents = {}, toasts = [];
+  const nodes = new Map(), timers = new Map(), windowEvents = {}, toasts = [], formBodies = [];
   let nextTimer = 1;
   function element(tag = 'div', className = '', text = '') {
     const el = { tag, className: className || '', textContent: text, children: [], style: {}, dataset: {}, listeners: {}, value: '',
@@ -52,15 +52,22 @@ function harness({ storage = new Map(), requests = [], status, upload, base = 'h
     document: { getElementById: id => nodes.get(id) },
     sessionStorage: { getItem(key) { if (blockedStorage) throw Error('blocked'); return storage.get(key) || null; },
       setItem(key, value) { if (blockedStorage) throw Error('blocked'); storage.set(key, value); } },
-    FormData: class { append() {} }, console: { warn() {}, error() {} },
+    FormData: class {
+      constructor() { this.entries = []; formBodies.push(this); }
+      append(key, value) { this.entries.push([key, value]); }
+    },
+    console: { warn() {}, error() {} },
     window: { addEventListener: (type, callback) => { windowEvents[type] = callback; } },
     setInterval: callback => { const id = nextTimer++; timers.set(id, callback); return id; },
     clearInterval: id => timers.delete(id),
   };
   vm.runInNewContext(source, context);
-  return { storage, requests, nodes, timers, toasts, fileList,
+  return { storage, requests, nodes, timers, toasts, fileList, formBodies,
     cards: () => fileList.children.filter(child => child.className === 'file-item'),
-    upload: async () => { nodes.get('fileInput').listeners.change({ target: { files: [{ name: 'manual.md', size: 128 }] } }); await flush(); },
+    upload: async (files = [{ name: 'manual.md', size: 128 }]) => {
+      nodes.get('fileInput').listeners.change({ target: { files } });
+      await flush();
+    },
     tick: async () => { await Promise.all([...timers.values()].map(callback => callback())); await flush(); },
     hide: () => windowEvents.pagehide(), show: () => windowEvents.pageshow({ persisted: true }),
     saveToken: () => nodes.get('saveToken').listeners.click(),
@@ -192,5 +199,61 @@ test('an old polling response cannot overwrite the resumed page or remove its ne
   await h.upload(); h.hide(); h.show(); await flush();
   resolveOld({ status: 'completed', done_list: [], running_list: [] }); await flush();
   assert.match(h.cards()[0].querySelector('.status-badge').textContent, /处理中/);
+  assert.equal(h.timers.size, 1);
+});
+
+test('a multi-file selection uses one upload request and maps task ids in order', async () => {
+  const h = harness({ upload: () => ({ task_ids: ['task-1', 'task-2'] }) });
+  await h.upload([{ name: 'one.md', size: 100 }, { name: 'two.md', size: 200 }]);
+  assert.equal(h.requests.filter(path => path === '/upload').length, 1);
+  assert.equal(h.formBodies.length, 1);
+  const files = h.formBodies[0].entries.filter(([key]) => key === 'files').map(([, value]) => value.name);
+  assert.deepEqual(files, ['one.md', 'two.md']);
+  assert.equal(h.cards().length, 2);
+  assert.ok(h.requests.includes('/status/task-1'));
+  assert.ok(h.requests.includes('/status/task-2'));
+  assert.equal(h.timers.size, 2);
+  const cached = JSON.parse([...h.storage.values()][0]);
+  assert.equal(cached.find(row => row.name === 'one.md').task_id, 'task-1');
+  assert.equal(cached.find(row => row.name === 'two.md').task_id, 'task-2');
+});
+
+test('a rejected batch marks every file failed without polling', async () => {
+  const error = Object.assign(Error('第 2 个文件（bad.txt）格式不支持，仅支持 md / pdf'), { status: 422 });
+  const h = harness({ upload: () => Promise.reject(error) });
+  await h.upload([{ name: 'good.md', size: 100 }, { name: 'bad.txt', size: 100 }]);
+  assert.equal(h.requests.filter(path => path === '/upload').length, 1);
+  assert.equal(h.cards().length, 2);
+  assert.equal(h.timers.size, 0);
+  for (const card of h.cards()) {
+    assert.match(card.querySelector('.status-badge').textContent, /失败/);
+    assert.match(card.querySelector('.log-list').children[0].textContent, /bad\.txt/);
+  }
+  assert.equal(h.requests.filter(path => path.startsWith('/status/')).length, 0);
+});
+
+test('one oversized file blocks the whole batch without an upload request', async () => {
+  const h = harness();
+  await h.upload([{ name: 'ok.md', size: 128 }, { name: 'big.pdf', size: 51 * 1024 * 1024 }]);
+  assert.equal(h.requests.length, 0);
+  assert.equal(h.cards().length, 2);
+  for (const card of h.cards()) {
+    assert.match(card.querySelector('.log-list').children[0].textContent, /big\.pdf/);
+  }
+});
+
+test('more than twenty files are refused before any upload request', async () => {
+  const h = harness();
+  await h.upload(Array.from({ length: 21 }, (_, index) => ({ name: `f${index}.md`, size: 10 })));
+  assert.equal(h.requests.length, 0);
+  assert.equal(h.cards().length, 0);
+  assert.match(h.toasts[0], /一次最多上传 20 个文件/);
+});
+
+test('a queued import shows queued state and keeps polling', async () => {
+  const h = harness({ status: () => ({ status: 'pending', done_list: ['上传文件'], running_list: [] }) });
+  await h.upload();
+  assert.match(h.cards()[0].querySelector('.status-badge').textContent, /排队中/);
+  assert.ok(h.requests.includes('/status/task-1'));
   assert.equal(h.timers.size, 1);
 });

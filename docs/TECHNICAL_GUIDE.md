@@ -34,7 +34,7 @@ Milvus（子块/主体名/FAQ） + Mongo（父块/任务/反馈） + MinIO（图
 `POST /api/import/upload`：
 
 1. 校验请求头 `X-Internal-Token`。
-2. 只接收一个文件。
+2. 一次最多接收 20 个文件；任一文件不合法则整批拒绝。
 3. 只接受 `.md` / `.pdf`。
 4. 检查文件大小上限。
 5. PDF 检查 `%PDF-` 文件头；Markdown 检查 UTF-8 与空字节。
@@ -42,13 +42,15 @@ Milvus（子块/主体名/FAQ） + Mongo（父块/任务/反馈） + MinIO（图
 
 通过后：
 
-- 生成 UUID `task_id`。
-- 创建 `output/<YYYYMMDD>/<task_id>/`。
+- 逐文件生成 UUID `task_id`，各建一个任务目录 `output/<YYYYMMDD>/<task_id>/`。
 - 保存原文件。
 - 写入 `_import_meta.json`：原文件名、资料类型、版本、失效时间。
-- 返回 `task_id`，后台开始导入。
+- 返回 `task_ids`（与文件顺序一致），每个任务在后台独立导入。
+- 落盘中途失败时，清理本批已建任务与目录，整批返回 `save_failed`。
 
 ### 2.2 任务执行
+
+上传后，任务先置为 `pending`，再提交到进程内线程池。线程池按 `IMPORT_MAX_CONCURRENT_TASKS` 并行执行。超出上限的任务在线程池队列中排队。
 
 `invoke_import_graph`：
 

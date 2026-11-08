@@ -32,7 +32,7 @@
 
 - 导入与查询分离，重任务不会阻塞在线问答。
 - 查询服务用文件锁保证单 worker。任务状态、SSE 频道、每个会话的并发锁都在进程内，多 worker 会失去一致性。
-- 导入并发用 `BoundedSemaphore` 限制，避免后台线程池被打满。
+- 导入任务提交到进程内线程池；`BoundedSemaphore` 兜底限制并发数。
 
 ## 3. 分层与模块职责
 
@@ -148,10 +148,11 @@ output/
 `app/api/routers/import_.py`：
 
 1. `require_import_admin_token` 校验 `X-Internal-Token`。
-2. `validate_upload_files` 校验文件数量、名称、后缀、大小、文件头。
+2. `validate_upload_files` 整批校验文件数量、名称、后缀、大小、文件头；任一文件不合法即整批拒绝。
 3. 业务政策校验版本与有效期。
-4. 创建 `task_id` 与任务目录，保存文件与 `_import_meta.json`。
-5. `BackgroundTasks` 调用 `invoke_import_graph`。
+4. 逐文件创建 `task_id` 与任务目录，保存文件与 `_import_meta.json`；返回与文件顺序一致的 `task_ids`。
+5. 落盘中途失败时回滚已建任务与目录。
+6. `BackgroundTasks` 为每个任务调用 `submit_import_graph`，由进程内线程池并行执行。
 
 ### 5.2 执行器
 

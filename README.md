@@ -262,14 +262,14 @@ uv run uvicorn app.api.http.query_server:app --host 0.0.0.0 --port 8001
 
 | 方法 | 路径 | 说明 | 鉴权 |
 |---|---|---|---|
-| POST | `/api/import/upload` | 上传单个文件并异步导入 | `X-Internal-Token` |
+| POST | `/api/import/upload` | 上传一批文件（最多 20 个）并异步导入 | `X-Internal-Token` |
 | GET | `/api/import/status/{task_id}` | 任务状态与节点进度 | `X-Internal-Token` |
 | POST | `/api/import/retry/{task_id}` | 重试失败的导入 | `X-Internal-Token` |
 | DELETE | `/api/import/records/{task_id}` | 删除导入记录与本地产物 | `X-Internal-Token` |
 | GET | `/api/health` | 健康检查与资源版本 | 无 |
 | GET | `/import` | 导入页 | 无 |
 
-上传参数：`files`（单文件）、`document_kind`（`manual` / `policy`）、`document_version`、`valid_until`。业务政策必须填写版本与未来失效时间。
+上传参数：`files`（一批文件，最多 20 个）、`document_kind`（`manual` / `policy`）、`document_version`、`valid_until`。每个文件独立建任务；任一文件不合法则整批拒绝。任务进入进程内线程池，按 `IMPORT_MAX_CONCURRENT_TASKS` 并行执行；其余任务排队。业务政策必须填写版本与未来失效时间。
 
 ### 问答服务（8001）
 
