@@ -19,8 +19,10 @@ from app.api.routers import evolution as evolution_router
 from app.api.routers import health as health_router
 from app.api.routers import pages as pages_router
 from app.api.routers import query as query_router
+from app.evolution.leader import scheduler_leader_loop
 from app.evolution.scheduler import evolution_scheduler_loop
 from app.evolution.flags import writes_enabled
+from app.shared.clients import redis_gateway
 from app.shared.clients.mongo import ensure_indexes
 from app.shared.config import settings
 from app.shared.runtime.logger import logger
@@ -48,10 +50,27 @@ def warmup_models() -> None:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    """服务生命周期：确保 Mongo 索引就绪，并按开关启停自进化调度器。"""
-    # 启动阶段：抢占单 worker 租约，保证调度器只有一个实例在跑。
-    lease = SingleWorkerLease()
-    lease.acquire()
+    """服务生命周期：确保 Mongo 索引就绪，并按开关启停自进化调度器。
+
+    多 worker 模式（Redis 后端）不抢单 worker 文件锁；调度器改用 Redis 主节点租约。
+    单 worker 模式保持原有的文件锁语义。
+    """
+    multi_worker = redis_gateway.using_redis()
+    if multi_worker:
+        # 多 worker 依赖 Redis 共享状态：启动自检失败直接阻断，避免带病运行
+        try:
+            await asyncio.to_thread(redis_gateway.ping)
+        except Exception as exc:  # noqa: BLE001
+            raise RuntimeError("多 worker 模式需要可用的 Redis，请检查 REDIS_URL") from exc
+        logger.info(f"多 worker 模式：Redis 后端，worker 数={settings.api.query_workers}")
+    else:
+        logger.info("单 worker 模式：未配置 Redis，使用进程内状态")
+
+    lease = None
+    if not multi_worker:
+        # 启动阶段：抢占单 worker 租约，保证调度器只有一个实例在跑。
+        lease = SingleWorkerLease()
+        lease.acquire()
     try:
         # 确保数据库索引/集合结构就绪，后续读写才有正确约束。
         ensure_indexes()
@@ -60,13 +79,19 @@ async def lifespan(_app: FastAPI):
         scheduler_task = None
         # 仅当允许写入且调度器开关开启时才启动后台循环（只读/导入进程不启动）。
         if writes_enabled() and settings.evolution.scheduler_enabled:
-            scheduler_task = asyncio.create_task(
-                evolution_scheduler_loop(settings.evolution.schedule_interval_minutes * 60.0)
-            )
-            logger.info(
-                f"自进化调度器已启动：interval={settings.evolution.schedule_interval_minutes}min, "
-                f"batch={settings.evolution.scan_batch}"
-            )
+            interval = settings.evolution.schedule_interval_minutes * 60.0
+            if multi_worker:
+                # 多 worker：只有一个实例能拿到主节点租约，避免重复跑指标与回测
+                scheduler_task = asyncio.create_task(scheduler_leader_loop(interval))
+                logger.info(
+                    f"自进化调度器已启动（主节点模式）：interval={settings.evolution.schedule_interval_minutes}min"
+                )
+            else:
+                scheduler_task = asyncio.create_task(evolution_scheduler_loop(interval))
+                logger.info(
+                    f"自进化调度器已启动：interval={settings.evolution.schedule_interval_minutes}min, "
+                    f"batch={settings.evolution.scan_batch}"
+                )
         try:
             yield
         finally:
@@ -79,7 +104,8 @@ async def lifespan(_app: FastAPI):
                     pass
     finally:
         # 释放单 worker 租约，允许其他实例接管。
-        lease.release()
+        if lease is not None:
+            lease.release()
 
 
 
@@ -109,4 +135,13 @@ app.include_router(pages_router.static_router)
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host=settings.api.host, port=settings.api.query_port)
+    if redis_gateway.using_redis():
+        # 多 worker 必须用导入字符串启动，uvicorn 才能派生多个进程
+        uvicorn.run(
+            "app.api.http.query_server:app",
+            host=settings.api.host,
+            port=settings.api.query_port,
+            workers=settings.api.query_workers,
+        )
+    else:
+        uvicorn.run(app, host=settings.api.host, port=settings.api.query_port)

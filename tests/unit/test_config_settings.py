@@ -29,7 +29,7 @@ def test_evolution_collection_has_single_source():
 
 
 def test_settings_domains_present():
-    for name in ("llm", "embedding", "reranker", "milvus", "minio", "mineru", "mcp", "mongo", "api", "import_", "evolution", "runtime"):
+    for name in ("llm", "embedding", "reranker", "milvus", "minio", "mineru", "redis", "mcp", "mongo", "api", "import_", "evolution", "runtime"):
         assert getattr(settings, name) is not None
 
 
@@ -49,6 +49,7 @@ def test_import_settings_have_sane_defaults():
     assert import_.retry_backoff_seconds >= 0
     assert import_.max_concurrent_tasks >= 1
     assert import_.acquire_timeout_seconds > 0
+    assert import_.slot_lease_seconds >= 60
 
 
 def test_import_admin_token_defaults_to_empty():

@@ -50,11 +50,11 @@ Milvus（子块/主体名/FAQ） + Mongo（父块/任务/反馈） + MinIO（图
 
 ### 2.2 任务执行
 
-上传后，任务先置为 `pending`，再提交到进程内线程池。线程池按 `IMPORT_MAX_CONCURRENT_TASKS` 并行执行。超出上限的任务在线程池队列中排队。
+上传后，任务先置为 `pending`，再提交到进程内线程池。单 worker 用信号量、多 worker 用 Redis `import:slots` 限制全局名额，按 `IMPORT_MAX_CONCURRENT_TASKS` 并行执行。超出上限的任务等待名额，超时失败为 `import_busy`。
 
 `invoke_import_graph`：
 
-1. 抢导入并发名额。
+1. 抢导入并发名额（跨进程）。
 2. 状态置 `processing`，写磁盘快照。
 3. 构造 `ImportGraphState`。
 4. 运行导入图；失败按错误码判断是否重试。
@@ -207,8 +207,14 @@ chunk_id  = sha1(doc_id#heading_path#occurrence#part)
 `POST /api/query`：
 
 1. 校验会话归属。
-2. 预留会话查询名额；同会话只允许一个问题。
+2. 预留会话查询名额；同会话只允许一个问题。多 worker 时用 Redis `query:active:<session_id>` 互斥。
 3. 非流式同步执行；流式立即返回 `session_id`，后台执行。
+
+流式事件：
+
+- 单 worker：事件进入进程内队列，SSE 连接直接消费。
+- 多 worker：事件写入 Redis Stream `sse:stream:<session_id>`；SSE 端从 `0-0` 回放后阻塞读取，因此刷新页面或连到另一个 worker 都能续上进度与最终答案。
+- `delta` 事件按 `SSE_DELTA_FLUSH_MS` 合并后写入，`final` / `close` 前会先冲刷，保证顺序。
 
 ### 3.2 意图识别
 
@@ -688,8 +694,8 @@ uv run python -m app.rag_eval.ui_trial prepare --run ui_test_YYYYMMDD_xxxxxxxx
 
 - 单条切片控制在 600~1000 字，避免超长正文。
 - 单文档图片数量过多时，图片增强会成为瓶颈。
-- 查询服务单 worker；CPU 模型下并发能力有限。
-- 导入并发默认 2，按机器资源调整。
+- 未配置 Redis 时查询服务单 worker；配置后可多 worker，但每个 worker 都加载模型，内存按 worker 数增长。
+- 导入并发默认 2，按机器资源调整；多 worker 时为全局上限。
 
 ## 11. 安全与审计
 

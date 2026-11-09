@@ -85,6 +85,14 @@ class MineruSettings:
 
 
 @dataclass
+class RedisSettings:
+    """跨进程运行期状态（多 worker）配置。"""
+
+    url: str  # Redis 连接串（REDIS_URL）；为空时退回进程内状态
+    timeout_seconds: float  # 单次读写超时（秒，REDIS_TIMEOUT_SECONDS）
+
+
+@dataclass
 class McpSettings:
     """百炼联网搜索 MCP 配置。"""
 
@@ -126,6 +134,8 @@ class ApiSettings:
     query_port: int  # 问答服务端口（QUERY_APP_PORT，默认 8001）
     cors_origins: tuple[str, ...]  # 跨域白名单，逗号分隔（CORS_ORIGINS，默认 *）
     session_ownership_enabled: bool = True  # 是否启用会话属主校验（SESSION_OWNERSHIP_ENABLED）
+    query_workers: int = 2  # 查询服务 worker 数（QUERY_APP_WORKERS），需 Redis
+    import_workers: int = 2  # 导入服务 worker 数（IMPORT_APP_WORKERS），需 Redis
 
 
 @dataclass
@@ -187,6 +197,12 @@ class RuntimeSettings:
     model_prices_json: str = "{}"  # 模型单价 JSON（LLM_MODEL_PRICES_JSON）
     intent_timeout_seconds: float = 2.0  # 意图识别超时（秒，INTENT_TIMEOUT_SECONDS）
     default_issue_owner: str = ""  # 问题默认负责人（DEFAULT_ISSUE_OWNER）
+    # 运行期状态后端：auto（有 REDIS_URL 用 Redis）/ redis / memory
+    state_backend: str = "auto"
+    sse_delta_flush_ms: int = 120  # SSE 增量合并窗口（毫秒，SSE_DELTA_FLUSH_MS）
+    sse_stream_ttl_seconds: int = 3600  # SSE 事件流保留时间（秒，SSE_STREAM_TTL_SECONDS）
+    query_turn_lock_ttl_seconds: int = 600  # 会话查询锁 TTL（秒，QUERY_TURN_LOCK_TTL_SECONDS）
+    scheduler_leader_ttl_seconds: int = 90  # 调度器主节点租约 TTL（秒，SCHEDULER_LEADER_TTL_SECONDS）
 
 
 @dataclass
@@ -210,9 +226,11 @@ class ImportSettings:
     # 导入任务的有界重试次数与退避基准（秒）
     max_retry_attempts: int
     retry_backoff_seconds: float
-    # 进程内同时执行的导入任务上限，以及等待名额的最长时间（秒）
+    # 全局同时执行的导入任务上限，以及等待名额的最长时间（秒）
     max_concurrent_tasks: int
     acquire_timeout_seconds: int
+    # 多 worker 下导入名额的租约（秒）：进程崩溃后由过期回收
+    slot_lease_seconds: int
     # 导入完成后的跨存储对账（只记日志，不阻断）
     reconcile_enabled: bool
     # 复用既有 MinerU 解析产物（断点续传的轻量实现）
@@ -229,6 +247,7 @@ class Settings:
     milvus: MilvusSettings
     minio: MinioSettings
     mineru: MineruSettings
+    redis: RedisSettings
     mcp: McpSettings
     mongo: MongoSettings
     api: ApiSettings
@@ -285,6 +304,10 @@ def _build_settings() -> Settings:
             base_url=env_str("MINERU_BASE_URL"),  # MinerU 服务地址
             api_key=env_str("MINERU_API_TOKEN"),  # MinerU 令牌
         ),
+        redis=RedisSettings(
+            url=env_str("REDIS_URL"),  # Redis 连接串，空则退回进程内状态
+            timeout_seconds=env_float("REDIS_TIMEOUT_SECONDS", 2.0),  # 单次读写超时（秒），默认 2
+        ),
         mcp=McpSettings(
             base_url=env_str("MCP_DASHSCOPE_BASE_URL"),  # 百炼 MCP 服务地址
             api_key=env_str("OPENAI_API_KEY"),  # 复用对话 API 密钥
@@ -312,6 +335,8 @@ def _build_settings() -> Settings:
             cors_origins=tuple(
                 item.strip() for item in env_str("CORS_ORIGINS", "*").split(",") if item.strip()
             ),  # 跨域白名单，逗号分隔，默认 *
+            query_workers=max(1, env_int("QUERY_APP_WORKERS", 2)),  # 查询服务 worker 数，默认 2
+            import_workers=max(1, env_int("IMPORT_APP_WORKERS", 2)),  # 导入服务 worker 数，默认 2
         ),
         import_=ImportSettings(
             admin_token=env_str("IMPORT_ADMIN_TOKEN", "evoadmin_15946edbb1ed4289ae8296dbaafa57b5aad9bf25bd72a51c"),  # 导入鉴权令牌（空则 fail-closed）
@@ -322,8 +347,9 @@ def _build_settings() -> Settings:
             llm_max_retries=env_int("LLM_MAX_RETRIES", 2),  # SDK 内建重试次数，默认 2
             max_retry_attempts=env_int("IMPORT_MAX_RETRY_ATTEMPTS", 3),  # 导入任务重试次数，默认 3
             retry_backoff_seconds=env_float("IMPORT_RETRY_BACKOFF_SECONDS", 1.0),  # 退避基准（秒），默认 1.0
-            max_concurrent_tasks=env_int("IMPORT_MAX_CONCURRENT_TASKS", 2),  # 并发导入任务数，默认 2
+            max_concurrent_tasks=env_int("IMPORT_MAX_CONCURRENT_TASKS", 2),  # 全局并发导入任务数，默认 2
             acquire_timeout_seconds=env_int("IMPORT_ACQUIRE_TIMEOUT_SECONDS", 600),  # 等待名额最长时间（秒），默认 600
+            slot_lease_seconds=env_int("IMPORT_SLOT_LEASE_SECONDS", 3600),  # 名额租约（秒），默认 3600
             reconcile_enabled=env_bool("IMPORT_RECONCILE_ENABLED", True),  # 跨存储对账，默认开启
             checkpoint_enabled=env_bool("IMPORT_CHECKPOINT_ENABLED", True),  # 断点续传，默认开启
         ),
@@ -361,6 +387,11 @@ def _build_settings() -> Settings:
             model_prices_json=env_str("LLM_MODEL_PRICES_JSON", "{}"),  # 模型单价 JSON，默认空
             intent_timeout_seconds=max(0.05, min(2.0, env_float("INTENT_TIMEOUT_SECONDS", 2.0))),  # 意图识别超时（秒），默认 2.0
             default_issue_owner=env_str("DEFAULT_ISSUE_OWNER", ""),  # 问题默认负责人，默认空
+            state_backend=env_str("RUNTIME_STATE_BACKEND", "auto").strip().lower(),  # auto / redis / memory
+            sse_delta_flush_ms=max(0, env_int("SSE_DELTA_FLUSH_MS", 120)),  # 增量合并窗口（毫秒），默认 120
+            sse_stream_ttl_seconds=max(60, env_int("SSE_STREAM_TTL_SECONDS", 3600)),  # 事件流保留（秒）
+            query_turn_lock_ttl_seconds=max(30, env_int("QUERY_TURN_LOCK_TTL_SECONDS", 600)),  # 会话锁 TTL（秒）
+            scheduler_leader_ttl_seconds=max(30, env_int("SCHEDULER_LEADER_TTL_SECONDS", 90)),  # 调度器租约（秒）
         ),
         agentic=AgenticSettings(
             mode=env_str('RAG_MODE', 'agentic'),  # 检索模式，默认 agentic

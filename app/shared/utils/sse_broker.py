@@ -9,6 +9,11 @@ SSE 事件推送（会话级广播）。
    生产者或订阅者任意一方先 ``ensure_channel``，订阅前的消息进入有界缓冲并在
    订阅时回放，保证 ``final`` 不会丢。
 3. 去掉调试 ``print``，异常统一走 ``error`` 事件；会话通道空闲超时自动回收。
+
+多 worker：
+- ``RUNTIME_STATE_BACKEND=redis`` 时，事件写入 Redis Stream ``sse:stream:<session_id>``，
+  SSE 端按事件 ID 回放 + 阻塞读取，跨进程可见；
+- 否则沿用进程内队列，行为与单 worker 完全一致（现有单测默认走这条路径）。
 """
 from __future__ import annotations
 
@@ -26,6 +31,14 @@ from fastapi import Request
 _BUFFER_SIZE = 512
 # 通道空闲回收时间（秒）：超过该时间没有读写的通道会被清理
 _CHANNEL_IDLE_SECONDS = 30 * 60
+
+# Redis 键前缀（跨 worker 契约）
+_REDIS_STREAM_PREFIX = "sse:stream:"
+_REDIS_EXISTS_PREFIX = "sse:exists:"
+# Stream 近似长度上限：只保留最近事件，避免长期堆积
+_REDIS_STREAM_MAXLEN = 2048
+# 增量合并阈值：达到该字符数立即落 Redis，避免长回答等待过久
+_DELTA_FLUSH_CHARS = 200
 
 
 class SSEEvent:
@@ -52,6 +65,25 @@ class _Channel:
 _channels: Dict[str, _Channel] = {}
 _lock = threading.Lock()
 
+# 增量合并缓冲：session_id -> {text, updated_at}
+_delta_buffer: Dict[str, Dict[str, Any]] = {}
+_delta_lock = threading.Lock()
+
+
+def _use_redis() -> bool:
+    """当前是否使用 Redis 后端（延迟导入，避免导入期建立连接）。"""
+    from app.shared.clients.redis_gateway import using_redis
+
+    return using_redis()
+
+
+def _stream_key(session_id: str) -> str:
+    return f"{_REDIS_STREAM_PREFIX}{session_id}"
+
+
+def _exists_key(session_id: str) -> str:
+    return f"{_REDIS_EXISTS_PREFIX}{session_id}"
+
 
 def _prune_locked(now: float) -> None:
     """回收长时间空闲的通道（调用方需持锁）。"""
@@ -60,9 +92,140 @@ def _prune_locked(now: float) -> None:
         _channels.pop(sid, None)
 
 
+# ==================== Redis 后端内部实现 ====================
+
+def _redis_client():
+    from app.shared.clients.redis_gateway import get_redis_client
+
+    return get_redis_client()
+
+
+def _redis_mark_exists(session_id: str) -> None:
+    """刷新通道标记与 TTL。"""
+    from app.shared.config import settings
+
+    client = _redis_client()
+    ttl = settings.runtime.sse_stream_ttl_seconds
+    client.set(_exists_key(session_id), "1", ex=ttl)
+    client.expire(_stream_key(session_id), ttl)
+
+
+def _redis_publish_raw(session_id: str, event: str, data: Dict[str, Any]) -> None:
+    """把事件写入 Redis Stream（异常只告警，不阻断主链路）。"""
+    from app.shared.config import settings
+    from app.shared.runtime.logger import logger
+
+    try:
+        client = _redis_client()
+        stream = _stream_key(session_id)
+        client.xadd(
+            stream,
+            {"event": event, "data": json.dumps(data, ensure_ascii=False, default=_json_default)},
+            maxlen=_REDIS_STREAM_MAXLEN,
+            approximate=True,
+        )
+        client.expire(stream, settings.runtime.sse_stream_ttl_seconds)
+        client.set(_exists_key(session_id), "1", ex=settings.runtime.sse_stream_ttl_seconds)
+    except Exception as exc:  # noqa: BLE001 - 事件推送失败不应中断查询
+        logger.warning(f"SSE 事件写入 Redis 失败（忽略）：{session_id}：{exc}")
+
+
+def _flush_delta_locked(session_id: str) -> None:
+    """把该会话累积的增量写入 Redis（调用方需持 _delta_lock）。"""
+    buffered = _delta_buffer.pop(session_id, None)
+    if not buffered:
+        return
+    text = buffered.get("text") or ""
+    if text:
+        _redis_publish_raw(session_id, SSEEvent.DELTA, {"delta": text})
+
+
+def _flush_delta(session_id: str) -> None:
+    with _delta_lock:
+        _flush_delta_locked(session_id)
+
+
+def _redis_publish(session_id: str, event: str, data: Dict[str, Any]) -> None:
+    """Redis 后端发布：增量先合并，其余事件前先冲刷增量，保证顺序。"""
+    from app.shared.config import settings
+
+    if event == SSEEvent.DELTA:
+        text = str(data.get("delta") or "")
+        if not text:
+            return
+        now = time.time()
+        with _delta_lock:
+            buffered = _delta_buffer.get(session_id)
+            if buffered is None:
+                # started_at 记录本批次的起始时刻，窗口按它计算
+                buffered = {"text": "", "started_at": now}
+                _delta_buffer[session_id] = buffered
+            buffered["text"] = f"{buffered['text']}{text}"
+            window = max(0, settings.runtime.sse_delta_flush_ms) / 1000.0
+            reached_window = window <= 0 or now - float(buffered["started_at"]) >= window
+            if reached_window or len(buffered["text"]) >= _DELTA_FLUSH_CHARS:
+                _flush_delta_locked(session_id)
+        return
+
+    # 非增量事件：先冲刷累积文本，避免 final 越过 delta
+    _flush_delta(session_id)
+    _redis_publish_raw(session_id, event, data)
+
+
+async def _stream_events_redis(session_id: str, request: Request) -> AsyncIterator[str]:
+    """Redis 后端的 SSE 读取：从 0-0 回放，再阻塞等待新事件。"""
+    from app.shared.runtime.logger import logger
+
+    try:
+        client = _redis_client()
+        stream = _stream_key(session_id)
+        if not client.exists(stream) and not client.exists(_exists_key(session_id)):
+            yield _pack(SSEEvent.ERROR, {"code": "stream_not_found", "message": "流式会话不存在或已结束"})
+            return
+        yield _pack(SSEEvent.READY, {})
+        last_id = "0-0"
+        while True:
+            if await request.is_disconnected():
+                return
+            try:
+                result = await asyncio.to_thread(
+                    client.xread, {stream: last_id}, count=64, block=1000
+                )
+            except Exception as exc:  # noqa: BLE001 - 连接抖动时继续尝试
+                logger.warning(f"SSE 读取 Redis 失败（稍后重试）：{session_id}：{exc}")
+                await asyncio.sleep(1)
+                continue
+            if not result:
+                continue
+            for _stream, entries in result:
+                for entry_id, fields in entries:
+                    last_id = entry_id
+                    event = str(fields.get("event") or "")
+                    raw = fields.get("data") or "{}"
+                    try:
+                        payload = json.loads(raw)
+                    except (TypeError, ValueError):
+                        payload = {}
+                    if event == SSEEvent.CLOSE:
+                        yield _pack(SSEEvent.CLOSE, payload)
+                        return
+                    if event:
+                        yield _pack(event, payload)
+    except (asyncio.CancelledError, ConnectionResetError, BrokenPipeError):
+        return
+
+
+# ==================== 公共 API ====================
+
 def ensure_channel(session_id: str) -> None:
     """确保会话通道存在（生产者与订阅者都可安全调用）。"""
     if not session_id:
+        return
+    if _use_redis():
+        try:
+            _redis_mark_exists(session_id)
+        except Exception:  # noqa: BLE001 - 标记失败不影响后续 publish 尝试
+            pass
         return
     now = time.time()
     with _lock:
@@ -76,6 +239,15 @@ def ensure_channel(session_id: str) -> None:
 
 def drop_channel(session_id: str) -> None:
     """移除会话通道（流结束时调用）。"""
+    if _use_redis():
+        try:
+            client = _redis_client()
+            client.delete(_stream_key(session_id), _exists_key(session_id))
+        except Exception:  # noqa: BLE001
+            pass
+        with _delta_lock:
+            _delta_buffer.pop(session_id, None)
+        return
     with _lock:
         _channels.pop(session_id, None)
 
@@ -89,6 +261,19 @@ def reset_channel(session_id: str) -> None:
     新一轮重连会在那个旧 close 处提前结束，导致本轮回答永远收不到。
     """
     if not session_id:
+        return
+    if _use_redis():
+        try:
+            client = _redis_client()
+            client.delete(_stream_key(session_id))
+        except Exception:  # noqa: BLE001
+            pass
+        with _delta_lock:
+            _delta_buffer.pop(session_id, None)
+        try:
+            _redis_mark_exists(session_id)
+        except Exception:  # noqa: BLE001
+            pass
         return
     now = time.time()
     with _lock:
@@ -126,6 +311,9 @@ def publish(session_id: str, event: str, data: Dict[str, Any]) -> None:
         metrics = current_metrics.get()
         if metrics:
             metrics.first_text()
+    if _use_redis():
+        _redis_publish(session_id, event, data)
+        return
     ensure_channel(session_id)
     message = {"event": event, "data": data}
     with _lock:
@@ -160,6 +348,11 @@ def _json_default(obj: Any) -> Any:
 
 async def stream_events(session_id: str, request: Request) -> AsyncIterator[str]:
     """SSE 生成器：订阅会话通道并把事件写回客户端。"""
+    if _use_redis():
+        async for chunk in _stream_events_redis(session_id, request):
+            yield chunk
+        return
+
     with _lock:
         channel = _channels.get(session_id)
         if channel is not None:
