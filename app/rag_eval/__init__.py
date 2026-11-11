@@ -1,15 +1,16 @@
+"""RAG 离线评测：HTTP 调用查询服务，计算检索与 RAGAS 生成指标。
+
+快速开始：
+    python -m app.rag_eval.cli run --dataset app/rag_eval/datasets/sample_cases.json
+
+设计约束：
+- 只通过 HTTP 访问查询服务，不直接连 Milvus / Mongo；
+- RAGAS 是可选依赖，未安装时可用 ``--no-ragas`` 只跑检索指标；
+- judge 模型必须由 ``EVAL_LLM_MODEL`` 明确配置，避免回答模型自评。
 """
-RAG 评估子系统统一入口。
 
-目标：
-1. 将评估数据、执行流程、指标统计收敛到一个独立包中。
-2. 便于在结构相近的其他 RAG 项目中整体迁移。
-3. 对外只暴露一个测试类，降低使用成本。
+from app.rag_eval.config import EvalConfig
+from app.rag_eval.dataset import EvalCase, load_cases
+from app.rag_eval.runner import run_evaluation, timed_run
 
-说明：
-优先使用 `RagEvalTester`，不要关心包内的其他实现细节。
-"""
-
-from app.rag_eval.tester import RagEvalTester
-
-__all__ = ["RagEvalTester"]
+__all__ = ["EvalConfig", "EvalCase", "load_cases", "run_evaluation", "timed_run"]

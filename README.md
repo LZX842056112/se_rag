@@ -90,7 +90,7 @@ se_rag/
 │  ├─ evolution/              # 反馈、缺口、候选、审批、索引、指标、调参、回测
 │  ├─ shared/                 # 配置、存储客户端、模型、日志、SSE、任务状态
 │  ├─ resources/              # 三张页面与静态资源
-│  └─ rag_eval/               # 离线评估、切分评估、答案质量、Agentic 对比、隔离联调
+│  └─ rag_eval/               # HTTP 离线评测：检索指标、RAGAS 生成指标、基线回归
 ├─ docs/                      # PRD、代码设计、技术讲解
 ├─ doc/                       # 手册语料（PDF）
 ├─ output/                    # 导入工作目录与任务快照（运行时生成）
@@ -325,6 +325,8 @@ uv run uvicorn app.api.http.query_server:app --host 0.0.0.0 --port 8001 --worker
 
 SSE 事件：`ready`、`progress`、`delta`、`final`、`error`、`close`。
 
+`POST /api/query` 请求体可选 `include_evidence=true`：仅评测场景使用，响应会额外返回 `evidence`（证据正文）与 `retrieval_layers`（分层 chunk_id）。
+
 ## 核心流程
 
 ### 导入
@@ -367,7 +369,29 @@ E2E_ENABLED=1 uv run pytest -m e2e tests/e2e -s
 node --test tests/frontend
 ```
 
-离线单测通过 `tests/conftest.py` 的 `offline_guard` 禁止真实 Mongo / Milvus / MinIO 连接。
+离线单测通过 `tests/conftest.py` 的 `offline_guard` 禁止真实 Mongo / Milvus / MinIO / Redis 连接。
+
+## 离线评测
+
+评测通过 HTTP 调用查询服务，覆盖检索指标与 RAGAS 生成指标，并支持基线回归。
+示例数据集共 100 题，覆盖 12 个主体，包含参数设置、故障排查、操作步骤、维护保养、功能说明、网络连接、安全信息、电池与充电，以及模糊输入、超范围、否定问题、长输入四类边界场景。
+每次评测都会输出总体结论、逐题执行状态与关键指标，并写入带时间戳的 Markdown 报告。
+
+```bash
+# 安装评测依赖
+uv sync --group eval
+
+# 先启动问答服务（8001），再运行评测
+uv run python -m app.rag_eval.cli run --dataset app/rag_eval/datasets/sample_cases.json
+
+# 只跑检索指标
+uv run python -m app.rag_eval.cli run --dataset ... --no-ragas
+
+# 与基线对比；有回归时退出码为 1
+uv run python -m app.rag_eval.cli run --dataset ... --baseline output/eval/baseline.json --fail-on-regression
+```
+
+评测集字段、指标口径与报告格式见 [app/rag_eval/README.md](app/rag_eval/README.md)。
 
 ## 常见问题
 

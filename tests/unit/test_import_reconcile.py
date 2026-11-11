@@ -3,7 +3,7 @@
 回归背景（真实事故）：导入完成后 `upsert_count=16` 已成功，但紧接着的对账查询在 55ms 后
 执行，读到 0 条并打出 ERROR「对账不符：Milvus 子块 0 条 != 期望 16 条」——纯属假警报。
 根因是 Milvus 的 `query` 对尚未 seal 的 growing segment 存在可见性延迟（本仓
-`rag_eval/runner` 已记录同一现象：仅靠短睡眠重试可能稳定读到 0 行）。
+离线评测曾记录同一现象：仅靠短睡眠重试可能稳定读到 0 行）。
 
 第二个缺陷：MinIO 观察项误用 `md_path` 的 stem。`md_path` 在上游已被替换为 `<stem>_new.md`，
 因此日志打出 `stem=hak180产品安全手册_new`，与实际上传前缀 `hak180产品安全手册` 不符。

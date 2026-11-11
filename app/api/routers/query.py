@@ -18,6 +18,7 @@ from app.api.schema.query_schema import (
     QueryTaskStatusResponseSchema,
 )
 from app.rag.query.answer_payload import answer_fields
+from app.rag.query.eval_evidence import build_evidence, build_retrieval_layers
 from app.evolution.feedback.collector import feedback_states
 from app.rag.query.pipeline import invoke_query_graph
 from app.rag.query.lifecycle import reserve_query, query_is_active
@@ -66,6 +67,10 @@ def query(background_tasks: BackgroundTasks, query_params: QueryRequestSchema, r
         raise ApiError("query_failed", "查询流程执行失败", status_code=500)
     fields = answer_fields(state)
     fields["answer_id"] = fields["answer_id"] or ""
+    # 评测请求才回传证据：普通问答不额外暴露检索正文
+    if query_params.include_evidence:
+        fields["evidence"] = build_evidence(state.get("reranked_docs"))
+        fields["retrieval_layers"] = build_retrieval_layers(state)
     return QueryNotStreamResponseSchema(
         message=f"已完成{query_params.query}的内容检索",
         session_id=session_id,

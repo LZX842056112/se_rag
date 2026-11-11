@@ -26,6 +26,8 @@ class QueryRequestSchema(BaseModel):
     rewrite_hint: Annotated[
         str | None, StringConstraints(strip_whitespace=True, max_length=4096)
     ] = None
+    # 评测专用：显式要求回传证据正文与分层 chunk_id，普通问答保持精简响应
+    include_evidence: bool = False
 
 # 查询模块流式响应结果
 class QueryStreamResponseSchema(BaseModel):
@@ -70,6 +72,9 @@ class QueryNotStreamResponseSchema(BaseModel):
     issue_id: str = ""
     handoff_required: bool = False
     metrics: dict = Field(default_factory=dict)
+    # 仅在请求 include_evidence=true 时填充：评测所需的证据正文与分层检索结果
+    evidence: list[dict] = Field(default_factory=list)
+    retrieval_layers: dict = Field(default_factory=dict)
 
 # 会话记录
 class HistoryClearResponseSchema(BaseModel):
