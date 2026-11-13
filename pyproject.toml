@@ -19,6 +19,7 @@ dependencies = [
     "pymongo>=4.16.0",
     "python-dotenv>=1.2.2",
     "python-multipart>=0.0.22",
+    "redis>=5.0",
     "torch>=2.10.0",
     "uvicorn>=0.42.0",
     "transformers>=4.57.6",
@@ -38,6 +39,7 @@ eval = ["ragas==0.4.3", "langchain-community==0.4.1"]
 dev = [
     "pytest>=8.3",
     "mongomock>=4.1",
+    "fakeredis[lua]>=2.23",
 ]
 
 [tool.pytest.ini_options]

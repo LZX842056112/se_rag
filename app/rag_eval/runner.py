@@ -1,470 +1,230 @@
+"""批量评测执行器：HTTP 取答案 → 检索指标 → RAGAS 生成指标 → 汇总。
+
+并发只用于 HTTP 请求；RAGAS 评分逐题串行，避免 judge 模型被并发打满。
 """
-RAG 评估执行模块。
+from __future__ import annotations
 
-可以把这个文件理解成“评估流程主脚本”，主要负责 4 件事：
-
-1. 把测试知识通过真实导入链路写入 Milvus；
-2. 读取题库，逐条走真实查询链路；
-3. 统计每一层的召回效果；
-4. 输出汇总结果和报告文件。
-
-这个文件不追求过度抽象，优先保证：
-- 顺着往下读就能看懂；
-- 关键参数和返回值写清楚；
-- 每一步为什么做能说清楚。
-"""
-
-import json
+import statistics
 import time
-from pathlib import Path
-from statistics import mean
-from unittest.mock import patch
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
+from typing import Callable
 
-from app.shared.clients.milvus_gateway import eq_expr, milvus_gateway
-from app.shared.config import settings
-from app.shared.runtime.logger import logger
-from app.process.import_.agent.nodes.node_bge_embedding import node_bge_embedding
-from app.process.import_.agent.nodes.node_import_milvus import node_import_milvus
-from app.process.import_.agent.nodes.node_item_name_recognition import node_item_name_recognition
-from app.process.import_.agent.state import create_default_state
-from app.process.query.agent.nodes.node_rerank import node_rerank
-from app.process.query.agent.nodes.node_rrf import node_rrf
-from app.process.query.agent.nodes.node_search_embedding import node_search_embedding
-from app.process.query.agent.nodes.node_search_embedding_hyde import node_search_embedding_hyde
-from app.process.query.agent.state import create_query_default_state
-from app.rag_eval.dataset import (
-    ARTIFACTS_DIR,
-    TEST_FILE_TITLE,
-    TEST_ITEM_NAME,
-    build_web_search_docs,
-    load_batch_eval_cases,
-    write_batch_eval_cases,
-)
-from app.rag_eval.metrics import evaluate_query_state
-from app.rag_eval.split_dataset import (
-    ARTIFACT_DOC_NAME,
-    build_cases_from_split,
-    split_eval_document,
-    split_real_artifact,
-)
-from app.rag_eval.split_metrics import evaluate_split_quality
-from app.shared.utils.paths import PROJECT_ROOT
-LAYER_LABELS = {
-    "embedding_chunks": "普通检索",
-    "hyde_embedding_chunks": "HyDE检索",
-    "rrf_chunks": "RRF融合",
-    "reranked_docs": "最终重排结果",
-}
+from app.rag_eval.config import EvalConfig
+from app.rag_eval.dataset import EvalCase, load_cases
+from app.rag_eval.http_client import EvalHTTPError, QueryClient
+from app.rag_eval.ragas_metrics import RagasScorer, aggregate_ragas
+from app.rag_eval.retrieval_metrics import aggregate, evaluate_case
+
+Progress = Callable[[str], None]
+
+# 总体结论阈值：用于把结果直接判成 passed / warning / failed，而不是只给一堆数字
+RECALL_TARGET = 0.8
+MUST_HIT_TARGET = 1.0
 
 
-def insert_env_ready() -> bool:
-    """
-    判断“测试数据入库”所需环境是否齐全。
+def run_evaluation(config: EvalConfig, progress: Progress | None = None) -> dict:
+    """执行一次完整评测并返回报告字典。"""
+    say = progress or (lambda _message: None)
+    cases = [case for case in load_cases(config.dataset_path) if config.selected(list(case.tags))]
+    if not cases:
+        raise ValueError("按当前标签过滤后没有可执行样本")
 
-    返回值：
-    - True：可以执行入库
-    - False：缺少必要配置
-    """
-    return bool(
-        settings.milvus.url
-        and settings.milvus.chunks_collection
-        and settings.milvus.item_name_collection
-        and (settings.embedding.model_path or settings.embedding.model_name)
-    )
+    client = QueryClient(config.base_url, config.timeout_seconds, config.retries)
+    say(f"健康检查：{config.base_url}")
+    client.health()
 
+    say(f"开始评测：{len(cases)} 题，并发 {config.concurrency}")
+    answers = _fetch_answers(client, cases, config, say)
 
-def batch_eval_ready() -> bool:
-    """
-    判断“批量评测”所需环境是否齐全。
+    scorer = None
+    if config.run_ragas:
+        say("初始化 RAGAS judge")
+        scorer = RagasScorer(_settings())
+        say(f"judge 模型：{scorer.metadata.get('judge_model')}")
 
-    和入库相比，这里额外要求 reranker 模型可用。
+    rows: list[dict] = []
+    try:
+        for index, case in enumerate(cases, start=1):
+            row = answers[case.case_id]
+            if row.get("error"):
+                row["status"] = "failed"
+                rows.append(row)
+                say(f"[{index}/{len(cases)}] {case.case_id} 失败：{row['error']}")
+                continue
+            row["status"] = "succeeded"
+            row["retrieval"] = evaluate_case(row.pop("retrieval_layers"), case, config.ks)
+            if scorer is not None:
+                row["ragas"] = scorer.score(
+                    question=case.question,
+                    answer=row["answer"],
+                    contexts=row["contexts"],
+                    ground_truth=case.ground_truth,
+                )
+            rows.append(row)
+            say(f"[{index}/{len(cases)}] {case.case_id} {_case_brief(row, config.ks)}")
+    finally:
+        client.close()
+        if scorer is not None:
+            scorer.close()
 
-    返回值：
-    - True：可以执行批量评测
-    - False：缺少必要配置
-    """
-    return bool(
-        settings.milvus.url
-        and settings.milvus.chunks_collection
-        and settings.milvus.item_name_collection
-        and (settings.embedding.model_path or settings.embedding.model_name)
-        and settings.reranker.model_path
-    )
-
-
-def milvus_ready() -> bool:
-    """
-    判断 MilvusClient 是否已经初始化成功。
-
-    返回值：
-    - True：Milvus 可用
-    - False：Milvus 不可用
-    """
-    return milvus_gateway.milvus_client is not None
-
-
-def _query_chunk_rows_with_retry(
-    milvus_client,
-    *,
-    item_name: str,
-    file_title: str,
-    expected_count: int,
-    retry_times: int = 5,
-) -> list[dict]:
-    """
-    查询刚写入的 chunk 数据，并做几次短暂重试。
-
-    参数：
-    - milvus_client：当前项目的 Milvus 客户端
-    - item_name：本次导入**实际写入**的主体名（不能硬编码期望值：主体识别会把新名归并到
-      库内标准名，例如 `HAK 180` → `HAK 180 烫金机`，硬编码过滤会稳定查到 0 行）
-    - file_title：本次导入文件标题，用于过滤出当前测试数据
-    - expected_count：期望查回多少条 chunk
-    - retry_times：最多重试次数
-
-    返回值：
-    - list[dict]：查询到的 chunk 行数据
-
-    为什么要重试：
-    - 向量库刚写完数据时，马上查询有时会出现短暂延迟。
-
-    注意：本函数只用于**校验写入是否成功**。gold 标注不再依赖回查结果（历史实现靠回查自增
-    主键拿 gold，导致切片标识一变标注即失效），排序键也从 ``part`` 改为全局序号 ``seq``。
-
-    首次未读到时先 ``flush`` 一次：Milvus 的 ``query`` 对尚未 seal 的 growing segment 存在
-    可见性延迟，仅靠短睡眠重试可能稳定读到 0 行。flush 只用于评估路径，不影响导入热路径。
-    """
-    for attempt in range(retry_times):
-        if attempt == 1:
-            try:
-                milvus_client.flush(collection_name=milvus_gateway.chunk_collection_name)
-            except Exception as exc:  # noqa: BLE001 - flush 失败继续走后续重试
-                logger.warning(f"Milvus flush 失败（继续重试）：{exc}")
-        chunk_rows = milvus_client.query(
-            collection_name=milvus_gateway.chunk_collection_name,
-            filter=eq_expr("item_name", item_name),
-            output_fields=["chunk_id", "item_name", "title", "part", "seq", "file_title", "content"],
-        )
-        chunk_rows = [row for row in chunk_rows if row.get("file_title") == file_title]
-        if len(chunk_rows) >= expected_count:
-            chunk_rows.sort(key=lambda row: row.get("seq") or 0)
-            return chunk_rows
-        time.sleep(0.3)
-    return []
+    return _build_report(config, cases, rows, scorer)
 
 
-def insert_batch_eval_dataset() -> dict:
-    """
-    写入评测测试数据，并生成题库文件。
+def _settings():
+    from app.shared.config import settings
 
-    返回值：
-    - item_name：本次写入的主体名称
-    - item_rows：item_name 集合查询结果
-    - chunk_rows：chunk 集合查询结果
-    - case_count：本次生成的题库问题数量
-
-    执行步骤：
-    1. 检查环境；
-    2. 用真实切分器切出评测切片（chunk_id 本地确定性可算）；
-    3. 走真实导入节点；
-    4. 查询回刚写入的数据（仅校验写入）；
-    5. 由内容关键词推导题库 gold；
-    6. 返回本次入库结果。
-    """
-    if not insert_env_ready():
-        raise RuntimeError("缺少 Milvus 或 Embedding 配置，无法执行评测数据入库。")
-
-    milvus_client = milvus_gateway.milvus_client
-    if milvus_client is None:
-        raise RuntimeError("MilvusClient 未成功初始化，无法执行评测数据入库。")
-
-    # 1. 评测切片由真实切分器产出：评估链路第一次真正覆盖了切分策略。
-    split = split_eval_document()
-    chunks = split["children"]
-    if not chunks:
-        raise RuntimeError("评测文档切分后为空，无法执行评测数据入库。")
-
-    # 2. 准备导入 state。
-    # 参数说明：
-    # - task_id：本次导入任务标识
-    # - file_title：这份测试知识的标题
-    # - chunks / parent_chunks：真实切分器产出的子块与章节级父块
-    state = create_default_state(
-        task_id="rag_eval_batch_insert",
-        file_title=TEST_FILE_TITLE,
-        chunks=chunks,
-        parent_chunks=split["parents"],
-    )
-
-    # 3. 固定主体识别结果，保证测试数据每次都稳定。
-    # 这里不让大模型自由识别，是为了避免测试数据每次导入出来的主体名称不一致。
-    with patch("app.rag.import_.item_name_service.recognize_item_name_by_chunks", return_value=TEST_ITEM_NAME):
-        state = node_item_name_recognition(state)  # item_name  item_name存储到向量数据库
-
-        # 4. 继续走真实导入链路：向量化 -> 写入 Milvus。
-        state = node_bge_embedding(state)
-        state = node_import_milvus(state)
-
-    # 5. 查询 item_name 集合，确认主体索引已经写入。
-    item_rows = milvus_client.query(
-        collection_name=milvus_gateway.item_name_collection_name,
-        filter=f"file_title == '{TEST_FILE_TITLE}'",
-        output_fields=["item_name", "file_title"],
-    )
-    if not item_rows:
-        raise RuntimeError("item_name 集合中未查询到评测数据。")
-
-    # 6. 回查 chunk 集合，仅用于确认写入成功。
-    # 注意用「实际写入的主体名」而非硬编码期望值：主体识别会把新名归并到库内标准名。
-    resolved_item_name = state["item_name"]
-    chunk_rows = _query_chunk_rows_with_retry(
-        milvus_client,
-        item_name=resolved_item_name,
-        file_title=TEST_FILE_TITLE,
-        expected_count=len(chunks),
-    )
-    if len(chunk_rows) != len(chunks):
-        raise RuntimeError(
-            f"chunks 集合中的评测数据数量与预期不一致：实际 {len(chunk_rows)}，预期 {len(chunks)}。"
-        )
-
-    # 7. gold 由内容关键词本地推导，不再依赖回查得到的自增主键。
-    case_list = build_cases_from_split(split, expected_item_names=[resolved_item_name])
-    write_batch_eval_cases(case_list)
-
-    return {
-        "item_name": resolved_item_name,
-        "item_rows": item_rows,
-        "chunk_rows": chunk_rows,
-        "case_count": len(case_list),
-        "split_quality": evaluate_split_quality(chunks, split["parents"], split["blocks"]),
-    }
+    return settings
 
 
-def run_query_eval_case(case_data: dict) -> dict:
-    """
-    执行单条问题评测。
+def _fetch_answers(
+    client: QueryClient, cases: list[EvalCase], config: EvalConfig, say: Progress
+) -> dict[str, dict]:
+    """并发请求所有题目，返回 ``case_id -> 原始结果``。"""
+    results: dict[str, dict] = {}
 
-    参数：
-    - case_data：单条题库数据，至少包含：
-      - case_id
-      - question
-      - expected_item_names
-      - gold_chunk_ids
-      - must_hit_chunk_ids
+    def ask(case: EvalCase) -> tuple[str, dict]:
+        try:
+            result = client.ask(case.question)
+            return case.case_id, {
+                "case_id": case.case_id,
+                "question": case.question,
+                "answer": result.answer,
+                "contexts": result.contexts,
+                "evidence_count": len(result.evidence),
+                "citations": len(result.citations),
+                "item_names": result.item_names,
+                "intent": result.intent,
+                "groundedness": result.groundedness,
+                "latency_ms": result.latency_ms,
+                "retrieval_layers": result.retrieval_layers,
+                "error": "",
+            }
+        except EvalHTTPError as exc:
+            return case.case_id, {
+                "case_id": case.case_id,
+                "question": case.question,
+                "error": str(exc),
+                "latency_ms": 0.0,
+            }
 
-    返回值：
-    - dict：这道题在 4 层查询链路上的评测结果
-
-    这一层只关心一件事：
-    给定一条题库问题，让真实查询链路完整跑一遍，
-    最后把查询结果和标注答案做对比。
-    """
-    # 1. 构造查询 state。这里直接把题库里的 expected_item_names 放进去，
-    # 避免主体识别波动影响“召回评测”本身。
-    state = create_query_default_state(
-        session_id=f"{case_data['case_id']}_query",
-        original_query=case_data["question"],
-        rewritten_query=case_data["question"],
-        item_names=case_data["expected_item_names"],
-        is_stream=False,
-        web_search_docs=build_web_search_docs(),
-    )
-
-    # 2. 固定 HyDE 输出，避免大模型随机性影响评测稳定性。
-    # 这样每次跑同一题，HyDE 这一层的检索输入都保持一致。
-    with patch(
-        "app.rag.query.hyde_search_service.call_llm_answer",
-        return_value="HAK 180 局部烫印通过设置 50mm 起点和 170mm 终点实现区域控制。",
-    ):
-        # 3. 逐层执行真实查询链路。
-        # 每个节点执行完后，结果都会回写到 state 里，供后续评测计算使用。
-        state.update(node_search_embedding(state))
-        state.update(node_search_embedding_hyde(state))
-        state = node_rrf(state)
-        state = node_rerank(state)
-
-    # 4. 用 metrics 模块统一计算这条题的评测结果。
-    return evaluate_query_state(result_state=state, expected=case_data)
+    with ThreadPoolExecutor(max_workers=max(1, config.concurrency)) as pool:
+        for case_id, row in pool.map(ask, cases):
+            results[case_id] = row
+    say(f"请求完成：{sum(1 for row in results.values() if not row.get('error'))} 题成功")
+    return results
 
 
-def summarize_eval_results(eval_results: list[dict]) -> dict:
-    """
-    对多条题目的评测结果做平均汇总。
-
-    参数：
-    - eval_results：所有题目的详细评测结果
-
-    返回值：
-    - dict：整体平均指标
-    """
-    if not eval_results:
-        return {"case_count": 0, "avg_item_name_hit_rate": 0.0, "layers": {}}
-
-    layer_names = ("embedding_chunks", "hyde_embedding_chunks", "rrf_chunks", "reranked_docs")
+def _build_report(
+    config: EvalConfig, cases: list[EvalCase], rows: list[dict], scorer
+) -> dict:
+    """组装报告：元信息 + 汇总 + 逐题结果。"""
+    successful = [row for row in rows if not row.get("error")]
+    latencies = [row["latency_ms"] for row in successful if row.get("latency_ms")]
     summary = {
-        "case_count": len(eval_results),
-        "avg_item_name_hit_rate": round(mean(result["item_name_hit_rate"] for result in eval_results), 4),
-        "layers": {},
+        "total": len(cases),
+        "succeeded": len(successful),
+        "failed": len(cases) - len(successful),
+        "retrieval": aggregate(successful, config.ks),
+        "latency_ms": _latency_summary(latencies),
     }
+    if config.run_ragas:
+        summary["ragas"] = aggregate_ragas(successful)
 
-    for layer_name in layer_names:
-        summary["layers"][layer_name] = {
-            "avg_precision": round(mean(result["layers"][layer_name]["precision"] for result in eval_results), 4),
-            "avg_recall": round(mean(result["layers"][layer_name]["recall"] for result in eval_results), 4),
-            "avg_must_hit_rate": round(
-                mean(result["layers"][layer_name]["must_hit_rate"] for result in eval_results),
-                4,
-            ),
-        }
-
-    return summary
-
-
-def _to_chinese_case_result(eval_result: dict) -> dict:
-    """
-    将单条评测结果转成更适合直接写报告的中文结构。
-    """
-    chinese_layers = {}
-    for layer_name, layer_result in eval_result.get("layers", {}).items():
-        chinese_layers[LAYER_LABELS.get(layer_name, layer_name)] = {
-            "检索结果chunk_id列表": layer_result.get("retrieved_chunk_ids", []),
-            "检索结果数量": layer_result.get("retrieved_count", 0),
-            "标注相关chunk_id列表": layer_result.get("gold_chunk_ids", []),
-            "标注相关数量": layer_result.get("gold_count", 0),
-            "命中chunk_id列表": layer_result.get("hit_chunk_ids", []),
-            "命中数量": layer_result.get("hit_count", 0),
-            "必须命中chunk_id列表": layer_result.get("must_hit_chunk_ids", []),
-            "必须命中结果列表": layer_result.get("must_hit_ids", []),
-            "必须命中数量": layer_result.get("must_hit_count", 0),
-            "精确率": layer_result.get("precision", 0.0),
-            "召回率": layer_result.get("recall", 0.0),
-            "必命中率": layer_result.get("must_hit_rate", 0.0),
-        }
-
+    summary["conclusion"] = _conclusion(summary, config.ks)
     return {
-        "用例ID": eval_result.get("case_id", ""),
-        "问题": eval_result.get("question", ""),
-        "预期主体列表": eval_result.get("expected_item_names", []),
-        "识别主体列表": eval_result.get("predicted_item_names", []),
-        "主体命中率": eval_result.get("item_name_hit_rate", 0.0),
-        "分层结果": chinese_layers,
-    }
-
-
-def _to_chinese_summary(summary: dict) -> dict:
-    """
-    将汇总结果转成中文结构，方便直接展示或落报告。
-    """
-    chinese_layers = {}
-    for layer_name, layer_summary in summary.get("layers", {}).items():
-        chinese_layers[LAYER_LABELS.get(layer_name, layer_name)] = {
-            "平均精确率": layer_summary.get("avg_precision", 0.0),
-            "平均召回率": layer_summary.get("avg_recall", 0.0),
-            "平均必命中率": layer_summary.get("avg_must_hit_rate", 0.0),
-        }
-
-    return {
-        "用例总数": summary.get("case_count", 0),
-        "平均主体命中率": summary.get("avg_item_name_hit_rate", 0.0),
-        "分层汇总": chinese_layers,
-    }
-
-
-def collect_split_quality() -> dict:
-    """
-    汇总切分质量：评测文档 + 已缓存的真实解析产物两套切片。
-
-    真实产物缺失时只保留评测文档一段——切分质量属评估增强项，不应阻断检索评测。
-    """
-    split = split_eval_document()
-    quality = {
-        "评测文档": evaluate_split_quality(split["children"], split["parents"], split["blocks"]),
-    }
-    real = split_real_artifact(PROJECT_ROOT)
-    if real is not None:
-        quality[f"真实产物:{ARTIFACT_DOC_NAME}"] = evaluate_split_quality(
-            real["children"], real["parents"], real["blocks"]
-        )
-    return quality
-
-
-def save_batch_eval_report(
-    eval_results: list[dict],
-    summary: dict,
-    split_quality: dict | None = None,
-    report_name: str = "rag_eval_batch_report.json",
-) -> Path:
-    """
-    保存批量评测报告。
-
-    报告里同时放三部分：
-    1. 汇总结果；
-    2. 每道题的详细结果；
-    3. 切分质量（切分策略变更后的可比证据）。
-
-    参数：
-    - eval_results：每道题的详细评测结果
-    - summary：整体汇总结果
-    - split_quality：切分质量指标（可选）
-    - report_name：报告文件名，默认 `rag_eval_batch_report.json`
-
-    返回值：
-    - Path：报告文件路径
-    """
-    ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
-    report_path = ARTIFACTS_DIR / report_name
-    payload = {
-        "汇总结果": _to_chinese_summary(summary),
-        "详细结果": [_to_chinese_case_result(result) for result in eval_results],
-    }
-    if split_quality:
-        payload["切分质量"] = split_quality
-    report_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    return report_path
-
-
-def run_batch_eval(case_list: list[dict] | None = None) -> dict:
-    """
-    执行整批评测。
-
-    参数：
-    - case_list：可选，自定义题库；不传时默认从题库文件读取
-
-    返回值：
-    - eval_results：每条题目的详细结果
-    - summary：整体平均指标
-    - report_path：报告文件路径
-
-    流程按顺序就是：
-    1. 检查环境；
-    2. 读取题库；
-    3. 逐题调用 `run_query_eval_case()`；
-    4. 汇总指标；
-    5. 汇总切分质量；
-    6. 保存报告；
-    7. 返回结果。
-    """
-    if not batch_eval_ready():
-        raise RuntimeError("缺少批量评测依赖配置，无法执行批量检索评测。")
-    if not milvus_ready():
-        raise RuntimeError("MilvusClient 未成功初始化，无法执行批量检索评测。")
-
-    real_case_list = case_list if case_list is not None else load_batch_eval_cases()
-    if not real_case_list:
-        raise RuntimeError("未找到批量评测样本，请先执行评测数据入库。")
-
-    # 逐题跑查询链路，拿到每一道题的分层评测结果。
-    eval_results = [run_query_eval_case(case_data) for case_data in real_case_list]
-    # 再把所有题的结果做平均汇总。
-    summary = summarize_eval_results(eval_results)
-    # 切分质量与检索指标分开统计：前者反映切分策略，后者反映检索链路。
-    split_quality = collect_split_quality()
-    # 最后把结果写到报告文件。
-    report_path = save_batch_eval_report(eval_results, summary, split_quality)
-    return {
-        "eval_results": eval_results,
+        "meta": {
+            "created_at": datetime.now().isoformat(timespec="seconds"),
+            "base_url": config.base_url,
+            "dataset": str(config.dataset_path),
+            "ks": list(config.ks),
+            "ragas_enabled": config.run_ragas,
+            "judge": (scorer.metadata if scorer is not None else {}),
+        },
         "summary": summary,
-        "split_quality": split_quality,
-        "report_path": report_path,
+        "cases": sorted(rows, key=lambda row: row["case_id"]),
     }
+
+
+def _primary_k(ks: tuple[int, ...]) -> int:
+    """结论默认看 @k：优先 5，否则取配置的最大 k。"""
+    return 5 if 5 in ks else max(ks)
+
+
+def _conclusion(summary: dict, ks: tuple[int, ...]) -> dict:
+    """把汇总结果翻译成可直接阅读的结论与原因。"""
+    k = _primary_k(ks)
+    reranked = (summary.get("retrieval") or {}).get("reranked") or {}
+    recall = reranked.get(f"recall@{k}")
+    must_hit = reranked.get(f"must_hit@{k}")
+    ndcg = reranked.get(f"ndcg@{k}")
+
+    reasons: list[str] = []
+    if summary.get("failed"):
+        reasons.append(f"{summary['failed']} 题执行失败")
+    if isinstance(recall, (int, float)) and recall < RECALL_TARGET:
+        reasons.append(f"reranked recall@{k}={recall} 低于目标 {RECALL_TARGET}")
+    if isinstance(must_hit, (int, float)) and must_hit < MUST_HIT_TARGET:
+        reasons.append(f"reranked must_hit@{k}={must_hit} 低于目标 {MUST_HIT_TARGET}")
+
+    if summary.get("failed"):
+        status = "failed"
+    elif recall is None and must_hit is None:
+        # 没有标注就无法判断检索质量；不能默认算「通过」
+        status = "inconclusive"
+        reasons.append("本次样本没有可计算的检索指标（未标注 gold_chunk_ids）")
+    elif reasons:
+        status = "warning"
+    else:
+        status = "passed"
+
+    ragas = summary.get("ragas") or {}
+    return {
+        "status": status,
+        "reasons": reasons or ["全部样本执行成功，关键检索指标达到目标"],
+        "key_metrics": {
+            f"recall@{k}": recall,
+            f"must_hit@{k}": must_hit,
+            f"ndcg@{k}": ndcg,
+            "faithfulness": ragas.get("faithfulness"),
+            "answer_relevancy": ragas.get("answer_relevancy"),
+            "latency_ms_avg": (summary.get("latency_ms") or {}).get("avg"),
+        },
+    }
+
+
+def _case_brief(row: dict, ks: tuple[int, ...]) -> str:
+    """单题完成时打印一行关键结果，避免结果只留在 JSON 里。"""
+    k = _primary_k(ks)
+    reranked = (row.get("retrieval") or {}).get("reranked") or {}
+    recall = reranked.get(f"recall@{k}")
+    must_hit = reranked.get(f"must_hit@{k}")
+
+    def _show(value):
+        return "无标注" if value is None else value
+
+    parts = [f"recall@{k}={_show(recall)}", f"must_hit@{k}={_show(must_hit)}"]
+    ragas = row.get("ragas") or {}
+    if isinstance(ragas.get("faithfulness"), (int, float)):
+        parts.append(f"faithfulness={ragas['faithfulness']}")
+    parts.append(f"{row.get('latency_ms')}ms")
+    return " | ".join(parts)
+
+
+def _latency_summary(values: list[float]) -> dict:
+    if not values:
+        return {"avg": None, "p95": None}
+    ordered = sorted(values)
+    index = min(len(ordered) - 1, int(round(0.95 * (len(ordered) - 1))))
+    return {
+        "avg": round(statistics.mean(ordered), 1),
+        "p95": round(ordered[index], 1),
+    }
+
+
+def timed_run(config: EvalConfig, progress: Progress | None = None) -> dict:
+    """带总耗时的运行入口（CLI 使用）。"""
+    started = time.perf_counter()
+    report = run_evaluation(config, progress)
+    report["meta"]["duration_seconds"] = round(time.perf_counter() - started, 1)
+    return report

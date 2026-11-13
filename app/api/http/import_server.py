@@ -50,4 +50,15 @@ app.include_router(pages_router.static_router)
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host=settings.api.host, port=settings.api.import_port)
+    from app.shared.clients import redis_gateway
+
+    if redis_gateway.using_redis():
+        # 多 worker：导入任务状态与全局名额走 Redis
+        uvicorn.run(
+            "app.api.http.import_server:app",
+            host=settings.api.host,
+            port=settings.api.import_port,
+            workers=settings.api.import_workers,
+        )
+    else:
+        uvicorn.run(app, host=settings.api.host, port=settings.api.import_port)

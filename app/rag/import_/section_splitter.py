@@ -236,7 +236,7 @@ def _new_section(*, level: int, title: str, heading_path: str, occurrence: int, 
 def split_blocks(blocks: list[Block], doc_key: str, file_title: str) -> tuple[list[dict], list[dict]]:
     """两级切分的纯函数编排：``(parents, children)``，并回填父块的 ``child_count``。
 
-    导入链路（``split_service.split_document``）与评估链路（``rag_eval.split_dataset``）共用
+    导入链路（``split_service.split_document``）与离线评测共用
     本函数，保证「评估用的切片」与「线上入库的切片」出自同一套逻辑。
     """
     parents, sections = build_sections(blocks, doc_key, file_title)

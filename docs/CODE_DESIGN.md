@@ -15,24 +15,32 @@
 系统由两个独立 FastAPI 进程组成，共用一套代码与配置。
 
 ```text
-导入进程 :8000
+导入进程 :8000（可多 worker）
   ├─ 上传 / 状态 / 重试 / 删除接口
   ├─ 导入图（LangGraph）
-  └─ 进程内并发闸门 + 磁盘任务快照
+  └─ 全局并发名额 + 磁盘任务快照
 
-问答进程 :8001
+问答进程 :8001（可多 worker）
   ├─ 提问 / SSE / 历史 / 反馈 / 自进化接口
   ├─ 查询图（LangGraph）
   ├─ Agentic 控制器
-  ├─ 自进化调度器
-  └─ 单 worker 租约 + 模型预热
+  ├─ 自进化调度器（主节点租约）
+  └─ 模型预热
+
+共享运行期状态（Redis，可选）
+  ├─ task:state:<id>          任务进度
+  ├─ sse:stream:<session_id>  SSE 事件流
+  ├─ query:active:<session_id> 会话查询锁
+  ├─ import:slots             全局导入名额
+  └─ evolution:scheduler:leader 调度器主节点
 ```
 
 设计取舍：
 
 - 导入与查询分离，重任务不会阻塞在线问答。
-- 查询服务用文件锁保证单 worker。任务状态、SSE 频道、每个会话的并发锁都在进程内，多 worker 会失去一致性。
-- 导入任务提交到进程内线程池；`BoundedSemaphore` 兜底限制并发数。
+- 未配置 `REDIS_URL` 时保持单 worker：查询服务用文件锁，任务状态、SSE 频道与会话锁都在进程内。
+- 配置 Redis 后查询与导入都可用多个 worker：任务状态、SSE、会话锁与导入名额跨进程共享。
+- 导入任务提交到进程内线程池；单 worker 用 `BoundedSemaphore`，多 worker 用 Redis 有序集合限制全局名额。
 
 ## 3. 分层与模块职责
 
@@ -45,7 +53,7 @@
 | 进化层 | `app/evolution/` | 反馈、缺口、候选、审批、索引、调度、指标、调参、回测 |
 | 共享层 | `app/shared/` | 配置、存储客户端、模型、日志、SSE、任务状态、通用工具 |
 | 页面层 | `app/resources/` | 对话页、导入页、审批页与静态资源 |
-| 评估层 | `app/rag_eval/` | 离线评估、切分评估、答案质量、Agentic 对比、隔离联调 |
+| 评估层 | `app/rag_eval/` | HTTP 离线评测：数据集、检索指标、RAGAS 生成指标、报告与基线回归 |
 
 ## 4. 数据契约
 
@@ -241,7 +249,7 @@ ID 只编码结构，不编码内容。内容变化由 `content_hash` 感知，�
 
 - `POST /api/import/retry/{task_id}`：仅允许 `failed`；复用原任务目录与原文件；清空旧进度；状态置 `pending` 后重新提交。业务政策重试前检查有效期。
 - `DELETE /api/import/records/{task_id}`：清理内存状态、磁盘快照、任务目录。进行中任务返回 409。已入库向量不删除。
-- 两者共用进程内锁，避免双击重试导致同一文件并发导入两次。
+- 两者共用「进程内锁 + Redis 会话锁」的保护，避免双击重试导致同一文件并发导入两次。
 
 ## 6. 查询子系统
 
@@ -440,12 +448,14 @@ bootstrap → assess
 
 ### 9.4 并发
 
-- 导入：进程内信号量。
-- 查询：每会话互斥 + 单 worker 租约。
+- 导入：单 worker 用进程内信号量；多 worker 用 Redis `import:slots` 全局名额。
+- 查询：每会话互斥；单 worker 用进程内字典，多 worker 用 Redis `query:active:<id>`。
+- SSE：单 worker 用进程内队列；多 worker 用 Redis Stream，支持断线回放。
 - 意图识别：独立线程池 + 信号量。
 - 图片说明：线程池，上限可配。
 - 发布任务：Mongo 租约。
 - 缺口处理：Mongo 租约与领取令牌。
+- 自进化调度器：多 worker 用 Redis 主节点租约，保证只有一个实例执行周期任务。
 
 ### 9.5 幂等与一致性
 
@@ -495,9 +505,10 @@ E2E_ENABLED=1 uv run pytest -m e2e tests/e2e -s
 
 ## 12. 已知限制
 
-1. 查询服务只能单 worker 运行。
-2. 导入任务状态与并发控制是进程内语义。
-3. Milvus / Mongo / MinIO 无事务；只能依靠幂等与对账。
-4. 本地模型在 CPU 上较慢；首次启动需要预热。
-5. 鉴权为共享令牌 + Cookie 归属，不是企业级账号体系。
-6. 联网检索依赖外部 MCP 服务，未配置时自动降级。
+1. 多 worker 依赖 Redis；未配置时自动退回单 worker。
+2. 导入任务目录与磁盘快照在本地 `output/`；多机部署需要共享存储。
+3. 每个 worker 独立加载 BGE-M3 与重排模型，内存按 worker 数增长。
+4. Milvus / Mongo / MinIO 无事务；只能依靠幂等与对账。
+5. 本地模型在 CPU 上较慢；首次启动需要预热。
+6. 鉴权为共享令牌 + Cookie 归属，不是企业级账号体系。
+7. 联网检索依赖外部 MCP 服务，未配置时自动降级。

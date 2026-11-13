@@ -43,6 +43,33 @@ def test_http_keeps_null_answer_id_normalization_and_own_fields(monkeypatch):
     assert response.model_dump() == {
         **COMMON, "message": "已完成问的内容检索", "session_id": "session-a",
         "done_list": ["已完成"], "retrieval_signals": {}, "turn_id": "turn-a",
+        # 未请求证据时保持空值，避免普通问答响应体膨胀
+        "evidence": [], "retrieval_layers": {},
+    }
+
+
+def test_http_returns_evidence_only_when_requested(monkeypatch):
+    """评测请求才回传证据正文与分层 chunk_id。"""
+    from app.api.routers import query as api
+    from app.api.schema.query_schema import QueryRequestSchema
+    monkeypatch.setattr(api, "authorize_session", lambda *a, **k: None)
+    monkeypatch.setattr(api, "reserve_query", lambda *a: "turn-b")
+    monkeypatch.setattr(api, "get_done_task_list", lambda *a: [])
+    monkeypatch.setattr(api, "invoke_query_graph", lambda **k: {
+        "answer": "答",
+        "reranked_docs": [{"chunk_id": "c1", "text": "正文"}],
+        "rrf_chunks": [{"chunk_id": "c1"}, {"chunk_id": "c2"}],
+    })
+    response = api.query(
+        BackgroundTasks(),
+        QueryRequestSchema(query="问", session_id="session-b", is_stream=False, include_evidence=True),
+    )
+    assert response.evidence == [{
+        "chunk_id": "c1", "content": "正文", "score": None, "source": "kb", "title": "",
+        "file_title": "", "item_name": "", "page": None, "heading_path": "", "document_version": "",
+    }]
+    assert response.retrieval_layers == {
+        "embedding": [], "hyde": [], "rrf": ["c1", "c2"], "reranked": ["c1"],
     }
 
 

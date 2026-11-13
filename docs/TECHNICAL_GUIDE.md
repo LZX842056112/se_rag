@@ -50,11 +50,11 @@ Milvus（子块/主体名/FAQ） + Mongo（父块/任务/反馈） + MinIO（图
 
 ### 2.2 任务执行
 
-上传后，任务先置为 `pending`，再提交到进程内线程池。线程池按 `IMPORT_MAX_CONCURRENT_TASKS` 并行执行。超出上限的任务在线程池队列中排队。
+上传后，任务先置为 `pending`，再提交到进程内线程池。单 worker 用信号量、多 worker 用 Redis `import:slots` 限制全局名额，按 `IMPORT_MAX_CONCURRENT_TASKS` 并行执行。超出上限的任务等待名额，超时失败为 `import_busy`。
 
 `invoke_import_graph`：
 
-1. 抢导入并发名额。
+1. 抢导入并发名额（跨进程）。
 2. 状态置 `processing`，写磁盘快照。
 3. 构造 `ImportGraphState`。
 4. 运行导入图；失败按错误码判断是否重试。
@@ -207,8 +207,14 @@ chunk_id  = sha1(doc_id#heading_path#occurrence#part)
 `POST /api/query`：
 
 1. 校验会话归属。
-2. 预留会话查询名额；同会话只允许一个问题。
+2. 预留会话查询名额；同会话只允许一个问题。多 worker 时用 Redis `query:active:<session_id>` 互斥。
 3. 非流式同步执行；流式立即返回 `session_id`，后台执行。
+
+流式事件：
+
+- 单 worker：事件进入进程内队列，SSE 连接直接消费。
+- 多 worker：事件写入 Redis Stream `sse:stream:<session_id>`；SSE 端从 `0-0` 回放后阻塞读取，因此刷新页面或连到另一个 worker 都能续上进度与最终答案。
+- `delta` 事件按 `SSE_DELTA_FLUSH_MS` 合并后写入，`final` / `close` 前会先冲刷，保证顺序。
 
 ### 3.2 意图识别
 
@@ -629,48 +635,59 @@ curl http://127.0.0.1:8001/api/health
 
 ## 9. 评估与实验
 
-### 9.1 切分评估
+评测通过 HTTP 调用查询服务，不直接连 Milvus / Mongo。请求带 `include_evidence=true`，
+服务端才回传证据正文与分层 chunk_id。
 
-- `app/rag_eval/dataset.py`
-- `app/rag_eval/split_metrics.py`
-- `app/rag_eval/split_dataset.py`
-
-用于构建切分数据集、计算切分指标、对比不同切分策略。
-
-### 9.2 答案质量
+### 9.1 运行
 
 ```bash
-uv run python -m app.rag_eval.answer_quality \
-  --cases app/rag_eval/artifacts/eval_cases.json \
-  --output output/answer-quality-report.json
+uv sync --group eval
+uv run python -m app.rag_eval.cli run --dataset app/rag_eval/datasets/sample_cases.json
 ```
 
-可选参数：`--allow-external`、`--allow-unreviewed`、`--snapshots`、`--baseline`、`--limit`。
+只跑检索指标时加 `--no-ragas`。报告写入 `output/eval/`，包含 JSON 与 Markdown。
+Markdown 报告包含总体结论、分层指标、延迟、逐题结果与基线对比。
+逐题结果展示执行状态、证据数、`recall@k`、`must_hit@k`、`faithfulness`、延迟与失败原因。
 
-### 9.3 Agentic 对比
+### 9.2 指标
+
+检索指标按 `embedding` / `hyde` / `rrf` / `reranked` 分层统计：
+
+- `precision@k`、`recall@k`
+- `mrr@k`、`ndcg@k`
+- `must_hit@k`
+
+生成指标（RAGAS 0.4.3）：
+
+- `faithfulness`
+- `answer_relevancy`
+- `context_precision`
+- `context_recall`
+
+judge 模型由 `EVAL_LLM_MODEL` 明确配置；未配置直接报错，避免回答模型自评。
+未标注 `gold_chunk_ids` 的样本不参与对应检索指标平均；RAGAS 单指标失败只记录原因。
+
+### 9.3 数据集
+
+JSON 数组或 JSONL。必填 `case_id`、`question`、`ground_truth`；可选
+`expected_item_names`、`gold_chunk_ids`、`must_hit_chunk_ids`、`tags`。
+格式见 `app/rag_eval/README.md`。
+
+示例数据集共 100 题，覆盖 12 个主体、89 道正常场景题和 11 道边界题。
+边界题包含模糊输入 3 道、超范围 3 道、否定问题 3 道、长输入 2 道。
+超范围与否定问题不标注 `gold_chunk_ids`，只检查执行状态与回答内容。
+
+### 9.4 基线回归
 
 ```bash
-uv run python -m app.rag_eval.agentic_comparison \
-  --output output/agentic-comparison.json
+# 保存基线
+uv run python -m app.rag_eval.cli run --dataset ... --save-baseline output/eval/baseline.json
+
+# 与基线对比；有回归时退出码为 1
+uv run python -m app.rag_eval.cli run --dataset ... --baseline output/eval/baseline.json --fail-on-regression
 ```
 
-用于对比 legacy 与 agentic 的答案质量与成本。
-
-### 9.4 全流程实验
-
-```bash
-uv run python -m app.rag_eval.full_flow --base-url http://127.0.0.1:8001
-```
-
-### 9.5 隔离联调
-
-```bash
-uv run python -m app.rag_eval.ui_trial prepare --run ui_test_YYYYMMDD_xxxxxxxx
-```
-
-命令：`prepare`、`serve-query`、`serve-import`、`inspect`、`cycle`、`e2e`、`configure-images`。
-
-隔离资源使用独立的 Mongo 库、Milvus 集合、MinIO 桶；代码会校验资源名，拒绝连接非隔离资源。
+默认阈值为 `0.02`。延迟指标越小越好，其余指标越大越好。缺失指标不参与对比。
 
 ## 10. 性能与容量
 
@@ -688,8 +705,8 @@ uv run python -m app.rag_eval.ui_trial prepare --run ui_test_YYYYMMDD_xxxxxxxx
 
 - 单条切片控制在 600~1000 字，避免超长正文。
 - 单文档图片数量过多时，图片增强会成为瓶颈。
-- 查询服务单 worker；CPU 模型下并发能力有限。
-- 导入并发默认 2，按机器资源调整。
+- 未配置 Redis 时查询服务单 worker；配置后可多 worker，但每个 worker 都加载模型，内存按 worker 数增长。
+- 导入并发默认 2，按机器资源调整；多 worker 时为全局上限。
 
 ## 11. 安全与审计
 

@@ -1,246 +1,138 @@
-# RAG 评估模块说明
+# RAG 离线评测
 
-新增的 `RagEvalTester.run_answer_eval()` 用于离线答案质量评测。
-它使用 Ragas，覆盖忠实度、相关性和事实正确性。
-默认只校验题库，不调用模型。
-原有 `run_eval()` 继续评测检索与重排。
-安装、独立测试资源、样本复核和运行命令见 [答案评测操作说明](../../docs/answer-evaluation.md)。
+通过 HTTP 调用查询服务，计算检索指标与 RAGAS 生成指标，并支持基线回归对比。
 
-## 1. 模块目标
+## 1. 准备
 
-`app/rag_eval` 是当前项目的统一评估子系统，目标是把评估逻辑收敛到一个独立包里，并且对外只暴露一个测试类，方便：
+1. 启动查询服务（8001）。
+2. 安装评测依赖（只用检索指标可跳过）：
 
-- 在当前项目里统一维护评估代码
-- 在另一个结构相近的 RAG 教学项目中整体迁移
-- 让“测试数据准备”和“批量评测执行”流程更清晰
-- 复制整个包后直接实例化类，不依赖 `tests` 目录和命令行入口
+```bash
+uv sync --group eval
+```
 
-当前假设另一个项目满足下面两个前提：
-
-- 查询链路的 `state` 字段约定一致
-- 查询节点名称与调用方式一致
-
-如果这两个前提成立，通常复制整个 `app/rag_eval` 目录，再调整少量导入路径即可完成迁移。
-
-## 2. 包结构
+3. 在 `.env` 配置独立 judge 模型，避免回答模型自评：
 
 ```text
-app/rag_eval/
-  __init__.py
-  runner.py
-  dataset.py
-  split_dataset.py
-  split_metrics.py
-  metrics.py
-  tester.py
-  README.md
+EVAL_LLM_MODEL=
+EVAL_LLM_BASE_URL=
+EVAL_LLM_API_KEY=
+EVAL_LLM_TIMEOUT_SECONDS=120
 ```
 
-各文件职责如下：
+`EVAL_LLM_BASE_URL` / `EVAL_LLM_API_KEY` 为空时复用 `OPENAI_BASE_URL` / `OPENAI_API_KEY`。
 
-- `tester.py`
-  - 提供统一测试类 `RagEvalTester`
-  - 对外提供检索评测和答案评测入口
-- `dataset.py`
-  - 维护常量与题库文件读写
-  - 维护联网占位结果
-  - 维护联网占位结果及题库文件读写；切片由真实切分器生成
-- `split_dataset.py`
-  - 把评测知识组织成 Markdown 文档，经**真实切分器**产出黄金切片
-  - 由**内容关键词**推导 gold，不依赖切片序号
-  - 读取已缓存的 MinerU 解析产物，用于切分质量基线
-- `split_metrics.py`
-  - 切分质量纯函数指标：源内容覆盖率、表格完整率、碎片率、面包屑覆盖率、页码溯源覆盖率、父子关联
-- `metrics.py`
-  - 提取 `chunk_id`
-  - 计算主体命中率
-  - 计算每层检索的 `precision / recall / must_hit_rate`
-- `runner.py`
-  - 通过真实导入链路写入评测数据
-  - 执行单条评测
-  - 执行批量评测与汇总
-  - 生成中文报告（含切分质量段）
+## 2. 评测集格式
 
-## 3. 当前评估流程
+JSON 数组或 JSONL，每题字段：
 
-这套评估分两步执行。
+| 字段 | 必填 | 说明 |
+|---|---|---|
+| `case_id` | 是 | 唯一标识，不能重复 |
+| `question` | 是 | 提问原文 |
+| `ground_truth` | 是 | 标准答案，RAGAS 需要 |
+| `expected_item_names` | 否 | 预期主体，用于人工核对 |
+| `gold_chunk_ids` | 否 | 标注的相关切片，检索指标需要 |
+| `must_hit_chunk_ids` | 否 | 必须命中的关键切片 |
+| `tags` | 否 | 标签，可用 `--tags` 过滤 |
 
-### 第一步：准备评测数据
+示例见 `app/rag_eval/datasets/sample_cases.json`，使用的是当前知识库中的真实切片 ID。
+换一套知识库时需要替换 `gold_chunk_ids` 与 `must_hit_chunk_ids`，否则检索指标会偏低。
 
-`runner.insert_batch_eval_dataset()` 会复用现有导入链路：
+示例数据集共 100 题，覆盖 12 个主体：
 
-- `node_item_name_recognition`
-- `node_bge_embedding`
-- `node_import_milvus`
+| 维度 | 数量 | 说明 |
+|---|---|---|
+| 总题数 | 100 | 92 题有切片标注，8 题只检查行为 |
+| 正常场景 | 89 | 操作步骤 30、参数设置 14、故障排查 14、功能说明 13、网络连接 8、安全信息 7、电池与充电 7、维护保养 3 |
+| 边界场景 | 11 | 模糊输入 3、超范围 3、否定问题 3、长输入 2 |
+| 覆盖主体 | 12 | HAK 180、Brother 打印服务器、5 款华为笔记本、2 款华为台式机、华为显示器、Aolynk 网桥、H3C 网关 |
 
-切片不再手工编写，而是由 `split_dataset.split_eval_document()` 调**真实切分器**
-（`section_splitter.split_blocks`，与线上导入同一套逻辑）产出。因此：
+`边界-超范围`、`边界-否定问题` 和部分 `边界-模糊输入` 没有 `gold_chunk_ids`。
+这些题只检查执行状态与回答内容，不计算检索指标。
 
-- 切分策略的改动会被评估覆盖到；
-- `chunk_id` 是确定性哈希，可在本地算出来，**不再需要「先入库再回查自增主键」**；
-- gold 由内容关键词推导，切片数量变化不会让标注失效。
+## 3. 运行
 
-执行后会完成两件事：
+```bash
+# 检索 + RAGAS
+python -m app.rag_eval.cli run --dataset app/rag_eval/datasets/sample_cases.json
 
-1. 将测试 chunks 写入 `item_name` 集合和 `chunks` 集合（父块写入 MongoDB）
-2. 生成批量评测样本文件 `app/rag_eval/artifacts/hak180_eval_cases.json`
+# 只跑检索指标
+python -m app.rag_eval.cli run --dataset ... --no-ragas
 
-> 注意：回查 chunk 集合只用于**校验写入成功**。过滤条件必须使用「实际写入的主体名」——
-> 主体识别会把新名归并到库内标准名（如 `HAK 180` → `HAK 180 烫金机`），硬编码常量会稳定查到 0 行。
-
-### 第二步：执行批量评测
-
-`runner.run_batch_eval()` 会读取题库，然后逐条执行：
-
-- `node_search_embedding`
-- `node_search_embedding_hyde`
-- `node_rrf`
-- `node_rerank`
-
-每个节点返回的数据都会写回查询 `state`，评估模块再从 `state` 中读取：
-
-- `embedding_chunks`
-- `hyde_embedding_chunks`
-- `rrf_chunks`
-- `reranked_docs`
-
-最后用标注好的 `gold_chunk_ids` 和 `must_hit_chunk_ids` 做对比，统计指标。
-
-### 切分质量（报告新增段）
-
-`runner.collect_split_quality()` 会对**评测文档**与**已缓存的真实解析产物**分别计算切分质量，
-写入报告的 `切分质量` 段。这是切分策略变更后唯一可比的证据：
-
-| 指标 | 含义 | 期望 |
-| --- | --- | --- |
-| 源内容覆盖率 | 源块文本都能在某个切片中找到 | 100% |
-| 表格完整率 | 每个数据行都出现在「带表头」的切片里 | 100% |
-| 碎片率 | 分别给出碎片块**数量占比**与**内容占比** | 看内容占比 |
-| 章节面包屑覆盖率 | 切片带 `heading_path` 的比例 | 100% |
-| 页码溯源覆盖率 | 切片带有效 `page` 的比例 | 结构感知路径 100% |
-| 父子关联 | 每个子块的 `parent_id` 都能在父块列表中找到 | 100% |
-
-碎片率口径说明：结构感知切分下，短小节会天然产出短切片——**不同标题的切片不合并**，以保证切片标题与
-引用溯源精确（合并会让标题与实际内容不符）。因此验收看的是碎片块**承载的内容占比**，而不是数量占比。
-
-## 4. 如何获取每层召回结果
-
-评估系统不会额外去日志或数据库反查，而是直接读取查询 `state`：
-
-- `embedding_chunks`：普通检索召回结果
-- `hyde_embedding_chunks`：HyDE 检索召回结果
-- `rrf_chunks`：RRF 融合后的候选结果
-- `reranked_docs`：最终重排后保留的上下文结果
-
-这也是它容易迁移的原因之一：只要新项目保留同样的字段名，评估逻辑就不用重写。
-
-## 5. 如何理解“交给大模型的数据”
-
-当前评估涉及两类模型输入：
-
-### 5.1 HyDE 的 LLM 输入
-
-- 输入：`rewritten_query`
-- 输出：假设性答案 `hyde_answer`
-- 用途：把“问题 + 假设答案”一起向量化，再去做 HyDE 检索
-
-### 5.2 reranker 模型输入
-
-- 输入：`[question, text]` 对
-- 来源：
-  - 本地 Milvus 候选 `rrf_chunks`
-  - 联网占位文档 `web_search_docs`
-- 用途：给最终候选重新打分排序
-
-注意：
-
-- 当前评估系统并没有走“最终回答生成”
-- 它评估到 `reranked_docs` 这一层就结束
-- 所以它评估的是“检索与重排质量”，不是最终回答质量
-
-## 6. 推荐用法
-
-推荐直接使用测试类：
-
-```python
-from app.rag_eval import RagEvalTester
-
-tester = RagEvalTester()
+# 指定服务地址与并发
+python -m app.rag_eval.cli run --dataset ... --base-url http://127.0.0.1:8001 --concurrency 2
 ```
 
-### 6.1 导入评测数据
+默认输出目录 `output/eval/`，会写：
 
-```python
-insert_result = tester.run_insert_test_data()
+- `eval_<时间戳>.json`：完整报告
+- `eval_<时间戳>.md`：人工查看的摘要，包含总体结论、逐题结果与基线对比
+- `latest.json`：最近一次报告
+
+运行过程中，每完成一题会打印一行关键结果。
+示例：`recall@5=0.8 | must_hit@5=1.0 | faithfulness=1.0 | 1820ms`。
+没有标注的题显示 `无标注`。
+
+## 4. 指标
+
+检索指标（按层 `embedding` / `hyde` / `rrf` / `reranked` 分别统计）：
+
+- `precision@k`：前 k 条中相关切片比例
+- `recall@k`：前 k 条覆盖了多少标注切片
+- `mrr@k`：第一条命中的倒数排名
+- `ndcg@k`：二值相关度的排序质量
+- `must_hit@k`：关键切片命中比例
+
+生成指标（RAGAS 0.4.3）：
+
+- `faithfulness`
+- `answer_relevancy`
+- `context_precision`
+- `context_recall`
+
+## 5. 基线回归
+
+```bash
+# 首次运行并保存基线
+python -m app.rag_eval.cli run --dataset ... --save-baseline output/eval/baseline.json
+
+# 后续运行与基线对比；有回归时退出码为 1
+python -m app.rag_eval.cli run --dataset ... --baseline output/eval/baseline.json --fail-on-regression
+
+# 只对比两份已有报告
+python -m app.rag_eval.cli compare --baseline output/eval/baseline.json --current output/eval/latest.json
 ```
 
-### 6.2 执行批量评测
+对比默认阈值为 `0.02`，可用 `--max-drop` 调整。延迟指标越小越好，其余指标越大越好。
+对比结论会写入 Markdown 报告的 `## 基线对比` 章节。
 
-```python
-eval_result = tester.run_eval()
-```
+## 6. 结果查看
 
-## 7. 这两个方法分别做什么
+Markdown 报告按顺序展示以下内容：
 
-### 7.1 `tester.run_insert_test_data()`
+| 章节 | 内容 |
+|---|---|
+| `## 总体结论` | 状态、判定依据、关键指标 |
+| `## 检索指标` | 各层 `precision` / `recall` / `mrr` / `ndcg` / `must_hit` 与样本数 |
+| `## RAGAS 生成指标` | 四项生成指标与样本数 |
+| `## 延迟` | 平均与 P95 |
+| `## 逐题结果` | 每题状态、证据数、`recall@k`、`must_hit@k`、`faithfulness`、延迟、失败原因 |
+| `## 基线对比` | 回归与提升项、对比指标数、阈值 |
 
-负责：
+总体结论有四种状态：
 
-- 通过真实导入链路写入评测数据
-- 查询并确认 item_name / chunk 数据成功入库
-- 生成批量评测题库
+- `通过`：全部样本执行成功，`recall@5 >= 0.8` 且 `must_hit@5 >= 1.0`。
+- `需关注`：样本执行成功，但关键指标低于目标。
+- `未通过`：有样本执行失败。
+- `无法判定`：没有可计算的检索指标，例如全部样本都未标注。
 
-返回值包含：
+没有 5 时，结论使用配置中的最大 k。
+没有标注的指标在报告中显示 `无标注`，不会显示空值。
 
-- `item_name`（**实际写入的主体名**，可能是归并后的库内标准名）
-- `item_rows`
-- `chunk_rows`
-- `case_count`
-- `split_quality`
+## 7. 说明
 
-### 7.2 `tester.run_eval()`
-
-负责：
-
-- 读取题库
-- 执行 embedding / HyDE / RRF / rerank 四层评测
-- 统计主体命中率、召回率、精确率、必命中率
-- 汇总切分质量
-- 输出报告文件
-
-返回值包含：
-
-- `eval_results`
-- `summary`
-- `split_quality`
-- `report_path`
-
-## 8. 为什么适合迁移
-
-这个包内部已经自带：
-
-- 测试样本定义
-- 评测数据导入逻辑
-- 批量评测逻辑
-- 指标统计
-- 报告输出
-
-因此迁移时优先以 `app/rag_eval` 为最小复制单元，不再依赖 `tests` 目录下的脚本，也不需要额外保留命令行入口。
-
-## 9. 迁移到另一个项目时要改什么
-
-如果另一个项目结构接近，优先复制 `app/rag_eval` 整个目录。
-
-通常只需要检查这些点：
-
-- `runner.py` 里导入的节点路径是否一致
-- `create_default_state` 和 `create_query_default_state` 路径是否一致
-- `milvus_gateway` 与配置模块路径是否一致
-- 项目中的 `state` 字段名是否仍然是：
-  - `embedding_chunks`
-  - `hyde_embedding_chunks`
-  - `rrf_chunks`
-  - `reranked_docs`
-  - `item_names`
-
-如果这些约定不变，这套评估系统基本可以直接复用。
+- 评测请求带 `include_evidence=true`，服务端才会回传证据正文与分层 chunk_id。
+- 检索指标依赖标注的 `gold_chunk_ids`；没有标注的样本不参与对应指标平均。
+- RAGAS 单指标失败只记录原因，不影响其他指标；失败样本不计入平均。
+- judge 模型与 rubric 固定后，跨版本结果才可比。

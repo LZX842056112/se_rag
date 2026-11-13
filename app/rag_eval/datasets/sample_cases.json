@@ -1,0 +1,1752 @@
+[
+  {
+    "case_id": "hak180_film_saving_001",
+    "question": "HAK 180 的节省烫金膜模式怎么设置 50mm 到 170mm 的转印长度？",
+    "ground_truth": "选择仅转印到纸张右上方的模式，按上下键设置从纸张顶边算起的转印长度（50 mm 到 170 mm），按 OK 确定；退出时按 Stop/Exit 并装入介质。",
+    "expected_item_names": [
+      "Brother HAK 180 烫金机"
+    ],
+    "gold_chunk_ids": [
+      "8b5f1a2a3069c594a933b01a86f8faf926600b2f",
+      "cb6e819917c40fdc61c68cad0eb94d6821407b5d"
+    ],
+    "must_hit_chunk_ids": [
+      "cb6e819917c40fdc61c68cad0eb94d6821407b5d"
+    ],
+    "tags": [
+      "参数设置",
+      "节省烫金膜"
+    ]
+  },
+  {
+    "case_id": "hak180_troubleshooting_001",
+    "question": "烫金膜没有转印到纸张上，可能的原因和处理方法是什么？",
+    "ground_truth": "常见原因是转印温度太低、纸张使用非墨粉方式打印、纸张污脏、设备内部热转印辊污脏或定影单元寿命将尽。对应处理为提高转印温度、换用墨粉打印的纸张、使用干净纸张，或联系 Brother 经销商。",
+    "expected_item_names": [
+      "Brother HAK 180 烫金机"
+    ],
+    "gold_chunk_ids": [
+      "a8cf790b8f2a3e2d6e1e02bb57b395d3b5827a16"
+    ],
+    "must_hit_chunk_ids": [
+      "a8cf790b8f2a3e2d6e1e02bb57b395d3b5827a16"
+    ],
+    "tags": [
+      "故障排查"
+    ]
+  },
+  {
+    "case_id": "hak180_temperature_001",
+    "question": "烫金膜容易脱落或打印内容缺失时，怎么调整转印温度？",
+    "ground_truth": "提高设备的转印温度。可以在液晶显示屏的温度设置中调整，也可按操作面板的温度按键进入更改界面。",
+    "expected_item_names": [
+      "Brother HAK 180 烫金机"
+    ],
+    "gold_chunk_ids": [
+      "a4bec5d83734fa17217e421e62d357faacc58b9c"
+    ],
+    "must_hit_chunk_ids": [
+      "a4bec5d83734fa17217e421e62d357faacc58b9c"
+    ],
+    "tags": [
+      "参数设置",
+      "转印温度"
+    ]
+  },
+  {
+    "case_id": "hak180_paper_loading_001",
+    "question": "HAK 180 怎么装入介质，纸张克重范围是多少？",
+    "ground_truth": "进纸托板可容纳总厚度不超过 5 mm 的多页纸张，使用 90 到 350 g/m² 的介质；装入前先把纸张呈扇形展开，再放入进纸托板。",
+    "expected_item_names": [
+      "Brother HAK 180 烫金机"
+    ],
+    "gold_chunk_ids": [
+      "7de8e0e8a9860f3b9735be206d0a5e38bc745e12"
+    ],
+    "must_hit_chunk_ids": [
+      "7de8e0e8a9860f3b9735be206d0a5e38bc745e12"
+    ],
+    "tags": [
+      "操作步骤",
+      "介质"
+    ]
+  },
+  {
+    "case_id": "hak180_cleaning_001",
+    "question": "分离辊脏了怎么清洁？",
+    "ground_truth": "关闭电源并取出进纸托板，打开设备背面的分离辊舱盖，按维护步骤清洁分离辊。",
+    "expected_item_names": [
+      "Brother HAK 180 烫金机"
+    ],
+    "gold_chunk_ids": [
+      "2bbb2f72a56549738511f802cd6d7f84800dc0a5",
+      "b8ed50d82e625e1611c4e448f861421dee32053b"
+    ],
+    "must_hit_chunk_ids": [
+      "2bbb2f72a56549738511f802cd6d7f84800dc0a5"
+    ],
+    "tags": [
+      "维护保养",
+      "清洁"
+    ]
+  },
+  {
+    "case_id": "hak180_prepare_001",
+    "question": "开始使用 HAK 180 之前需要准备什么？",
+    "ground_truth": "准备好设备、安装要使用的烫金膜盒，并准备已预先印刷的介质；如果烫金膜盒中没有烫金膜，不要开始转印。",
+    "expected_item_names": [
+      "Brother HAK 180 烫金机"
+    ],
+    "gold_chunk_ids": [
+      "858f41a54d26d3a8d72a815238ddb1b386ee3438"
+    ],
+    "must_hit_chunk_ids": [
+      "858f41a54d26d3a8d72a815238ddb1b386ee3438"
+    ],
+    "tags": [
+      "操作步骤",
+      "使用前准备"
+    ]
+  },
+  {
+    "case_id": "hak180_film_box_full_001",
+    "question": "HAK 180 怎么装入全幅烫金膜盒？",
+    "ground_truth": "打开烫金膜盒支架盖，把烫金膜盒的烫金膜缠绕面放入支架，让圆角部分对准支架盖上的卡槽，向下轻推直到锁定，再合上支架盖。",
+    "expected_item_names": [
+      "Brother HAK 180 烫金机"
+    ],
+    "gold_chunk_ids": [
+      "af85f3f842becf8182460eb72086c2f55381ab4f",
+      "55ff974dba346c4025f118447d94ff315acb6656"
+    ],
+    "must_hit_chunk_ids": [
+      "af85f3f842becf8182460eb72086c2f55381ab4f"
+    ],
+    "tags": [
+      "操作步骤",
+      "烫金膜盒"
+    ]
+  },
+  {
+    "case_id": "hak180_film_box_half_001",
+    "question": "HAK 180 怎么装入半幅烫金膜盒？",
+    "ground_truth": "先确认盖锁定 LED 熄灭并打开前盖，再按半幅烫金膜盒的安装步骤装入并拉紧烫金膜；烫金膜盒要远离高温、高湿、火源和过热位置存放。",
+    "expected_item_names": [
+      "Brother HAK 180 烫金机"
+    ],
+    "gold_chunk_ids": [
+      "78c0d5afe44f6df2a41e08b5487bed082a559c5e",
+      "31e4c2e1fb6a3e9e437695493bc4c37d1670462a"
+    ],
+    "must_hit_chunk_ids": [
+      "78c0d5afe44f6df2a41e08b5487bed082a559c5e"
+    ],
+    "tags": [
+      "操作步骤",
+      "烫金膜盒"
+    ]
+  },
+  {
+    "case_id": "hak180_unsupported_media_001",
+    "question": "哪些介质不能用 HAK 180 转印烫金膜？",
+    "ground_truth": "带碳膜、墨水打印、未干透、铅笔书写、厚度不均、褶皱或卷曲超过 5 mm、描图纸、涂层纸、相纸、穿孔纸、不规则形状、带照片便笺贴纸、无碳纸、活页打孔纸、带回形针或订书钉、含织物或金属、光面反光、超过建议厚度、折叠、贴胶带、纸板或纺织品等介质不适用。",
+    "expected_item_names": [
+      "Brother HAK 180 烫金机"
+    ],
+    "gold_chunk_ids": [
+      "a2edfcbc10c4f2cbb79e40886b0046fef2874936"
+    ],
+    "must_hit_chunk_ids": [
+      "a2edfcbc10c4f2cbb79e40886b0046fef2874936"
+    ],
+    "tags": [
+      "功能说明",
+      "介质"
+    ]
+  },
+  {
+    "case_id": "hak180_margin_001",
+    "question": "HAK 180 避免卡纸对上边距有什么要求？",
+    "ground_truth": "介质上边距至少 5 mm，并且上边距区域不能有墨粉打印内容。",
+    "expected_item_names": [
+      "Brother HAK 180 烫金机"
+    ],
+    "gold_chunk_ids": [
+      "39097557569bb202e856ad25617de0cbde0bfcb0"
+    ],
+    "must_hit_chunk_ids": [
+      "39097557569bb202e856ad25617de0cbde0bfcb0"
+    ],
+    "tags": [
+      "参数设置",
+      "卡纸"
+    ]
+  },
+  {
+    "case_id": "hak180_duplex_001",
+    "question": "HAK 180 怎么把烫金膜转印到双面纸张上？",
+    "ground_truth": "先用激光打印机打印纸张正面，再用设备把烫金膜转印到正面已打印内容上；然后打印反面，再把烫金膜转印到反面已打印内容上。",
+    "expected_item_names": [
+      "Brother HAK 180 烫金机"
+    ],
+    "gold_chunk_ids": [
+      "086dc2eebd2f446e0d89beb4406e9cf880c9a9dd"
+    ],
+    "must_hit_chunk_ids": [
+      "086dc2eebd2f446e0d89beb4406e9cf880c9a9dd"
+    ],
+    "tags": [
+      "操作步骤",
+      "双面"
+    ]
+  },
+  {
+    "case_id": "hak180_standard_media_001",
+    "question": "HAK 180 支持哪些标准尺寸介质，装入前要做什么？",
+    "ground_truth": "支持 A4、A5、JISB5、LTR/LGL；先拉出可伸缩进纸托板翼板和纸张支撑翼板，调整导纸板到介质宽度，再沿长边或短边呈扇形展开纸张。",
+    "expected_item_names": [
+      "Brother HAK 180 烫金机"
+    ],
+    "gold_chunk_ids": [
+      "be5e9bc66979a1cf03819362d814023631f2e3d5"
+    ],
+    "must_hit_chunk_ids": [
+      "be5e9bc66979a1cf03819362d814023631f2e3d5"
+    ],
+    "tags": [
+      "操作步骤",
+      "介质"
+    ]
+  },
+  {
+    "case_id": "hak180_nonstandard_media_001",
+    "question": "HAK 180 怎么装入非标准尺寸介质？",
+    "ground_truth": "调整导纸板以适合介质宽度，把纸张正面朝下、顶边先进入，放入进纸托板的导纸板之间，直到顶边触到设备内部。",
+    "expected_item_names": [
+      "Brother HAK 180 烫金机"
+    ],
+    "gold_chunk_ids": [
+      "9cb289d3bae705c8377283454a07a2b8c1817a94"
+    ],
+    "must_hit_chunk_ids": [
+      "9cb289d3bae705c8377283454a07a2b8c1817a94"
+    ],
+    "tags": [
+      "操作步骤",
+      "介质"
+    ]
+  },
+  {
+    "case_id": "hak180_menu_access_001",
+    "question": "HAK 180 怎么访问主菜单并修改设置？",
+    "ground_truth": "按上下键选择菜单，按 OK 进入；用上下键选择子菜单，再选择设置值并按 OK 确定。",
+    "expected_item_names": [
+      "Brother HAK 180 烫金机"
+    ],
+    "gold_chunk_ids": [
+      "13f21632beb049191195d6b6cd6cd2122ebec701"
+    ],
+    "must_hit_chunk_ids": [
+      "13f21632beb049191195d6b6cd6cd2122ebec701"
+    ],
+    "tags": [
+      "操作步骤",
+      "菜单"
+    ]
+  },
+  {
+    "case_id": "hak180_menu_items_001",
+    "question": "HAK 180 的主菜单有哪些常用设置？",
+    "ground_truth": "常用设置包括语言、自动关机、温度、打印速度、节省烫金膜模式等；温度有五个档位，打印速度在 A4 时可选 15 ppm 或 7.0 ppm。",
+    "expected_item_names": [
+      "Brother HAK 180 烫金机"
+    ],
+    "gold_chunk_ids": [
+      "d65de4a9db1b43e50cb21eb64629838587a58f09"
+    ],
+    "must_hit_chunk_ids": [
+      "d65de4a9db1b43e50cb21eb64629838587a58f09"
+    ],
+    "tags": [
+      "功能说明",
+      "菜单"
+    ]
+  },
+  {
+    "case_id": "hak180_feed_speed_001",
+    "question": "HAK 180 的送纸速度怎么改，A4 有哪些档位？",
+    "ground_truth": "在菜单中更改打印速度；A4 纸张可选 7.0 ppm 或 15 ppm，设置后按 Stop/Exit 退出。",
+    "expected_item_names": [
+      "Brother HAK 180 烫金机"
+    ],
+    "gold_chunk_ids": [
+      "59be0f686a26b02d57385475a7292a73b8768b03"
+    ],
+    "must_hit_chunk_ids": [
+      "59be0f686a26b02d57385475a7292a73b8768b03"
+    ],
+    "tags": [
+      "参数设置",
+      "送纸速度"
+    ]
+  },
+  {
+    "case_id": "hak180_skip_mode_001",
+    "question": "HAK 180 的节省烫金膜跳过模式是什么效果？",
+    "ground_truth": "指定从纸张顶边算起的空白区域，只在该区域以外转印烫金膜；此模式不能使用半幅烫金膜盒，空白区域不能有墨粉打印内容。",
+    "expected_item_names": [
+      "Brother HAK 180 烫金机"
+    ],
+    "gold_chunk_ids": [
+      "15beb0189f05c2e1c8b5873f6fc836d38192e625"
+    ],
+    "must_hit_chunk_ids": [
+      "15beb0189f05c2e1c8b5873f6fc836d38192e625"
+    ],
+    "tags": [
+      "参数设置",
+      "节省烫金膜"
+    ]
+  },
+  {
+    "case_id": "hak180_middle_mode_001",
+    "question": "HAK 180 怎么只把烫金膜转印到纸张中间部分？",
+    "ground_truth": "按 Menu，选择节省烫金膜模式并按 OK，再选择中间并按 OK。",
+    "expected_item_names": [
+      "Brother HAK 180 烫金机"
+    ],
+    "gold_chunk_ids": [
+      "0b2bafabc2dc6f910f856d7a5886cc48f8ddcf89"
+    ],
+    "must_hit_chunk_ids": [
+      "0b2bafabc2dc6f910f856d7a5886cc48f8ddcf89"
+    ],
+    "tags": [
+      "参数设置",
+      "节省烫金膜"
+    ]
+  },
+  {
+    "case_id": "hak180_disable_film_save_001",
+    "question": "HAK 180 怎么关闭节省烫金膜模式？",
+    "ground_truth": "按 Foil Save 进入节省烫金膜模式设置，选择关并按 OK，再按 Stop/Exit 退出；也可从菜单进入该设置。",
+    "expected_item_names": [
+      "Brother HAK 180 烫金机"
+    ],
+    "gold_chunk_ids": [
+      "93eb406667aac5b0b590a5653c2cfa936afe960e"
+    ],
+    "must_hit_chunk_ids": [
+      "93eb406667aac5b0b590a5653c2cfa936afe960e"
+    ],
+    "tags": [
+      "参数设置",
+      "节省烫金膜"
+    ]
+  },
+  {
+    "case_id": "hak180_favorites_001",
+    "question": "HAK 180 的收藏功能可以保存哪些设置？",
+    "ground_truth": "可以保存常用的转印温度、送纸速度和节省烫金膜模式设置，便于快速调用。",
+    "expected_item_names": [
+      "Brother HAK 180 烫金机"
+    ],
+    "gold_chunk_ids": [
+      "35b0979e333fc346be7a26aa7c0da2f29cf5633d"
+    ],
+    "must_hit_chunk_ids": [
+      "35b0979e333fc346be7a26aa7c0da2f29cf5633d"
+    ],
+    "tags": [
+      "功能说明",
+      "收藏"
+    ]
+  },
+  {
+    "case_id": "hak180_reset_001",
+    "question": "HAK 180 怎么把设置重置为默认值？",
+    "ground_truth": "按 Menu，选择重置并按 OK，再选择设备重置或出厂重置；设备重置只重置主菜单设置，出厂重置重置所有设备设置，确认后设备重启。",
+    "expected_item_names": [
+      "Brother HAK 180 烫金机"
+    ],
+    "gold_chunk_ids": [
+      "1fdd5998ec01739c75d24e9ff777a8293c81ebe3"
+    ],
+    "must_hit_chunk_ids": [
+      "1fdd5998ec01739c75d24e9ff777a8293c81ebe3"
+    ],
+    "tags": [
+      "操作步骤",
+      "重置"
+    ]
+  },
+  {
+    "case_id": "hak180_feed_pressure_001",
+    "question": "HAK 180 一次送入多张纸时怎么处理？",
+    "ground_truth": "使用粗糙纸张时设备可能一次送入多张纸，可以用进纸调节器降低介质送入压力。",
+    "expected_item_names": [
+      "Brother HAK 180 烫金机"
+    ],
+    "gold_chunk_ids": [
+      "e0a46d0d91a64178b8e305bb149c091059cd9b8d"
+    ],
+    "must_hit_chunk_ids": [
+      "e0a46d0d91a64178b8e305bb149c091059cd9b8d"
+    ],
+    "tags": [
+      "参数设置",
+      "进纸"
+    ]
+  },
+  {
+    "case_id": "hak180_clean_exterior_001",
+    "question": "HAK 180 怎么清洁设备外部？",
+    "ground_truth": "用柔软的无绒干抹布擦去操作面板灰尘，拉出可伸缩出纸托板翼板，擦拭出纸托板内侧和翼板，再把翼板牢固插回。",
+    "expected_item_names": [
+      "Brother HAK 180 烫金机"
+    ],
+    "gold_chunk_ids": [
+      "387f109bda10e9dc5dc2e3f0bd5837c974ae47b2",
+      "6d1279b4ef22fd77cc84326d41554fdfb4115794"
+    ],
+    "must_hit_chunk_ids": [
+      "387f109bda10e9dc5dc2e3f0bd5837c974ae47b2"
+    ],
+    "tags": [
+      "维护保养",
+      "清洁"
+    ]
+  },
+  {
+    "case_id": "hak180_no_feed_jam_001",
+    "question": "HAK 180 显示无进纸且卡纸在进纸前，怎么处理？",
+    "ground_truth": "如果送入了多张纸，先取出多张纸；再用双手轻轻把卡住的纸张拉出设备。",
+    "expected_item_names": [
+      "Brother HAK 180 烫金机"
+    ],
+    "gold_chunk_ids": [
+      "c5aacf857c3fb7a8b9927f274b0f9c45db829bfa"
+    ],
+    "must_hit_chunk_ids": [
+      "c5aacf857c3fb7a8b9927f274b0f9c45db829bfa"
+    ],
+    "tags": [
+      "故障排查",
+      "卡纸"
+    ]
+  },
+  {
+    "case_id": "hak180_inner_jam_001",
+    "question": "HAK 180 显示内部卡纸时怎么处理？",
+    "ground_truth": "如果卡纸发生在设备内部，液晶显示屏会显示内部卡纸；按说明书步骤清除卡纸。",
+    "expected_item_names": [
+      "Brother HAK 180 烫金机"
+    ],
+    "gold_chunk_ids": [
+      "0372e91bf77e38f00902a2c5aeebe3dad339e9ec"
+    ],
+    "must_hit_chunk_ids": [
+      "0372e91bf77e38f00902a2c5aeebe3dad339e9ec"
+    ],
+    "tags": [
+      "故障排查",
+      "卡纸"
+    ]
+  },
+  {
+    "case_id": "hak180_error_messages_001",
+    "question": "HAK 180 显示纸张尺寸不正确是什么原因？",
+    "ground_truth": "节省烫金膜模式设置与装入介质尺寸不匹配；按 Stop/Exit，确认模式设置与介质尺寸一致。",
+    "expected_item_names": [
+      "Brother HAK 180 烫金机"
+    ],
+    "gold_chunk_ids": [
+      "37c75fa16f1814e1c2a7dcfd9d6babdc26e8a90a"
+    ],
+    "must_hit_chunk_ids": [
+      "37c75fa16f1814e1c2a7dcfd9d6babdc26e8a90a"
+    ],
+    "tags": [
+      "故障排查",
+      "错误消息"
+    ]
+  },
+  {
+    "case_id": "hak180_specs_001",
+    "question": "HAK 180 的一般规格是什么？",
+    "ground_truth": "采用定影单元转印技术，液晶显示屏为 20 字符乘 2 行，电源 220 到 240 VAC、50 或 60 Hz，转印功耗约 340 W，准备就绪约 7 W，重量约 16.3 kg（含全幅烫金膜盒）。",
+    "expected_item_names": [
+      "Brother HAK 180 烫金机"
+    ],
+    "gold_chunk_ids": [
+      "84a878c5a50d011f1aaa3a3ec83ce76f9594dfab"
+    ],
+    "must_hit_chunk_ids": [
+      "84a878c5a50d011f1aaa3a3ec83ce76f9594dfab"
+    ],
+    "tags": [
+      "功能说明",
+      "规格"
+    ]
+  },
+  {
+    "case_id": "hak180_media_specs_001",
+    "question": "HAK 180 支持多大的介质尺寸和重量？",
+    "ground_truth": "介质宽度 55 mm 到 225 mm，长度 90 mm 到 500 mm，重量 90 到 350 g/m²。",
+    "expected_item_names": [
+      "Brother HAK 180 烫金机"
+    ],
+    "gold_chunk_ids": [
+      "90f356ffe19e333727e5ee9a2929416ad924a57c"
+    ],
+    "must_hit_chunk_ids": [
+      "90f356ffe19e333727e5ee9a2929416ad924a57c"
+    ],
+    "tags": [
+      "功能说明",
+      "规格"
+    ]
+  },
+  {
+    "case_id": "brother_ip_bradmin_001",
+    "question": "怎么用 BRAdmin Light 给 Brother 打印服务器设置 IP 地址？",
+    "ground_truth": "BRAdmin Light 可以搜索网络中的 Brother 设备，查看状态并配置 IP 地址等基本网络设置；支持 Windows 2000/XP、Vista、7、Server 2003/2008 和 Mac OS X 10.3.9 或更高版本。",
+    "expected_item_names": [
+      "Brother HL-3040CN / HL-3070CW 网络打印服务器"
+    ],
+    "gold_chunk_ids": [
+      "314dd1b82551d7bb805c6d98819176cea12367b8"
+    ],
+    "must_hit_chunk_ids": [
+      "314dd1b82551d7bb805c6d98819176cea12367b8"
+    ],
+    "tags": [
+      "网络连接",
+      "IP 地址"
+    ]
+  },
+  {
+    "case_id": "brother_web_access_001",
+    "question": "怎么通过浏览器访问 Brother 打印服务器的网络基本管理页面？",
+    "ground_truth": "在浏览器地址栏输入打印服务器的 IP 地址或 DNS 名称；Windows 用户也可以输入 NetBIOS 名称，名称可在网络配置页找到。",
+    "expected_item_names": [
+      "Brother HL-3040CN / HL-3070CW 网络打印服务器"
+    ],
+    "gold_chunk_ids": [
+      "0621b7a447282016aec1724379b3f7f0f41bf977"
+    ],
+    "must_hit_chunk_ids": [
+      "0621b7a447282016aec1724379b3f7f0f41bf977"
+    ],
+    "tags": [
+      "网络连接",
+      "Web 管理"
+    ]
+  },
+  {
+    "case_id": "brother_peer_print_001",
+    "question": "Brother 打印服务器的对等打印是什么意思？",
+    "ground_truth": "在对等环境下，每台计算机直接向 Brother 设备发送和接收数据，不需要中央服务器控制文件访问或打印机共享。",
+    "expected_item_names": [
+      "Brother HL-3040CN / HL-3070CW 网络打印服务器"
+    ],
+    "gold_chunk_ids": [
+      "2bec60307b28cb95d496fc50cacdf40d46eb7348"
+    ],
+    "must_hit_chunk_ids": [
+      "2bec60307b28cb95d496fc50cacdf40d46eb7348"
+    ],
+    "tags": [
+      "功能说明",
+      "对等打印"
+    ]
+  },
+  {
+    "case_id": "brother_win_add_printer_001",
+    "question": "Windows 7 怎么添加 Brother 网络打印机？",
+    "ground_truth": "点击开始按钮，进入设备和打印机，点击添加打印机，再按向导选择要添加的网络打印机。",
+    "expected_item_names": [
+      "Brother HL-3040CN / HL-3070CW 网络打印服务器"
+    ],
+    "gold_chunk_ids": [
+      "031a5b0fa5fd72f89a4a9f7d60490b79e8a6e2c5"
+    ],
+    "must_hit_chunk_ids": [
+      "031a5b0fa5fd72f89a4a9f7d60490b79e8a6e2c5"
+    ],
+    "tags": [
+      "操作步骤",
+      "Windows"
+    ]
+  },
+  {
+    "case_id": "brother_tcpip_port_001",
+    "question": "怎么在 Windows XP 上为 Brother 打印机创建标准 TCP/IP 端口？",
+    "ground_truth": "打开打印机和传真，启动添加打印机向导，选择本地打印机并取消自动检测；选择创建新端口，端口类型选 Standard TCP/IP Port，再输入 IP 地址或节点名称。",
+    "expected_item_names": [
+      "Brother HL-3040CN / HL-3070CW 网络打印服务器"
+    ],
+    "gold_chunk_ids": [
+      "04fad8c7e6c26df6a1a3f4ffbe9d583dfc371b6c"
+    ],
+    "must_hit_chunk_ids": [
+      "04fad8c7e6c26df6a1a3f4ffbe9d583dfc371b6c"
+    ],
+    "tags": [
+      "操作步骤",
+      "TCP/IP"
+    ]
+  },
+  {
+    "case_id": "brother_ipp_firewall_001",
+    "question": "IPP 打印使用 631 端口被防火墙拦截怎么办？",
+    "ground_truth": "改用 80 端口，或在防火墙中允许 631 端口数据通过；使用 80 端口时地址格式为 http://ipaddress/ipp。",
+    "expected_item_names": [
+      "Brother HL-3040CN / HL-3070CW 网络打印服务器"
+    ],
+    "gold_chunk_ids": [
+      "32cd9cdb97bf904eb5aa79eff59885f230fcddd5"
+    ],
+    "must_hit_chunk_ids": [
+      "32cd9cdb97bf904eb5aa79eff59885f230fcddd5"
+    ],
+    "tags": [
+      "故障排查",
+      "IPP"
+    ]
+  },
+  {
+    "case_id": "brother_defaults_001",
+    "question": "Brother 打印服务器的功能表和出厂默认设置在哪里查？",
+    "ground_truth": "在网络使用说明书的打印服务器规格章节；表中列出 Network、Wired LAN、TCP/IP 等菜单及出厂默认值。",
+    "expected_item_names": [
+      "Brother HL-3040CN / HL-3070CW 网络打印服务器"
+    ],
+    "gold_chunk_ids": [
+      "2a2ab68afe33bfd2fc772a8ef3d491daf5a479db"
+    ],
+    "must_hit_chunk_ids": [
+      "2a2ab68afe33bfd2fc772a8ef3d491daf5a479db"
+    ],
+    "tags": [
+      "功能说明",
+      "默认设置"
+    ]
+  },
+  {
+    "case_id": "brother_telnet_001",
+    "question": "Brother 打印服务器支持 Telnet 配置吗？",
+    "ground_truth": "支持，Brother 打印服务器提供 Telnet 服务器的命令行配置。",
+    "expected_item_names": [
+      "Brother HL-3040CN / HL-3070CW 网络打印服务器"
+    ],
+    "gold_chunk_ids": [
+      "16bdee8bd4b43e1367702f66a455c693ebc5ef69"
+    ],
+    "must_hit_chunk_ids": [
+      "16bdee8bd4b43e1367702f66a455c693ebc5ef69"
+    ],
+    "tags": [
+      "网络连接",
+      "Telnet"
+    ]
+  },
+  {
+    "case_id": "brother_ssid_channel_001",
+    "question": "配置 Brother 无线打印服务器时 SSID 和信道有什么用？",
+    "ground_truth": "需要配置 SSID 和信道，以指定设备要连接的无线网络。",
+    "expected_item_names": [
+      "Brother HL-3040CN / HL-3070CW 网络打印服务器"
+    ],
+    "gold_chunk_ids": [
+      "189b1ef18770586ce82e3574f0244e10b3b7fb09"
+    ],
+    "must_hit_chunk_ids": [
+      "189b1ef18770586ce82e3574f0244e10b3b7fb09"
+    ],
+    "tags": [
+      "参数设置",
+      "无线"
+    ]
+  },
+  {
+    "case_id": "brother_connection_mode_001",
+    "question": "Brother 设备可以同时使用有线和无线网络吗？",
+    "ground_truth": "不可以，设备虽然支持有线和无线网络，但每次只能使用一种连接方式。",
+    "expected_item_names": [
+      "Brother HL-3040CN / HL-3070CW 网络打印服务器"
+    ],
+    "gold_chunk_ids": [
+      "765637e45301b8149585f90c6eec7a794d87cc0f"
+    ],
+    "must_hit_chunk_ids": [
+      "765637e45301b8149585f90c6eec7a794d87cc0f"
+    ],
+    "tags": [
+      "功能说明",
+      "网络连接"
+    ]
+  },
+  {
+    "case_id": "brother_placement_001",
+    "question": "Brother 无线打印设备应该放在什么位置？",
+    "ground_truth": "尽量靠近网络接入点或路由器，减少中间障碍物；墙壁、大型物体和其他电气设备会干扰并降低传输速度。",
+    "expected_item_names": [
+      "Brother HL-3040CN / HL-3070CW 网络打印服务器"
+    ],
+    "gold_chunk_ids": [
+      "765637e45301b8149585f90c6eec7a794d87cc0f"
+    ],
+    "must_hit_chunk_ids": [
+      "765637e45301b8149585f90c6eec7a794d87cc0f"
+    ],
+    "tags": [
+      "参数设置",
+      "无线"
+    ]
+  },
+  {
+    "case_id": "brother_node_name_001",
+    "question": "Brother 打印服务器的有线网络节点名称是什么？",
+    "ground_truth": "NC-6700h。",
+    "expected_item_names": [
+      "Brother HL-3040CN / HL-3070CW 网络打印服务器"
+    ],
+    "gold_chunk_ids": [
+      "9707e187a87cf5293a1729a8682e58074d4aee67"
+    ],
+    "must_hit_chunk_ids": [
+      "9707e187a87cf5293a1729a8682e58074d4aee67"
+    ],
+    "tags": [
+      "功能说明",
+      "规格"
+    ]
+  },
+  {
+    "case_id": "brother_security_001",
+    "question": "Brother 无线打印服务器支持哪些网络安全方式？",
+    "ground_truth": "支持 128 或 64 位 WEP、WPA-PSK（TKIP/AES）、WPA2-PSK（AES）、LEAP（CKIP）和 EAP-FAST（TKIP/AES）。",
+    "expected_item_names": [
+      "Brother HL-3040CN / HL-3070CW 网络打印服务器"
+    ],
+    "gold_chunk_ids": [
+      "b6f61398ee7063978003ba852c4659d9d209a758"
+    ],
+    "must_hit_chunk_ids": [
+      "b6f61398ee7063978003ba852c4659d9d209a758"
+    ],
+    "tags": [
+      "安全信息",
+      "无线"
+    ]
+  },
+  {
+    "case_id": "brother_protocols_001",
+    "question": "Brother 打印服务器支持哪些网络协议？",
+    "ground_truth": "支持 TCP/IP 下的 ARP、DHCP、APIPA、DNS、LPR/LPD、Port9100、IPP、IPPS、FTP、SSL/TLS、Telnet、SNMP、HTTP/HTTPS、TFTP 等协议。",
+    "expected_item_names": [
+      "Brother HL-3040CN / HL-3070CW 网络打印服务器"
+    ],
+    "gold_chunk_ids": [
+      "db82eed9ddd9d277f49a9bf427b39162f73107c4"
+    ],
+    "must_hit_chunk_ids": [
+      "db82eed9ddd9d277f49a9bf427b39162f73107c4"
+    ],
+    "tags": [
+      "功能说明",
+      "协议"
+    ]
+  },
+  {
+    "case_id": "brother_cannot_print_001",
+    "question": "Brother 网络打印机无法打印作业怎么排查？",
+    "ground_truth": "先确认设备电源打开、连接网络并准备就绪；打印网络配置页检查 IP 地址是否匹配、是否有重复 IP；再确认网络中的打印服务器。",
+    "expected_item_names": [
+      "Brother HL-3040CN / HL-3070CW 网络打印服务器"
+    ],
+    "gold_chunk_ids": [
+      "9e70543f093ddf93489a85dafc8d568a5e604c06"
+    ],
+    "must_hit_chunk_ids": [
+      "9e70543f093ddf93489a85dafc8d568a5e604c06"
+    ],
+    "tags": [
+      "故障排查",
+      "无法打印"
+    ]
+  },
+  {
+    "case_id": "b7_charging_001",
+    "question": "HUAWEI MateBook B7-420 怎么给计算机充电？",
+    "ground_truth": "电池电量低时计算机会提示低电；连接电源适配器和充电线缆即可充电，关机或睡眠状态下充电速度更快。",
+    "expected_item_names": [
+      "HUAWEI MateBook B7-420"
+    ],
+    "gold_chunk_ids": [
+      "94d6c369bddc06020822f63bd9dcb7d31d789124"
+    ],
+    "must_hit_chunk_ids": [
+      "94d6c369bddc06020822f63bd9dcb7d31d789124"
+    ],
+    "tags": [
+      "电池与充电"
+    ]
+  },
+  {
+    "case_id": "b7_battery_status_001",
+    "question": "HUAWEI MateBook B7-420 怎么查看电池状态和剩余使用时间？",
+    "ground_truth": "通过桌面右下角的电池图标判断是否连接电源；点击进入电源和电池选项，可查看电量充满时间或剩余电量与剩余使用时间。",
+    "expected_item_names": [
+      "HUAWEI MateBook B7-420"
+    ],
+    "gold_chunk_ids": [
+      "b53a3cfdad9ec40f480a98ffbf6e7a38b808b411"
+    ],
+    "must_hit_chunk_ids": [
+      "b53a3cfdad9ec40f480a98ffbf6e7a38b808b411"
+    ],
+    "tags": [
+      "电池与充电"
+    ]
+  },
+  {
+    "case_id": "b7_charging_notes_001",
+    "question": "HUAWEI MateBook B7-420 充电时需要注意什么？",
+    "ground_truth": "在适宜温度和通风良好的阴凉区域充电；高温环境可能损坏计算机；长时间工作和充电时表面发热属于正常现象，发烫时关闭部分功能并停止充电；电池寿命明显下降时到华为客户服务中心更换。",
+    "expected_item_names": [
+      "HUAWEI MateBook B7-420"
+    ],
+    "gold_chunk_ids": [
+      "fa1f2fc510d4dc78c2cb7b0d18054d9fb3404bc6"
+    ],
+    "must_hit_chunk_ids": [
+      "fa1f2fc510d4dc78c2cb7b0d18054d9fb3404bc6"
+    ],
+    "tags": [
+      "安全信息",
+      "电池与充电"
+    ]
+  },
+  {
+    "case_id": "b7_eye_comfort_001",
+    "question": "HUAWEI MateBook B7-420 怎么开启护眼模式？",
+    "ground_truth": "右键点击桌面空白处，选择显示更多选项和显示管理，打开护眼模式开关；开启后屏幕偏黄属于正常现象。",
+    "expected_item_names": [
+      "HUAWEI MateBook B7-420"
+    ],
+    "gold_chunk_ids": [
+      "06bb279bbeb295f692084596e400df37e03704f3"
+    ],
+    "must_hit_chunk_ids": [
+      "06bb279bbeb295f692084596e400df37e03704f3"
+    ],
+    "tags": [
+      "功能说明",
+      "显示"
+    ]
+  },
+  {
+    "case_id": "b7_touchpad_001",
+    "question": "HUAWEI MateBook B7-420 触摸板的三指手势有哪些？",
+    "ground_truth": "三指点击使用搜索，三指上滑打开多任务视图，三指下滑显示桌面，三指左右滑动切换应用。",
+    "expected_item_names": [
+      "HUAWEI MateBook B7-420"
+    ],
+    "gold_chunk_ids": [
+      "45810d3e90025269b6075ccdf9b1a26a9b42156c"
+    ],
+    "must_hit_chunk_ids": [
+      "45810d3e90025269b6075ccdf9b1a26a9b42156c"
+    ],
+    "tags": [
+      "操作步骤",
+      "触摸板"
+    ]
+  },
+  {
+    "case_id": "b7_fn_mode_001",
+    "question": "HUAWEI MateBook B7-420 怎么把 F1、F2 键切换为功能键？",
+    "ground_truth": "按 Fn 键，当 Fn 指示灯亮起时 F1、F2 等键锁定为功能键模式；再按一次 Fn 键，指示灯熄灭后返回快捷键模式。也可以在华为电脑管家的设置中心把键盘设置为功能键优先。",
+    "expected_item_names": [
+      "HUAWEI MateBook B7-420"
+    ],
+    "gold_chunk_ids": [
+      "5c714894c77b3d32533459bfe0a01e9540f30fc2"
+    ],
+    "must_hit_chunk_ids": [
+      "5c714894c77b3d32533459bfe0a01e9540f30fc2"
+    ],
+    "tags": [
+      "操作步骤",
+      "键盘"
+    ]
+  },
+  {
+    "case_id": "b7_f10_001",
+    "question": "HUAWEI MateBook B7-420 怎么用 F10 一键恢复出厂？",
+    "ground_truth": "先备份 C 盘个人数据；连接电源，开机过程中连续快速点按 F10，进入界面后按提示恢复出厂。",
+    "expected_item_names": [
+      "HUAWEI MateBook B7-420"
+    ],
+    "gold_chunk_ids": [
+      "0d2f2d842d912b55fb971f7d9eebf12890e7f846"
+    ],
+    "must_hit_chunk_ids": [
+      "0d2f2d842d912b55fb971f7d9eebf12890e7f846"
+    ],
+    "tags": [
+      "操作步骤",
+      "系统恢复"
+    ]
+  },
+  {
+    "case_id": "b7_projection_001",
+    "question": "HUAWEI MateBook B7-420 怎么连接电视或投影仪？",
+    "ground_truth": "准备 HDMI 或 VGA 线缆，通过扩展坞连接计算机和电视、显示器或投影仪；接通外接设备电源并打开，按 F8 或 Win+P 选择投影方式。HDMI 和 VGA 接口不能同时使用。",
+    "expected_item_names": [
+      "HUAWEI MateBook B7-420"
+    ],
+    "gold_chunk_ids": [
+      "e0dc8db8f7e2ae27ba607e4c2b39ca7199a89a73"
+    ],
+    "must_hit_chunk_ids": [
+      "e0dc8db8f7e2ae27ba607e4c2b39ca7199a89a73"
+    ],
+    "tags": [
+      "操作步骤",
+      "外接显示"
+    ]
+  },
+  {
+    "case_id": "b5_rj45_001",
+    "question": "HUAWEI MateBook B5-440 怎么连接有线网络？",
+    "ground_truth": "部分机型配有 HUAWEI Mini RJ45 转 RJ45 转接线；把网线接入转接线的 RJ45 接口，再把迷你 RJ45 接口接入计算机，即可连接有线网络。",
+    "expected_item_names": [
+      "HUAWEI MateBook B5-440"
+    ],
+    "gold_chunk_ids": [
+      "0d2e47f6c655ec5aa2398111c49330d0fbeffac7"
+    ],
+    "must_hit_chunk_ids": [
+      "0d2e47f6c655ec5aa2398111c49330d0fbeffac7"
+    ],
+    "tags": [
+      "网络连接"
+    ]
+  },
+  {
+    "case_id": "b5_battery_status_001",
+    "question": "HUAWEI MateBook B5-440 怎么判断电池是否在充电？",
+    "ground_truth": "查看桌面右下角的电池图标可以判断是否连接电源；进入电源和电池选项可查看电量充满时间或剩余使用时间。",
+    "expected_item_names": [
+      "HUAWEI MateBook B5-440"
+    ],
+    "gold_chunk_ids": [
+      "d23efe41ed2db347c771f4ad1e023092e2e8bec2"
+    ],
+    "must_hit_chunk_ids": [
+      "d23efe41ed2db347c771f4ad1e023092e2e8bec2"
+    ],
+    "tags": [
+      "电池与充电"
+    ]
+  },
+  {
+    "case_id": "b5_charging_notes_001",
+    "question": "HUAWEI MateBook B5-440 在高温环境下充电会怎样？",
+    "ground_truth": "在高温环境下充电可能损坏计算机；应在适宜温度和通风良好的阴凉区域充电。长时间工作和充电时表面发热属于正常现象，发烫时关闭部分功能并停止充电。",
+    "expected_item_names": [
+      "HUAWEI MateBook B5-440"
+    ],
+    "gold_chunk_ids": [
+      "d7e8700747605d562112b0774aea6deeed81dca3"
+    ],
+    "must_hit_chunk_ids": [
+      "d7e8700747605d562112b0774aea6deeed81dca3"
+    ],
+    "tags": [
+      "安全信息",
+      "电池与充电"
+    ]
+  },
+  {
+    "case_id": "b5_touchpad_settings_001",
+    "question": "HUAWEI MateBook B5-440 怎么更改触摸板设置？",
+    "ground_truth": "打开设置界面，进入触摸板设置，可以开启或关闭触摸板、设置连接鼠标时是否启用触摸板、更改滚动方向以及设置手指动作功能。",
+    "expected_item_names": [
+      "HUAWEI MateBook B5-440"
+    ],
+    "gold_chunk_ids": [
+      "471e312fb49e03faaa456b200fa2b6d9656124b8"
+    ],
+    "must_hit_chunk_ids": [
+      "471e312fb49e03faaa456b200fa2b6d9656124b8"
+    ],
+    "tags": [
+      "操作步骤",
+      "触摸板"
+    ]
+  },
+  {
+    "case_id": "b5_usb_device_001",
+    "question": "HUAWEI MateBook B5-440 怎么连接 USB 鼠标或打印机？",
+    "ground_truth": "通过扩展坞的 USB-A 接口连接 USB 设备；把设备 USB 线缆插入接口，需要供电的设备接通电源并启动，首次安装时计算机会自动安装所需软件。",
+    "expected_item_names": [
+      "HUAWEI MateBook B5-440"
+    ],
+    "gold_chunk_ids": [
+      "4f84f6ef1d701d3129f9ba8f53aec470adf84e74"
+    ],
+    "must_hit_chunk_ids": [
+      "4f84f6ef1d701d3129f9ba8f53aec470adf84e74"
+    ],
+    "tags": [
+      "操作步骤",
+      "USB"
+    ]
+  },
+  {
+    "case_id": "l420x_bios_entry_001",
+    "question": "华为擎云 L420x 怎么进入 BIOS 设置界面？",
+    "ground_truth": "开机或重启时，长按或连续点按 F2 键进入 BIOS 设置界面，再按界面提示进行设置。",
+    "expected_item_names": [
+      "华为擎云 L420x"
+    ],
+    "gold_chunk_ids": [
+      "6ddf9be564278fe85d3e0054030bc12fb27248a8"
+    ],
+    "must_hit_chunk_ids": [
+      "6ddf9be564278fe85d3e0054030bc12fb27248a8"
+    ],
+    "tags": [
+      "操作步骤",
+      "BIOS"
+    ]
+  },
+  {
+    "case_id": "l420x_bios_password_role_001",
+    "question": "华为擎云 L420x 的 BIOS 管理员密码和用户密码有什么区别？",
+    "ground_truth": "BIOS 管理员密码可以作为启动密码，也可以作为配置密码登录 BIOS 并修改任意配置；BIOS 用户密码可以作为启动密码，也可以登录 BIOS，但只能查看配置，不能修改除用户密码外的其他配置。",
+    "expected_item_names": [
+      "华为擎云 L420x"
+    ],
+    "gold_chunk_ids": [
+      "6961391dfc76b8aba6f059b879d4bc38f15931d7"
+    ],
+    "must_hit_chunk_ids": [
+      "6961391dfc76b8aba6f059b879d4bc38f15931d7"
+    ],
+    "tags": [
+      "功能说明",
+      "BIOS"
+    ]
+  },
+  {
+    "case_id": "l420x_bios_password_config_001",
+    "question": "华为擎云 L420x 怎么配置 BIOS 管理员密码和用户密码？",
+    "ground_truth": "开机时按 F2 进入 BIOS，选择 BIOS 配置管理员密码并按提示输入确认；再选择 BIOS 配置用户密码并按提示输入确认；确认启动时检查菜单密码已打开，按 F10 保存退出。",
+    "expected_item_names": [
+      "华为擎云 L420x"
+    ],
+    "gold_chunk_ids": [
+      "ff6ee48ed99fefdd826f1072a5d8ea6b5e094749"
+    ],
+    "must_hit_chunk_ids": [
+      "ff6ee48ed99fefdd826f1072a5d8ea6b5e094749"
+    ],
+    "tags": [
+      "操作步骤",
+      "BIOS"
+    ]
+  },
+  {
+    "case_id": "l420x_bios_restore_001",
+    "question": "华为擎云 L420x 恢复 BIOS 默认设置会影响已设置的 BIOS 密码吗？",
+    "ground_truth": "不会。恢复 BIOS 默认设置会把 BIOS 各接口配置还原到原始状态，但不影响已经配置的 BIOS 密码。",
+    "expected_item_names": [
+      "华为擎云 L420x"
+    ],
+    "gold_chunk_ids": [
+      "ec0a3165abc68b522b5a3aef26bdf821c539e6d6"
+    ],
+    "must_hit_chunk_ids": [
+      "ec0a3165abc68b522b5a3aef26bdf821c539e6d6"
+    ],
+    "tags": [
+      "操作步骤",
+      "BIOS"
+    ]
+  },
+  {
+    "case_id": "l420x_power_001",
+    "question": "华为擎云 L420x 首次开机和强制关机怎么操作？",
+    "ground_truth": "首次开机必须先连接电源适配器，连接后计算机会自动开机；再次开机按电源键至键盘灯亮起后松开；强制关机长按电源键 10 秒以上。",
+    "expected_item_names": [
+      "华为擎云 L420x"
+    ],
+    "gold_chunk_ids": [
+      "d8d17d16e8fac3e9a6a0c2811595a59464067390"
+    ],
+    "must_hit_chunk_ids": [
+      "d8d17d16e8fac3e9a6a0c2811595a59464067390"
+    ],
+    "tags": [
+      "操作步骤",
+      "开机"
+    ]
+  },
+  {
+    "case_id": "w585_usb_mode_001",
+    "question": "华为擎云W585 怎么在 BIOS 中切换 USB 模式？",
+    "ground_truth": "开机或重启时按 F2 进入 BIOS，选择 USB 智能模式控制，在正常模式、存储只读、存储拒绝三种模式间切换，按 F10 保存。",
+    "expected_item_names": [
+      "华为擎云W585"
+    ],
+    "gold_chunk_ids": [
+      "d1cc151afd5567ce0430d3ee1b87d87d92064d61"
+    ],
+    "must_hit_chunk_ids": [
+      "d1cc151afd5567ce0430d3ee1b87d87d92064d61"
+    ],
+    "tags": [
+      "参数设置",
+      "BIOS"
+    ]
+  },
+  {
+    "case_id": "w585_power_policy_001",
+    "question": "华为擎云W585 的电源上电策略有什么作用？",
+    "ground_truth": "计算机断电后再次恢复供电时，会按之前设置的电源上电策略执行开关机或维持上次使用状态；断开电源后需要等机箱内独立电源电量释放完全，再连接电源才能生效。",
+    "expected_item_names": [
+      "华为擎云W585"
+    ],
+    "gold_chunk_ids": [
+      "82375b4d4c4ce66fc5245ce01d3982cd27a54b7f"
+    ],
+    "must_hit_chunk_ids": [
+      "82375b4d4c4ce66fc5245ce01d3982cd27a54b7f"
+    ],
+    "tags": [
+      "参数设置",
+      "BIOS"
+    ]
+  },
+  {
+    "case_id": "w585_usb_inaccessible_001",
+    "question": "华为擎云W585 无法访问 USB 接口怎么排查？",
+    "ground_truth": "确认 USB 电缆与计算机接口和设备连接正确；检查设备开关和联机开关已打开；打印机要确认纸张已装入；确认驱动程序或软件已安装；最后拆离并重新连接 USB 接口。",
+    "expected_item_names": [
+      "华为擎云W585"
+    ],
+    "gold_chunk_ids": [
+      "3cb7f9111cf5abde2feea2c100ed0e58ca979ba8"
+    ],
+    "must_hit_chunk_ids": [
+      "3cb7f9111cf5abde2feea2c100ed0e58ca979ba8"
+    ],
+    "tags": [
+      "故障排查",
+      "USB"
+    ]
+  },
+  {
+    "case_id": "w585_no_display_001",
+    "question": "华为擎云W585 上电启动后显示器无显示怎么办？",
+    "ground_truth": "检查所有线缆是否正确连接，确认显示器和计算机都处于开机状态，检查 HDMI 等信号线是否损坏；如果都正常，重启设备查看屏幕是否恢复。",
+    "expected_item_names": [
+      "华为擎云W585"
+    ],
+    "gold_chunk_ids": [
+      "f57c15e063982510147c33b75e16f0e1a4d052e5"
+    ],
+    "must_hit_chunk_ids": [
+      "f57c15e063982510147c33b75e16f0e1a4d052e5"
+    ],
+    "tags": [
+      "故障排查",
+      "显示"
+    ]
+  },
+  {
+    "case_id": "w585_cannot_boot_001",
+    "question": "华为擎云W585 无法开机或启动怎么办？",
+    "ground_truth": "检查计算机电源和适配器上线缆的所有插头是否牢固插入插座；如果仍然无法开机，联系华为客户服务中心。",
+    "expected_item_names": [
+      "华为擎云W585"
+    ],
+    "gold_chunk_ids": [
+      "43ca4cd22818ca987a637f21842707ebe8d5560c"
+    ],
+    "must_hit_chunk_ids": [
+      "43ca4cd22818ca987a637f21842707ebe8d5560c"
+    ],
+    "tags": [
+      "故障排查",
+      "开机"
+    ]
+  },
+  {
+    "case_id": "ms_f10_001",
+    "question": "HUAWEI MateStation S 怎么用 F10 一键恢复出厂？",
+    "ground_truth": "先备份 C 盘个人数据；连接电源，开机过程中连续快速点按 F10，进入界面后按提示恢复出厂。",
+    "expected_item_names": [
+      "HUAWEI MateStation S 12代酷睿版"
+    ],
+    "gold_chunk_ids": [
+      "dbae8215fb0c6cccd97e95115d39942d5ee455a6"
+    ],
+    "must_hit_chunk_ids": [
+      "dbae8215fb0c6cccd97e95115d39942d5ee455a6"
+    ],
+    "tags": [
+      "操作步骤",
+      "系统恢复"
+    ]
+  },
+  {
+    "case_id": "ms_power_001",
+    "question": "HUAWEI MateStation S 怎么开机和强制关机？",
+    "ground_truth": "组装完成后短按主机电源键，指示灯亮起表示开机；正常使用时通过开始菜单进入睡眠、关机或重启；长按电源键 10 秒以上可以强制关机。",
+    "expected_item_names": [
+      "HUAWEI MateStation S 12代酷睿版"
+    ],
+    "gold_chunk_ids": [
+      "bcf709b2aa3b917206b010655dd434b7adc00ea4"
+    ],
+    "must_hit_chunk_ids": [
+      "bcf709b2aa3b917206b010655dd434b7adc00ea4"
+    ],
+    "tags": [
+      "操作步骤",
+      "开机"
+    ]
+  },
+  {
+    "case_id": "ms_maintenance_001",
+    "question": "HUAWEI MateStation S 日常维护要注意什么？",
+    "ground_truth": "保持设备和配件干燥，不要用微波炉或吹风机干燥；避免高温、低温、强烈冲击或震动；清洁前停止使用并断开连接；不要用烈性化学品清洁，用清洁干燥的软布擦拭；不要自行拆卸或改装。",
+    "expected_item_names": [
+      "HUAWEI MateStation S 12代酷睿版"
+    ],
+    "gold_chunk_ids": [
+      "21b5043e05986a6e62b4758421895c170d2f3f2d"
+    ],
+    "must_hit_chunk_ids": [
+      "21b5043e05986a6e62b4758421895c170d2f3f2d"
+    ],
+    "tags": [
+      "维护保养"
+    ]
+  },
+  {
+    "case_id": "ms_power_safety_001",
+    "question": "HUAWEI MateStation S 的电源安全要求有哪些？",
+    "ground_truth": "电源插头作为断开装置，插座应安装在设备附近并易于操作；不使用设备时断开电源并拔掉插头；电源插头应连接到带接地线的插座；插头或电源线损坏时不要继续使用；不要用湿手触碰电源线。",
+    "expected_item_names": [
+      "HUAWEI MateStation S 12代酷睿版"
+    ],
+    "gold_chunk_ids": [
+      "c73d8248abf1cf3f9bb3123015ea93204cf1175e"
+    ],
+    "must_hit_chunk_ids": [
+      "c73d8248abf1cf3f9bb3123015ea93204cf1175e"
+    ],
+    "tags": [
+      "安全信息",
+      "电源"
+    ]
+  },
+  {
+    "case_id": "ms_battery_safety_001",
+    "question": "HUAWEI MateStation S 的电池使用有哪些安全注意事项？",
+    "ground_truth": "不要使用不正确型号的电池；不要将电池暴露在高温、极低气压、火中；不要跌落、挤压、穿刺、拆解或改装电池；不要将电池作为生活垃圾处理；电池异常发热、变色或变形时停止使用。",
+    "expected_item_names": [
+      "HUAWEI MateStation S 12代酷睿版"
+    ],
+    "gold_chunk_ids": [
+      "a01016183294d0cc15c9cce8065a98825a4cdf43"
+    ],
+    "must_hit_chunk_ids": [
+      "a01016183294d0cc15c9cce8065a98825a4cdf43"
+    ],
+    "tags": [
+      "安全信息",
+      "电池"
+    ]
+  },
+  {
+    "case_id": "l540_bios_password_001",
+    "question": "华为擎云 L540 怎么设置 BIOS 密码？",
+    "ground_truth": "开机或重启时，长按或连续点按 F2 键进入 BIOS 设置界面，设置 BIOS 管理员密码和 BIOS 用户密码。",
+    "expected_item_names": [
+      "华为擎云 L540"
+    ],
+    "gold_chunk_ids": [
+      "0eb1806c96bf8b051662e326b20a6f5728bd1d93"
+    ],
+    "must_hit_chunk_ids": [
+      "0eb1806c96bf8b051662e326b20a6f5728bd1d93"
+    ],
+    "tags": [
+      "操作步骤",
+      "BIOS"
+    ]
+  },
+  {
+    "case_id": "l540_bluetooth_mouse_001",
+    "question": "华为擎云 L540 怎么配对蓝牙鼠标？",
+    "ground_truth": "把蓝牙鼠标底部开关拨到配对位置并保持 3 秒，指示灯闪烁后松开；打开控制中心，选择蓝牙，在其他设备列表中选择 Huawei Mouse，等待配对完成。",
+    "expected_item_names": [
+      "华为擎云 L540"
+    ],
+    "gold_chunk_ids": [
+      "64faeff71aa849b9e1ac146f1aec809fd1ab64d6"
+    ],
+    "must_hit_chunk_ids": [
+      "64faeff71aa849b9e1ac146f1aec809fd1ab64d6"
+    ],
+    "tags": [
+      "操作步骤",
+      "蓝牙"
+    ]
+  },
+  {
+    "case_id": "l540_charging_notes_001",
+    "question": "华为擎云 L540 充电时表面发烫正常吗？",
+    "ground_truth": "计算机长时间工作和充电时表面发热属于正常现象；感觉发烫时关闭部分功能并停止充电。电池待机时间大幅减少时，应到华为客户服务中心更换原装电池。",
+    "expected_item_names": [
+      "华为擎云 L540"
+    ],
+    "gold_chunk_ids": [
+      "040173ee2f54271cd920bfd98cee8b211d543ba6"
+    ],
+    "must_hit_chunk_ids": [
+      "040173ee2f54271cd920bfd98cee8b211d543ba6"
+    ],
+    "tags": [
+      "安全信息",
+      "电池与充电"
+    ]
+  },
+  {
+    "case_id": "g740_touchpad_001",
+    "question": "华为擎云G740 的触摸板双指手势有哪些？",
+    "ground_truth": "双指点击相当于单击鼠标右键，双指上下滑动可以滚动浏览屏幕或文档，双指张开或闭合可以放大或缩小图片、网页。",
+    "expected_item_names": [
+      "华为擎云G740"
+    ],
+    "gold_chunk_ids": [
+      "6450b53e25b08090897ecc424b4c38e6ae403dbc"
+    ],
+    "must_hit_chunk_ids": [
+      "6450b53e25b08090897ecc424b4c38e6ae403dbc"
+    ],
+    "tags": [
+      "操作步骤",
+      "触摸板"
+    ]
+  },
+  {
+    "case_id": "g740_charging_notes_001",
+    "question": "华为擎云G740 在高温环境下充电会损坏计算机吗？",
+    "ground_truth": "会。高温环境下充电可能损坏计算机；应在适宜温度和通风良好的阴凉区域充电。长时间充电时表面发热属于正常现象，发烫时关闭部分功能并停止充电。",
+    "expected_item_names": [
+      "华为擎云G740"
+    ],
+    "gold_chunk_ids": [
+      "60a9e92679f3b99c80ed3f15c7846134b0491fd0"
+    ],
+    "must_hit_chunk_ids": [
+      "60a9e92679f3b99c80ed3f15c7846134b0491fd0"
+    ],
+    "tags": [
+      "安全信息",
+      "电池与充电"
+    ]
+  },
+  {
+    "case_id": "monitor_power_001",
+    "question": "华为显示器 B3-211H 怎么开机和关机？",
+    "ground_truth": "短按电源键，屏幕显示品牌 Logo 后指示灯点亮，显示器开启；长按电源键 2 秒以上，指示灯熄灭，显示器关机。",
+    "expected_item_names": [
+      "华为显示器 B3-211H"
+    ],
+    "gold_chunk_ids": [
+      "92e3b4b0c3f7cc17053b7dc8c89d9a4fd58ca90d"
+    ],
+    "must_hit_chunk_ids": [
+      "92e3b4b0c3f7cc17053b7dc8c89d9a4fd58ca90d"
+    ],
+    "tags": [
+      "操作步骤",
+      "显示器"
+    ]
+  },
+  {
+    "case_id": "monitor_menu_001",
+    "question": "华为显示器 B3-211H 怎么打开和操作设置菜单？",
+    "ground_truth": "显示器开机后短按任意功能键打开设置菜单，再按 1 到 5 键操作；按键 1 退出或左移，按键 2 进入亮度或上移，按键 3 进入情景模式或下移，按键 4 进入主菜单或右移，按键 5 关机或确认。",
+    "expected_item_names": [
+      "华为显示器 B3-211H"
+    ],
+    "gold_chunk_ids": [
+      "dfdfcc9dc4d112c5879f7ee283cfe81279e663d5"
+    ],
+    "must_hit_chunk_ids": [
+      "dfdfcc9dc4d112c5879f7ee283cfe81279e663d5"
+    ],
+    "tags": [
+      "操作步骤",
+      "OSD 菜单"
+    ]
+  },
+  {
+    "case_id": "monitor_connect_001",
+    "question": "华为显示器 B3-211H 怎么连接计算机？",
+    "ground_truth": "把 HDMI 或 VGA 线缆一端接入显示器对应接口，另一端接入计算机对应接口；连接好电源线后开机，屏幕显示计算机画面表示连接成功。",
+    "expected_item_names": [
+      "华为显示器 B3-211H"
+    ],
+    "gold_chunk_ids": [
+      "11f52136e840eb636610d474d4aa5f80a2ee0694"
+    ],
+    "must_hit_chunk_ids": [
+      "11f52136e840eb636610d474d4aa5f80a2ee0694"
+    ],
+    "tags": [
+      "操作步骤",
+      "连接"
+    ]
+  },
+  {
+    "case_id": "monitor_no_image_001",
+    "question": "华为显示器 B3-211H 屏幕上无图像怎么排查？",
+    "ground_truth": "检查所有线缆是否正确连接，确认显示器和计算机主机都处于开机状态，检查 VGA 或 HDMI 信号线是否损坏；如果都正常，重启设备查看屏幕是否恢复。",
+    "expected_item_names": [
+      "华为显示器 B3-211H"
+    ],
+    "gold_chunk_ids": [
+      "086d7eebf8b78dccf548bb50f59b47129d02d5f2"
+    ],
+    "must_hit_chunk_ids": [
+      "086d7eebf8b78dccf548bb50f59b47129d02d5f2"
+    ],
+    "tags": [
+      "故障排查",
+      "显示"
+    ]
+  },
+  {
+    "case_id": "monitor_color_001",
+    "question": "华为显示器 B3-211H 屏幕颜色显示异常怎么办？",
+    "ground_truth": "检查 VGA 或 HDMI 信号线是否损坏，例如插针弯曲；打开显示器设置菜单，调整色温。",
+    "expected_item_names": [
+      "华为显示器 B3-211H"
+    ],
+    "gold_chunk_ids": [
+      "9e85a54b56adf08542a812ff3c050790ac28a750"
+    ],
+    "must_hit_chunk_ids": [
+      "9e85a54b56adf08542a812ff3c050790ac28a750"
+    ],
+    "tags": [
+      "故障排查",
+      "显示"
+    ]
+  },
+  {
+    "case_id": "monitor_brightness_001",
+    "question": "华为显示器 B3-211H 屏幕太亮或太暗怎么调整？",
+    "ground_truth": "打开显示器设置菜单，调节屏幕显示亮度和对比度。",
+    "expected_item_names": [
+      "华为显示器 B3-211H"
+    ],
+    "gold_chunk_ids": [
+      "4ac79ca1ac1f348f8ff8ef456a25452af88c8a51"
+    ],
+    "must_hit_chunk_ids": [
+      "4ac79ca1ac1f348f8ff8ef456a25452af88c8a51"
+    ],
+    "tags": [
+      "故障排查",
+      "显示"
+    ]
+  },
+  {
+    "case_id": "cb_login_001",
+    "question": "Aolynk CB304n 网桥怎么登录 Web 设置页面？",
+    "ground_truth": "在浏览器地址栏输入 http://192.168.1.1，进入登录页面；输入用户名和密码，缺省均为 admin，注意区分大小写，点击登录或直接回车进入。",
+    "expected_item_names": [
+      "Aolynk CB304n Cable网桥"
+    ],
+    "gold_chunk_ids": [
+      "931b6f2180e80315f1722c610198c5645cd3df62"
+    ],
+    "must_hit_chunk_ids": [
+      "931b6f2180e80315f1722c610198c5645cd3df62"
+    ],
+    "tags": [
+      "网络连接",
+      "Web 管理"
+    ]
+  },
+  {
+    "case_id": "cb_wired_001",
+    "question": "Aolynk CB304n 网桥用有线方式连接时怎么设置客户端？",
+    "ground_truth": "确认计算机已安装并启用以太网网卡，并已连接 CB304n 的 LAN 口；建议把计算机设置为自动获得 IP 地址和自动获得 DNS 服务器地址，由 CB304n 自动分配地址。",
+    "expected_item_names": [
+      "Aolynk CB304n Cable网桥"
+    ],
+    "gold_chunk_ids": [
+      "6ad022d0af22d28f816644cea4ed71e0fac19200"
+    ],
+    "must_hit_chunk_ids": [
+      "6ad022d0af22d28f816644cea4ed71e0fac19200"
+    ],
+    "tags": [
+      "网络连接",
+      "有线"
+    ]
+  },
+  {
+    "case_id": "cb_wireless_security_001",
+    "question": "Aolynk CB304n 网桥怎么设置无线安全？",
+    "ground_truth": "在网络、无线配置、无线配置、安全页面设置；网络认证方式可选 Mixed WPA2/WPA-PSK，设置 WPA 预共享密钥，选择 TKIP、AES 或 TKIP+AES 加密方式，并可设置会话密钥更新间隔。",
+    "expected_item_names": [
+      "Aolynk CB304n Cable网桥"
+    ],
+    "gold_chunk_ids": [
+      "27a81d1815972c570b2f69b764db1e5c3ba0ed64"
+    ],
+    "must_hit_chunk_ids": [
+      "27a81d1815972c570b2f69b764db1e5c3ba0ed64"
+    ],
+    "tags": [
+      "参数设置",
+      "无线安全"
+    ]
+  },
+  {
+    "case_id": "cb_dmz_001",
+    "question": "Aolynk CB304n 网桥怎么启用 DMZ 主机？",
+    "ground_truth": "启用 DMZ 主机，输入电脑 IP 地址，点击应用按钮激活；清空 IP 地址输入框后点击应用可以解除 DMZ 主机。",
+    "expected_item_names": [
+      "Aolynk CB304n Cable网桥"
+    ],
+    "gold_chunk_ids": [
+      "73d955aa58b49d5fbf61d9be69c9a8c15e1ab809"
+    ],
+    "must_hit_chunk_ids": [
+      "73d955aa58b49d5fbf61d9be69c9a8c15e1ab809"
+    ],
+    "tags": [
+      "参数设置",
+      "NAT"
+    ]
+  },
+  {
+    "case_id": "cb_troubleshooting_001",
+    "question": "Aolynk CB304n 网桥插上电源后所有指示灯都不亮怎么办？",
+    "ground_truth": "先确认电源适配器与电源插座连接正常，且设备电源开关已打开；确认后指示灯仍不亮，可能是电源适配器或设备损坏，请联系当地运营商维修，不要私自拆开设备。",
+    "expected_item_names": [
+      "Aolynk CB304n Cable网桥"
+    ],
+    "gold_chunk_ids": [
+      "6cb0054129f9c5bdccfd6cf63bc79516fe243fc9"
+    ],
+    "must_hit_chunk_ids": [
+      "6cb0054129f9c5bdccfd6cf63bc79516fe243fc9"
+    ],
+    "tags": [
+      "故障排查",
+      "电源"
+    ]
+  },
+  {
+    "case_id": "h3c_overview_001",
+    "question": "H3C LA2608 室内无线网关需要连接什么设备才能被管理？",
+    "ground_truth": "LA2608 通过 3G 或 4G 网络连接到运营商无线控制器，以实现对设备的管理；目前只支持与 H3C 公司的无线控制器互通。",
+    "expected_item_names": [
+      "H3C LA2608 室内无线网关"
+    ],
+    "gold_chunk_ids": [
+      "807a84583df44a449376a2d2ffccf127c98ad032"
+    ],
+    "must_hit_chunk_ids": [
+      "807a84583df44a449376a2d2ffccf127c98ad032"
+    ],
+    "tags": [
+      "功能说明",
+      "概述"
+    ]
+  },
+  {
+    "case_id": "h3c_verify_001",
+    "question": "怎么验证 H3C LA2608 与无线控制器是否连通？",
+    "ground_truth": "在无线控制器上执行 display wlan ap 命令，state 字段显示为 R/M，表示 LA2608 与无线控制器已经建立连接。",
+    "expected_item_names": [
+      "H3C LA2608 室内无线网关"
+    ],
+    "gold_chunk_ids": [
+      "f84d6220efd2a5a6185373feb737f7b721ddcdcd"
+    ],
+    "must_hit_chunk_ids": [
+      "f84d6220efd2a5a6185373feb737f7b721ddcdcd"
+    ],
+    "tags": [
+      "操作步骤",
+      "验证"
+    ]
+  },
+  {
+    "case_id": "boundary_vague_001",
+    "question": "机器有问题怎么办？",
+    "ground_truth": "先检查电源线已正确连接且设备已开机、包装材料已去除、前盖和分离辊舱盖已盖好，再根据具体现象继续排查。",
+    "expected_item_names": [
+      "Brother HAK 180 烫金机"
+    ],
+    "gold_chunk_ids": [
+      "7e84a256db3b50c18fcf2ccc14626ab428457220"
+    ],
+    "must_hit_chunk_ids": [
+      "7e84a256db3b50c18fcf2ccc14626ab428457220"
+    ],
+    "tags": [
+      "边界-模糊输入"
+    ]
+  },
+  {
+    "case_id": "boundary_out_of_scope_001",
+    "question": "今天上海天气怎么样？",
+    "ground_truth": "该问题与产品知识库无关。应说明无法从知识库回答，并引导用户提出与产品使用相关的问题。",
+    "expected_item_names": [],
+    "gold_chunk_ids": [],
+    "must_hit_chunk_ids": [],
+    "tags": [
+      "边界-超范围"
+    ]
+  },
+  {
+    "case_id": "boundary_negative_001",
+    "question": "HAK 180 能连接蓝牙吗？",
+    "ground_truth": "HAK 180 不支持蓝牙连接。它通过热定影把烫金膜转印到预先打印的介质上，不需要安装额外驱动或软件。",
+    "expected_item_names": [
+      "Brother HAK 180 烫金机"
+    ],
+    "gold_chunk_ids": [],
+    "must_hit_chunk_ids": [],
+    "tags": [
+      "边界-否定问题"
+    ]
+  },
+  {
+    "case_id": "boundary_long_question_001",
+    "question": "我这边用 HAK 180 做小批量烫金，纸张是已经用激光打印机打印好的 A4 纸，最近发现有的位置烫金膜附着力很差，用手一擦就掉，另一些位置又出现打印内容缺失，我想在不换纸、不换烫金膜的前提下先自己排查，请问应该优先调整什么参数，调整时要注意什么，调到什么程度需要联系售后？",
+    "ground_truth": "优先提高转印温度；如果温度提高后仍然脱落或缺失，再检查纸张是否为墨粉打印、纸张是否干净，以及热转印辊是否污脏、定影单元是否接近寿命终点；仍无法解决时联系 Brother 经销商。",
+    "expected_item_names": [
+      "Brother HAK 180 烫金机"
+    ],
+    "gold_chunk_ids": [
+      "a4bec5d83734fa17217e421e62d357faacc58b9c"
+    ],
+    "must_hit_chunk_ids": [
+      "a4bec5d83734fa17217e421e62d357faacc58b9c"
+    ],
+    "tags": [
+      "边界-长输入",
+      "转印温度"
+    ]
+  },
+  {
+    "case_id": "boundary_vague_002",
+    "question": "这个怎么调？",
+    "ground_truth": "问题缺少产品名称和要调整的项目。应先询问用户使用的产品和具体现象，再给出对应设置步骤。",
+    "expected_item_names": [],
+    "gold_chunk_ids": [],
+    "must_hit_chunk_ids": [],
+    "tags": [
+      "边界-模糊输入"
+    ]
+  },
+  {
+    "case_id": "boundary_vague_003",
+    "question": "灯一直闪，是不是坏了？",
+    "ground_truth": "问题缺少产品名称和指示灯位置。应先确认产品型号和闪烁的指示灯，再按对应说明排查。",
+    "expected_item_names": [],
+    "gold_chunk_ids": [],
+    "must_hit_chunk_ids": [],
+    "tags": [
+      "边界-模糊输入"
+    ]
+  },
+  {
+    "case_id": "boundary_out_of_scope_002",
+    "question": "帮我写一首关于春天的诗。",
+    "ground_truth": "该请求与产品知识库无关。应说明无法从知识库完成文学创作，并引导用户提出产品使用问题。",
+    "expected_item_names": [],
+    "gold_chunk_ids": [],
+    "must_hit_chunk_ids": [],
+    "tags": [
+      "边界-超范围"
+    ]
+  },
+  {
+    "case_id": "boundary_out_of_scope_003",
+    "question": "公司差旅报销流程是什么？",
+    "ground_truth": "该问题与产品知识库无关。应说明知识库不包含公司报销流程，并引导用户咨询行政部门。",
+    "expected_item_names": [],
+    "gold_chunk_ids": [],
+    "must_hit_chunk_ids": [],
+    "tags": [
+      "边界-超范围"
+    ]
+  },
+  {
+    "case_id": "boundary_negative_002",
+    "question": "HAK 180 支持彩色打印吗？",
+    "ground_truth": "HAK 180 是烫金机，不执行彩色打印。它把烫金膜转印到预先用激光打印机打印的介质上。",
+    "expected_item_names": [
+      "Brother HAK 180 烫金机"
+    ],
+    "gold_chunk_ids": [],
+    "must_hit_chunk_ids": [],
+    "tags": [
+      "边界-否定问题"
+    ]
+  },
+  {
+    "case_id": "boundary_negative_003",
+    "question": "华为擎云 L420x 可以插 SIM 卡上网吗？",
+    "ground_truth": "知识库没有说明 L420x 支持 SIM 卡上网，不能确认该能力；应引导用户查看产品规格或联系华为客户服务中心。",
+    "expected_item_names": [
+      "华为擎云 L420x"
+    ],
+    "gold_chunk_ids": [],
+    "must_hit_chunk_ids": [],
+    "tags": [
+      "边界-否定问题",
+      "网络连接"
+    ]
+  },
+  {
+    "case_id": "boundary_long_002",
+    "question": "我有一台 HAK 180，最近烫金膜有的地方转印不上，有的地方一擦就掉，纸张是激光打印机打的 A4 纸，烫金膜盒刚换过，设备也用了半年，清洁过外部但没有清洁分离辊，请问我应该先检查哪些部件，按什么顺序排查，什么情况下必须联系售后？",
+    "ground_truth": "先提高转印温度并确认纸张为墨粉打印且干净；再检查热转印辊是否污脏、定影单元是否接近寿命终点；分离辊脏污也会影响进纸，可按维护章节清洁；仍无法解决时联系 Brother 经销商。",
+    "expected_item_names": [
+      "Brother HAK 180 烫金机"
+    ],
+    "gold_chunk_ids": [
+      "a8cf790b8f2a3e2d6e1e02bb57b395d3b5827a16",
+      "a4bec5d83734fa17217e421e62d357faacc58b9c"
+    ],
+    "must_hit_chunk_ids": [
+      "a8cf790b8f2a3e2d6e1e02bb57b395d3b5827a16"
+    ],
+    "tags": [
+      "边界-长输入",
+      "故障排查"
+    ]
+  }
+]

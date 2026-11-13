@@ -46,6 +46,7 @@ def offline_guard(monkeypatch):
     from app.shared.clients import milvus_gateway as milvus_module
     from app.shared.clients import minio_gateway as minio_module
     from app.shared.clients import mongo as mongo_module
+    from app.shared.clients import redis_gateway as redis_module
 
     def _blocked(*_args, **_kwargs):
         raise RuntimeError("离线用例禁止访问外部服务")
@@ -53,6 +54,9 @@ def offline_guard(monkeypatch):
     monkeypatch.setattr(mongo_module, "get_mongo_client", _blocked)
     monkeypatch.setattr(milvus_module, "get_milvus_client", _blocked)
     monkeypatch.setattr(minio_module, "get_minio_client", _blocked)
+    monkeypatch.setattr(redis_module, "get_redis_client", _blocked)
+    # 默认走进程内后端；需要 Redis 的用例自行设置 RUNTIME_STATE_BACKEND 并注入 fakeredis
+    monkeypatch.setattr(settings.runtime, "state_backend", "memory")
 
     # 参数注册表带进程内缓存：清空并重置 TTL，保证每例都走「降级到常量」路径
     from app.evolution.tuning import param_registry

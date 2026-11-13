@@ -90,7 +90,7 @@ se_rag/
 │  ├─ evolution/              # 反馈、缺口、候选、审批、索引、指标、调参、回测
 │  ├─ shared/                 # 配置、存储客户端、模型、日志、SSE、任务状态
 │  ├─ resources/              # 三张页面与静态资源
-│  └─ rag_eval/               # 离线评估、切分评估、答案质量、Agentic 对比、隔离联调
+│  └─ rag_eval/               # HTTP 离线评测：检索指标、RAGAS 生成指标、基线回归
 ├─ docs/                      # PRD、代码设计、技术讲解
 ├─ doc/                       # 手册语料（PDF）
 ├─ output/                    # 导入工作目录与任务快照（运行时生成）
@@ -155,7 +155,20 @@ uv run uvicorn app.api.http.import_server:app --host 0.0.0.0 --port 8000
 uv run uvicorn app.api.http.query_server:app --host 0.0.0.0 --port 8001
 ```
 
-问答服务启动时会加载 BGE-M3 与重排模型。首次启动会多等一段时间，日志出现“检索模型预热完成”后再开始问答。
+多 worker 需要先启动 Redis，并在 `.env` 配置 `REDIS_URL`。随后两种启动方式都会自动使用配置的 worker 数：
+
+```bash
+# 直接运行模块：读取 QUERY_APP_WORKERS / IMPORT_APP_WORKERS
+uv run python -m app.api.http.query_server
+uv run python -m app.api.http.import_server
+
+# 或用 uvicorn 显式指定
+uv run uvicorn app.api.http.query_server:app --host 0.0.0.0 --port 8001 --workers 2
+```
+
+未配置 `REDIS_URL` 时保持单 worker：查询服务仍使用文件锁，导入状态与并发名额留在进程内。
+
+问答服务启动时会加载 BGE-M3 与重排模型。首次启动会多等一段时间，日志出现“检索模型预热完成”后再开始问答。多 worker 下每个进程都会加载一份模型，内存按 worker 数增长。
 
 ### 5. 打开页面
 
@@ -181,6 +194,20 @@ uv run uvicorn app.api.http.query_server:app --host 0.0.0.0 --port 8001
 | `APP_ENV` | `dev` | 运行环境 |
 | `CORS_ORIGINS` | `*` | 跨域白名单 |
 | `SESSION_OWNERSHIP_ENABLED` | `true` | 会话属主校验 |
+| `QUERY_APP_WORKERS` | `2` | 查询服务 worker 数；仅 Redis 后端生效 |
+| `IMPORT_APP_WORKERS` | `2` | 导入服务 worker 数；仅 Redis 后端生效 |
+
+### 多 worker 与跨进程状态
+
+| 键 | 默认 | 说明 |
+|---|---|---|
+| `REDIS_URL` | 空 | Redis 连接串；为空时退回进程内单 worker |
+| `REDIS_TIMEOUT_SECONDS` | `2` | Redis 单次读写超时 |
+| `RUNTIME_STATE_BACKEND` | `auto` | `auto` / `redis` / `memory`；`auto` 表示有 `REDIS_URL` 就用 Redis |
+| `SSE_DELTA_FLUSH_MS` | `120` | SSE 增量合并窗口（毫秒） |
+| `SSE_STREAM_TTL_SECONDS` | `3600` | SSE 事件流保留时间 |
+| `QUERY_TURN_LOCK_TTL_SECONDS` | `600` | 同一会话查询锁的 TTL |
+| `SCHEDULER_LEADER_TTL_SECONDS` | `90` | 自进化调度器主节点租约 TTL |
 
 ### 导入
 
@@ -188,8 +215,9 @@ uv run uvicorn app.api.http.query_server:app --host 0.0.0.0 --port 8001
 |---|---|---|
 | `IMPORT_ADMIN_TOKEN` | 内置默认值 | 导入鉴权；生产环境必须改成强随机值；为空时 fail-closed 503 |
 | `IMPORT_MAX_UPLOAD_MB` | `50` | 单文件上限 |
-| `IMPORT_MAX_CONCURRENT_TASKS` | `2` | 进程内并发导入数 |
+| `IMPORT_MAX_CONCURRENT_TASKS` | `2` | 全局并发导入数（多 worker 时跨进程） |
 | `IMPORT_ACQUIRE_TIMEOUT_SECONDS` | `600` | 等待并发名额上限 |
+| `IMPORT_SLOT_LEASE_SECONDS` | `3600` | 多 worker 名额租约；进程崩溃后过期回收 |
 | `IMPORT_MAX_RETRY_ATTEMPTS` | `3` | 导入有界重试次数 |
 | `IMPORT_RETRY_BACKOFF_SECONDS` | `1.0` | 退避基准 |
 | `IMPORT_CHECKPOINT_ENABLED` | `true` | 复用已有 MinerU 产物 |
@@ -250,7 +278,7 @@ uv run uvicorn app.api.http.query_server:app --host 0.0.0.0 --port 8001
 
 | 键 | 默认 | 说明 |
 |---|---|---|
-| `TASK_STATE_TTL_SECONDS` | `21600` | 内存任务状态 TTL |
+| `TASK_STATE_TTL_SECONDS` | `21600` | 任务状态 TTL（内存或 Redis） |
 | `INTENT_TIMEOUT_SECONDS` | `2.0` | 意图识别超时 |
 | `LLM_TIMEOUT_SECONDS` | `60` | 模型调用超时 |
 | `LLM_MAX_RETRIES` | `2` | SDK 内建重试 |
@@ -269,7 +297,7 @@ uv run uvicorn app.api.http.query_server:app --host 0.0.0.0 --port 8001
 | GET | `/api/health` | 健康检查与资源版本 | 无 |
 | GET | `/import` | 导入页 | 无 |
 
-上传参数：`files`（一批文件，最多 20 个）、`document_kind`（`manual` / `policy`）、`document_version`、`valid_until`。每个文件独立建任务；任一文件不合法则整批拒绝。任务进入进程内线程池，按 `IMPORT_MAX_CONCURRENT_TASKS` 并行执行；其余任务排队。业务政策必须填写版本与未来失效时间。
+上传参数：`files`（一批文件，最多 20 个）、`document_kind`（`manual` / `policy`）、`document_version`、`valid_until`。每个文件独立建任务；任一文件不合法则整批拒绝。任务进入线程池，按 `IMPORT_MAX_CONCURRENT_TASKS` 领取全局名额后执行；其余任务排队。业务政策必须填写版本与未来失效时间。
 
 ### 问答服务（8001）
 
@@ -296,6 +324,8 @@ uv run uvicorn app.api.http.query_server:app --host 0.0.0.0 --port 8001
 | GET | `/`、`/approval` | 对话页、审批页 | 无 |
 
 SSE 事件：`ready`、`progress`、`delta`、`final`、`error`、`close`。
+
+`POST /api/query` 请求体可选 `include_evidence=true`：仅评测场景使用，响应会额外返回 `evidence`（证据正文）与 `retrieval_layers`（分层 chunk_id）。
 
 ## 核心流程
 
@@ -339,7 +369,29 @@ E2E_ENABLED=1 uv run pytest -m e2e tests/e2e -s
 node --test tests/frontend
 ```
 
-离线单测通过 `tests/conftest.py` 的 `offline_guard` 禁止真实 Mongo / Milvus / MinIO 连接。
+离线单测通过 `tests/conftest.py` 的 `offline_guard` 禁止真实 Mongo / Milvus / MinIO / Redis 连接。
+
+## 离线评测
+
+评测通过 HTTP 调用查询服务，覆盖检索指标与 RAGAS 生成指标，并支持基线回归。
+示例数据集共 100 题，覆盖 12 个主体，包含参数设置、故障排查、操作步骤、维护保养、功能说明、网络连接、安全信息、电池与充电，以及模糊输入、超范围、否定问题、长输入四类边界场景。
+每次评测都会输出总体结论、逐题执行状态与关键指标，并写入带时间戳的 Markdown 报告。
+
+```bash
+# 安装评测依赖
+uv sync --group eval
+
+# 先启动问答服务（8001），再运行评测
+uv run python -m app.rag_eval.cli run --dataset app/rag_eval/datasets/sample_cases.json
+
+# 只跑检索指标
+uv run python -m app.rag_eval.cli run --dataset ... --no-ragas
+
+# 与基线对比；有回归时退出码为 1
+uv run python -m app.rag_eval.cli run --dataset ... --baseline output/eval/baseline.json --fail-on-regression
+```
+
+评测集字段、指标口径与报告格式见 [app/rag_eval/README.md](app/rag_eval/README.md)。
 
 ## 常见问题
 
@@ -364,8 +416,9 @@ node --test tests/frontend
 
 ## 已知限制
 
-- 查询服务采用单 worker 租约：只能以 `--workers 1` 运行。
-- 导入并发闸门与任务状态是进程内语义，多 worker 下不共享。
+- 多 worker 依赖 Redis；未配置时自动退回单 worker，查询服务仍受文件锁限制。
+- 多机部署需要共享 `output/` 目录（导入原文件与任务快照），或改用共享存储。
+- 每个 worker 独立加载 BGE-M3 与重排模型，内存按 worker 数增长。
 - Milvus、Mongo、MinIO 无跨存储事务；一致性依赖幂等写入与只读对账。
 - BGE-M3 与重排模型为本地模型；CPU 下启动和编码较慢。
 - 生产鉴权目前是共享令牌 + 浏览器归属 Cookie，未接入企业 SSO。
