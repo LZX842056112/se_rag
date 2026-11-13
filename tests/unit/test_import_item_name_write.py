@@ -6,6 +6,8 @@
 from __future__ import annotations
 
 from app.rag.import_ import item_name_service
+from app.rag.item_name import catalog as catalog_module
+from app.rag.item_name import match as match_module
 
 
 class _FakeMilvus:
@@ -65,3 +67,50 @@ def test_falls_back_when_driver_returns_no_ids(monkeypatch):
     ops = [name for name, _ in client.calls]
     assert ops == ["insert", "delete", "insert"], f"兜底路径应为 insert→delete→insert，实际 {ops}"
     assert client.deleted_filters[0] == "file_title == 'hak180'"
+
+
+def _catalog(monkeypatch, names: list[str]) -> None:
+    monkeypatch.setattr(
+        catalog_module,
+        "_CACHE",
+        {"names": names, "raws": names, "ts": 9e9},
+    )
+
+
+def test_write_merge_keeps_different_model(monkeypatch):
+    """库内只有一个主体时，不同型号不能因向量相似度高而被误并。"""
+    _catalog(monkeypatch, ["Brother HAK 180 烫金机"])
+    called = []
+    monkeypatch.setattr(
+        match_module,
+        "search_by_item_names",
+        lambda names: called.append(names) or {},
+    )
+
+    resolved, evidence = match_module.resolve_existing_item_name(
+        "Brother HL-3040CN网络打印服务器"
+    )
+
+    assert resolved == "Brother HL-3040CN网络打印服务器"
+    assert evidence is None
+    assert called == [], "写入端不应再调用向量检索做主体归并"
+
+
+def test_write_merge_reuses_same_entity_by_suffix(monkeypatch):
+    """品牌前缀差异（短名是长名后缀）仍复用库内标准名。"""
+    _catalog(monkeypatch, ["Brother HAK 180 烫金机"])
+
+    resolved, evidence = match_module.resolve_existing_item_name("HAK 180 烫金机")
+
+    assert resolved == "Brother HAK 180 烫金机"
+    assert evidence["matched_by"] == "catalog_entity"
+
+
+def test_write_merge_reuses_exact_normalized_name(monkeypatch):
+    """仅空格差异的写法规格化后视为精确同名。"""
+    _catalog(monkeypatch, ["Brother HAK 180 烫金机"])
+
+    resolved, evidence = match_module.resolve_existing_item_name("Brother HAK 180烫金机")
+
+    assert resolved == "Brother HAK 180 烫金机"
+    assert evidence["matched_by"] == "catalog_exact"

@@ -34,7 +34,7 @@ Milvus（子块/主体名/FAQ） + Mongo（父块/任务/反馈） + MinIO（图
 `POST /api/import/upload`：
 
 1. 校验请求头 `X-Internal-Token`。
-2. 只接收一个文件。
+2. 一次最多接收 20 个文件；任一文件不合法则整批拒绝。
 3. 只接受 `.md` / `.pdf`。
 4. 检查文件大小上限。
 5. PDF 检查 `%PDF-` 文件头；Markdown 检查 UTF-8 与空字节。
@@ -42,13 +42,15 @@ Milvus（子块/主体名/FAQ） + Mongo（父块/任务/反馈） + MinIO（图
 
 通过后：
 
-- 生成 UUID `task_id`。
-- 创建 `output/<YYYYMMDD>/<task_id>/`。
+- 逐文件生成 UUID `task_id`，各建一个任务目录 `output/<YYYYMMDD>/<task_id>/`。
 - 保存原文件。
 - 写入 `_import_meta.json`：原文件名、资料类型、版本、失效时间。
-- 返回 `task_id`，后台开始导入。
+- 返回 `task_ids`（与文件顺序一致），每个任务在后台独立导入。
+- 落盘中途失败时，清理本批已建任务与目录，整批返回 `save_failed`。
 
 ### 2.2 任务执行
+
+上传后，任务先置为 `pending`，再提交到进程内线程池。线程池按 `IMPORT_MAX_CONCURRENT_TASKS` 并行执行。超出上限的任务在线程池队列中排队。
 
 `invoke_import_graph`：
 
@@ -161,14 +163,14 @@ chunk_id  = sha1(doc_id#heading_path#occurrence#part)
 1. 取前 10 个切片。
 2. LLM 识别主体名。
 3. 为空时用文件标题兜底。
-4. 在主体目录中做同一实体归并。
+4. 在主体目录中做词法同一实体归并：精确同名，或短名是长名的品牌前缀后缀；不做向量相似度自动归并。
 5. 回填所有子块与父块的 `item_name`。
 6. 写入 `kb_item_names`：
    - 先插入新记录并取回自增 pk；
    - 再删除同一 `file_title` 下其他 pk；
    - 避免“先删后插”造成主体名丢失。
 
-主体名口径在导入端与查询端共用，保证“导入时归并到什么名字，查询时就能确认到什么名字”。
+导入端只做可解释的词法归并；查询端做语义匹配与用户确认。写入端宁可保留新名字，也不把不同型号合并。
 
 ### 2.7 向量化
 

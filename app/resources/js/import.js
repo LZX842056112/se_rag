@@ -13,8 +13,33 @@
 
   // 与服务端 IMPORT_MAX_UPLOAD_MB 默认值保持一致；本地先拦一次，避免白传超大文件
   const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
+  // 与服务端 MAX_BATCH_FILES 保持一致；一次请求最多携带的文件数
+  const MAX_BATCH_FILES = 20;
   // 进行中的状态：这些记录不允许删除，重试也只在 failed 时开放
   const ACTIVE_STATUSES = ['uploading', 'pending', 'processing'];
+
+  // 失败原因提示：优先显示可读的中文说明，原始错误放在可展开的日志里
+  const FAILURE_HINTS = {
+    mineru_failed: 'PDF 解析失败。请检查文件是否加密、损坏或页数过多。',
+    mineru_timeout: 'PDF 解析超时。请稍后重试，或拆分文件。',
+    parse_failed: '解析结果不完整。请重试。',
+    split_empty: '文档没有可切分的正文。请检查文件内容。',
+    import_busy: '导入任务较多，等待超时。请稍后重试。',
+    storage_unavailable: '存储服务不可用。请检查 MinIO、Milvus 或 MongoDB。',
+    embedding_failed: '向量生成失败。请稍后重试。',
+    item_name_failed: '主体名称识别失败。请稍后重试。',
+    index_failed: '写入知识库失败。请检查存储服务。',
+    index_count_mismatch: '入库数量不一致。请重试。',
+    import_source_missing: '原始文件不存在。请重新上传。',
+    policy_metadata_required: '业务政策必须填写版本和未来的失效时间。',
+    policy_metadata_expired: '业务政策的版本或有效期已失效。请重新上传。',
+    unsupported_type: '文件类型不支持。仅支持 md / pdf。',
+    file_too_large: '文件超过大小上限。',
+    file_content_mismatch: '文件内容与扩展名不匹配。',
+    save_failed: '文件保存失败。请重试。',
+    invalid_filename: '文件名不合法。',
+    too_many_files: '一次上传文件过多。'
+  };
 
   const dropZone = document.getElementById('dropZone');
   const fileInput = document.getElementById('fileInput');
@@ -98,7 +123,9 @@
   fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
 
   function handleFiles(files) {
-    Array.from(files).forEach(uploadFile);
+    const selected = Array.from(files);
+    if (!selected.length) return;
+    uploadBatch(selected);
   }
 
   // 任务区空态提示
@@ -120,6 +147,28 @@
     const badge = itemEl.querySelector('.status-badge');
     badge.textContent = text;
     badge.className = 'status-badge ' + cls;
+  }
+
+  // 服务端消息通常更具体（例如点名哪个文件）。任务失败时优先用中文提示，
+  // 因为原始异常文本对用户不可读，细节仍放在可展开的日志里。
+  function failureText(errorCode, message, preferHint) {
+    const hint = errorCode ? FAILURE_HINTS[errorCode] : '';
+    if (preferHint) return hint || message || errorCode || '导入失败';
+    return message || hint || errorCode || '导入失败';
+  }
+
+  // 失败原因常驻显示，用户不用展开日志就能看到原因；空字符串表示隐藏
+  function setFailureReason(itemEl, text) {
+    const box = itemEl.querySelector('.failure-reason');
+    if (!box) return;
+    const textEl = box.querySelector('.failure-reason-text');
+    if (!text) {
+      box.hidden = true;
+      if (textEl) textEl.textContent = '';
+      return;
+    }
+    if (textEl) textEl.textContent = text;
+    box.hidden = false;
   }
 
   function normalizeDoneLog(text) {
@@ -168,6 +217,7 @@
         if (!current()) return;
         if (!data.status) {
           setBadge(itemEl, '状态不可用', 'status-error');
+          setFailureReason(itemEl, '无法读取任务状态。请确认导入服务正常，并检查导入令牌。');
           remember(itemEl, { status: 'unavailable' });
           stop();
           return;
@@ -177,13 +227,20 @@
         renderLogs(itemEl, data.done_list, data.running_list);
         if (data.status === 'completed') {
           setBadge(itemEl, '已完成', 'status-completed');
+          setFailureReason(itemEl, '');
           updateProgressBar(itemEl.querySelector('.progress-bar'), 100);
           stop();
-        } else if (data.status === 'processing' || data.status === 'pending') {
+        } else if (data.status === 'pending') {
+          // 任务在进程内队列里等待执行，继续轮询，不能当成失败
+          setBadge(itemEl, '排队中...', 'status-processing');
+          setFailureReason(itemEl, '');
+        } else if (data.status === 'processing') {
           // 进度由日志反映，不造假百分比
           setBadge(itemEl, '处理中...', 'status-processing');
+          setFailureReason(itemEl, '');
         } else if (data.status === 'failed') {
           setBadge(itemEl, '失败', 'status-error');
+          setFailureReason(itemEl, failureText(data.error_code, data.message, true));
           if (data.error_code) {
             const logListEl = itemEl.querySelector('.log-list');
             logListEl.innerHTML = '';
@@ -198,6 +255,7 @@
         if (needsImportToken(e)) {
           highlightTokenInput();
           setBadge(itemEl, '等待验证导入令牌', 'status-error');
+          setFailureReason(itemEl, '导入令牌无效或未配置。请保存正确的导入令牌。');
           stop();
         } else {
           const record = taskRecords.get(itemEl.id);
@@ -214,8 +272,9 @@
     poll();
   }
 
-  function failItem(itemEl, logSummary, logListEl, logDetails, message, status = 'failed') {
+  function failItem(itemEl, logSummary, logListEl, logDetails, message, status = 'failed', errorCode = '', preferHint = false) {
     setBadge(itemEl, status === 'interrupted' ? '上传中断' : '失败', 'status-error');
+    setFailureReason(itemEl, failureText(errorCode, message, preferHint));
     remember(itemEl, { status, message });
     logSummary.textContent = '日志（失败，点击展开）';
     logListEl.innerHTML = '';
@@ -232,6 +291,10 @@
           <span class="file-name">${App.escapeHtml(name)}</span>
           <span class="file-size">${(size / 1024).toFixed(2)} KB</span>
           <div class="progress-bar-container"><div class="progress-bar"></div></div>
+          <div class="failure-reason" hidden>
+            <span class="failure-reason-title">失败原因</span>
+            <span class="failure-reason-text"></span>
+          </div>
           <details class="log-details">
             <summary>日志（点击展开）</summary>
             <ul class="log-list"></ul>
@@ -302,7 +365,8 @@
       });
       // 服务端沿用原 task_id：进度归零后重新轮询，前端不必更换地址
       remember(itemEl, { status: 'pending', done_list: [], running_list: [], error_code: '', message: '' });
-      setBadge(itemEl, '处理中...', 'status-processing');
+      setBadge(itemEl, '排队中...', 'status-processing');
+      setFailureReason(itemEl, '');
       renderLogs(itemEl, [], []);
       updateProgressBar(itemEl.querySelector('.progress-bar'), 0);
       App.toast((result && result.message) || '已重新提交导入');
@@ -395,10 +459,13 @@
       if (record.task_id) {
         if (record.status === 'failed') {
           failItem(itemEl, itemEl.querySelector('.log-details summary'), itemEl.querySelector('.log-list'),
-            itemEl.querySelector('.log-details'), record.message || record.error_code || '导入失败');
+            itemEl.querySelector('.log-details'), record.message || record.error_code || '导入失败',
+            'failed', record.error_code, true);
         } else {
-          setBadge(itemEl, record.status === 'completed' ? '已完成' : '处理中...',
-            record.status === 'completed' ? 'status-completed' : 'status-processing');
+          const completed = record.status === 'completed';
+          const queued = record.status === 'pending';
+          setBadge(itemEl, completed ? '已完成' : (queued ? '排队中...' : '处理中...'),
+            completed ? 'status-completed' : 'status-processing');
         }
         if (record.status === 'completed') updateProgressBar(itemEl.querySelector('.progress-bar'), 100);
         if (!['completed', 'failed'].includes(record.status)) pollStatus(record.task_id, itemEl);
@@ -412,26 +479,38 @@
     });
   }
 
-  async function uploadFile(file) {
-    const record = { id: 'file-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 11),
-      name: file.name, size: file.size, task_id: '', status: 'uploading', done_list: [], running_list: [] };
-    const itemEl = createTaskItem(record);
-    saveTasks();
-    const progressContainer = itemEl.querySelector('.progress-bar-container');
-    const logDetails = itemEl.querySelector('.log-details');
-    const logSummary = itemEl.querySelector('.log-details summary');
-    const logListEl = itemEl.querySelector('.log-list');
+  async function uploadBatch(files) {
+    if (files.length > MAX_BATCH_FILES) {
+      App.toast(`一次最多上传 ${MAX_BATCH_FILES} 个文件`);
+      return;
+    }
 
-    // 本地先做大小校验：避免把超大文件白传到服务端再被 413 拒绝
-    if (file.size > MAX_UPLOAD_BYTES) {
-      failItem(itemEl, logSummary, logListEl, logDetails,
-        `文件过大（上限 ${Math.round(MAX_UPLOAD_BYTES / 1024 / 1024)}MB）`);
+    // 先按选择顺序建记录；响应里的 task_ids 也按同一顺序返回
+    const items = files.map(file => {
+      const record = { id: 'file-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 11),
+        name: file.name, size: file.size, task_id: '', status: 'uploading', done_list: [], running_list: [] };
+      const itemEl = createTaskItem(record);
+      return {
+        itemEl,
+        progressContainer: itemEl.querySelector('.progress-bar-container'),
+        logDetails: itemEl.querySelector('.log-details'),
+        logSummary: itemEl.querySelector('.log-details summary'),
+        logListEl: itemEl.querySelector('.log-list')
+      };
+    });
+    saveTasks();
+
+    // 本地先做大小校验：任一文件超限即整批不发送，与服务端「整批拒绝」一致
+    const oversize = files.find(file => file.size > MAX_UPLOAD_BYTES);
+    if (oversize) {
+      const message = `文件过大（上限 ${Math.round(MAX_UPLOAD_BYTES / 1024 / 1024)}MB）：${oversize.name}`;
+      items.forEach(item => failItem(item.itemEl, item.logSummary, item.logListEl, item.logDetails, message));
       refreshEmptyHint();
       return;
     }
 
     const formData = new FormData();
-    formData.append('files', file);
+    files.forEach(file => formData.append('files', file));
     const kind = document.getElementById('documentKind').value;
     formData.append('document_kind', kind);
     formData.append('document_version', document.getElementById('documentVersion').value.trim());
@@ -439,21 +518,24 @@
     if (until) formData.append('valid_until', String(new Date(until).getTime() / 1000));
 
     try {
-      progressContainer.style.display = 'block';
+      items.forEach(item => { item.progressContainer.style.display = 'block'; });
       const result = await App.fetchJson(App.PATHS.upload, {
         method: 'POST', body: formData, token: currentToken()
       });
       const ids = Array.isArray(result.task_ids) ? result.task_ids : [];
-      if (!ids.length) throw new Error('上传接口未返回 task_id');
-      remember(itemEl, { task_id: ids[0], status: 'processing' });
-      setBadge(itemEl, '处理中...', 'status-processing');
-      pollStatus(ids[0], itemEl);
+      if (!ids.length || ids.length !== files.length) throw new Error('上传接口返回的任务数量与文件数量不一致');
+      items.forEach((item, index) => {
+        remember(item.itemEl, { task_id: ids[index], status: 'pending' });
+        setBadge(item.itemEl, '排队中...', 'status-processing');
+        pollStatus(ids[index], item.itemEl);
+      });
     } catch (error) {
-      // 业务拒绝（如 422 仅支持 md/pdf）属预期路径，用 warn 避免污染错误监控
+      // 业务拒绝（如 422 整批含非法文件）属预期路径，用 warn 避免污染错误监控
       console.warn(error);
       if (needsImportToken(error)) highlightTokenInput();
-      failItem(itemEl, logSummary, logListEl, logDetails,
-        (error && error.message) ? error.message : String(error));
+      const message = (error && error.message) ? error.message : String(error);
+      items.forEach(item => failItem(item.itemEl, item.logSummary, item.logListEl, item.logDetails,
+        message, 'failed', error && error.code));
     } finally {
       refreshEmptyHint();
     }

@@ -2,7 +2,8 @@
 
 加固要点（**不引入消息队列**，保持单进程部署形态）：
 
-- **并发闸门**：进程内信号量限制同时执行的导入任务数，避免 ``BackgroundTasks`` 线程池被打满；
+- **并行调度**：导入任务提交到进程内线程池，按 ``IMPORT_MAX_CONCURRENT_TASKS`` 并行执行；
+- **并发闸门**：信号量兜底限制同时执行的任务数，超出上限的任务在线程池队列中排队；
 - **有界重试**：仅对可重试错误码退避重试；配合 MinerU 产物复用（``checkpoint_enabled``），
   重试不会重复付出云端解析的代价；
 - **错误分类**：失败原因落成稳定机器码（见 ``app/rag/import_/errors.py``）；
@@ -15,6 +16,7 @@ from __future__ import annotations
 
 import threading
 import time
+from concurrent.futures import Future, ThreadPoolExecutor
 
 from app.process.import_.agent.main_graph import import_app
 from app.process.import_.agent.state import ImportGraphState, create_default_state
@@ -33,6 +35,10 @@ from app.shared.utils.task_state import (
 
 _IMPORT_SLOTS: threading.BoundedSemaphore | None = None
 _SLOTS_LOCK = threading.Lock()
+# 导入线程池：FastAPI 的 BackgroundTasks 按顺序执行，一批任务会排队跑；
+# 这里用独立线程池并行执行，池大小与并发名额一致。
+_IMPORT_EXECUTOR: ThreadPoolExecutor | None = None
+_EXECUTOR_LOCK = threading.Lock()
 
 
 def _import_slots() -> threading.BoundedSemaphore:
@@ -44,6 +50,18 @@ def _import_slots() -> threading.BoundedSemaphore:
                 max(1, settings.import_.max_concurrent_tasks)
             )
         return _IMPORT_SLOTS
+
+
+def _import_executor() -> ThreadPoolExecutor:
+    """进程内导入线程池（懒加载）；一批任务可并行执行。"""
+    global _IMPORT_EXECUTOR
+    with _EXECUTOR_LOCK:
+        if _IMPORT_EXECUTOR is None:
+            _IMPORT_EXECUTOR = ThreadPoolExecutor(
+                max_workers=max(1, settings.import_.max_concurrent_tasks),
+                thread_name_prefix="import-task",
+            )
+        return _IMPORT_EXECUTOR
 
 
 def _persist(task_id: str) -> None:
@@ -108,3 +126,23 @@ def invoke_import_graph(task_id: str, local_file_path: str, local_dir: str, docu
         slots.release()
     # 说明：这里刻意不立即清理进度记录——前端仍需轮询到最终状态；内存占用由
     # task_state 的 TTL 回收（TASK_STATE_TTL_SECONDS，默认 6 小时）保证不无限增长。
+
+
+def submit_import_graph(
+    task_id: str,
+    local_file_path: str,
+    local_dir: str,
+    document_kind: str = "manual",
+    document_version: str = "",
+    valid_until: float = 0.0,
+) -> Future[None]:
+    """把导入任务提交到进程内线程池，返回 Future 便于测试与错误追踪。"""
+    return _import_executor().submit(
+        invoke_import_graph,
+        task_id=task_id,
+        local_file_path=local_file_path,
+        local_dir=local_dir,
+        document_kind=document_kind,
+        document_version=document_version,
+        valid_until=valid_until,
+    )

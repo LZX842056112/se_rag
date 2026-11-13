@@ -27,7 +27,7 @@ from app.api.schema.import_schema import (
     TaskActionResponseSchema,
     UploadResponseSchema,
 )
-from app.rag.import_.pipeline import invoke_import_graph
+from app.rag.import_.pipeline import submit_import_graph
 from app.rag.import_.task_records import (
     delete_task_artifacts,
     find_source_file,
@@ -64,6 +64,8 @@ _STATE_CHANGE_LOCK = threading.Lock()
 _ALLOWED_SUFFIXES = (".md", ".pdf")
 # 文件头嗅探读取的字节数
 _HEAD_BYTES = 1024
+# 一次请求最多接收的文件数：防止单请求塞入过多任务，压垮导入队列
+MAX_BATCH_FILES = 20
 
 
 def require_import_admin_token(x_internal_token: str = Header(default="")) -> None:
@@ -105,40 +107,31 @@ def _measure_size(upload_file: UploadFile) -> int:
         return -1
 
 
-def _check_signature(upload_file: UploadFile, suffix: str) -> None:
+def _check_signature(upload_file: UploadFile, suffix: str, label: str) -> None:
     """文件头/编码校验：只认扩展名会被「改后缀」绕过，这里做一次内容嗅探。"""
     head = _read_head(upload_file)
     if suffix == ".pdf":
         if not head.startswith(b"%PDF-"):
-            raise ApiError("file_content_mismatch", "文件内容不是有效的 PDF", status_code=422)
+            raise ApiError("file_content_mismatch", f"{label}内容不是有效的 PDF", status_code=422)
         return
     # .md：必须是可解码的 UTF-8 文本（含二进制控制字节的一律拒绝）
     if b"\x00" in head:
-        raise ApiError("file_content_mismatch", "文件内容不是有效的文本", status_code=422)
+        raise ApiError("file_content_mismatch", f"{label}内容不是有效的文本", status_code=422)
     try:
         head.decode("utf-8")
     except UnicodeDecodeError as exc:
-        raise ApiError("file_content_mismatch", "文件不是 UTF-8 文本", status_code=422) from exc
+        raise ApiError("file_content_mismatch", f"{label}不是 UTF-8 文本", status_code=422) from exc
 
 
-def validate_upload_files(files: list[UploadFile]) -> UploadFile:
-    """校验上传列表并返回唯一待处理文件。
-
-    顺序：文件数 → 文件名 → 后缀 → 大小 → 文件头。任一不通过即抛 ``ApiError``。
-    """
-    if not files:
-        raise ApiError("no_files", "未收到上传文件", status_code=422)
-    if len(files) > 1:
-        # 前端是「每个文件一次请求」；历史上后端只取 files[0] 并静默丢弃其余文件
-        raise ApiError("too_many_files", "一次仅支持上传一个文件", status_code=422)
-
-    upload_file = files[0]
+def _validate_upload_file(upload_file: UploadFile, index: int) -> None:
+    """校验单个上传文件；提示里带上文件序号与名称，便于用户定位。"""
     safe_name = Path(upload_file.filename or "").name  # 仅取 basename，防路径穿越
+    label = f"第 {index} 个文件（{safe_name}）" if safe_name else f"第 {index} 个文件"
     if not safe_name or safe_name in (".", ".."):
-        raise ApiError("invalid_filename", "文件名不合法", status_code=422)
+        raise ApiError("invalid_filename", f"{label}文件名不合法", status_code=422)
     suffix = Path(safe_name).suffix.lower()
     if suffix not in _ALLOWED_SUFFIXES:
-        raise ApiError("unsupported_type", "仅支持 md / pdf 格式文件", status_code=422)
+        raise ApiError("unsupported_type", f"{label}格式不支持，仅支持 md / pdf", status_code=422)
 
     # 大小上限：IMPORT_MAX_UPLOAD_MB <= 0 表示不限制
     limit_mb = settings.import_.max_upload_mb
@@ -147,12 +140,30 @@ def validate_upload_files(files: list[UploadFile]) -> UploadFile:
         if size >= 0 and size > limit_mb * 1024 * 1024:
             raise ApiError(
                 "file_too_large",
-                f"文件超过 {limit_mb}MB 上限",
+                f"{label}超过 {limit_mb}MB 上限",
                 status_code=413,
             )
 
-    _check_signature(upload_file, suffix)
-    return upload_file
+    _check_signature(upload_file, suffix, label)
+
+
+def validate_upload_files(files: list[UploadFile]) -> list[UploadFile]:
+    """整批校验上传文件；任一文件不通过即整批拒绝。
+
+    顺序：文件数 → 文件名 → 后缀 → 大小 → 文件头。全部通过才返回原列表。
+    """
+    if not files:
+        raise ApiError("no_files", "未收到上传文件", status_code=422)
+    if len(files) > MAX_BATCH_FILES:
+        raise ApiError(
+            "too_many_files",
+            f"一次最多上传 {MAX_BATCH_FILES} 个文件",
+            status_code=422,
+        )
+
+    for index, upload_file in enumerate(files, start=1):
+        _validate_upload_file(upload_file, index)
+    return files
 
 
 @router.post(
@@ -161,47 +172,71 @@ def validate_upload_files(files: list[UploadFile]) -> UploadFile:
     dependencies=[Depends(require_import_admin_token)],
 )
 def upload(background_tasks: BackgroundTasks, files: list[UploadFile], document_kind: Annotated[Literal["manual", "policy"], Form()] = "manual", document_version: Annotated[str, Form(max_length=128)] = "", valid_until: Annotated[float, Form(allow_inf_nan=False)] = 0.0) -> UploadResponseSchema:
-    """上传单个文件并异步执行导入流程。
+    """上传一批文件，并为每个文件创建独立的导入任务。
 
-    入口即校验鉴权、文件数、扩展名、大小与文件头，避免「已完成但未入库」的静默成功。
+    入口先整批校验（鉴权、文件名、后缀、大小、文件头）；任一文件不通过则不创建
+    任何任务。逐文件落盘建任务，中途落盘失败时清理本批已建任务与目录。
+    全部落盘后先置为排队中，再提交进程内线程池并行执行。
     """
     if document_kind == "policy" and (not document_version.strip() or valid_until <= time.time()):
         raise ApiError("policy_metadata_required", "业务政策必须填写版本和未来的失效时间", 422)
-    upload_file = validate_upload_files(files)
-    safe_name = Path(upload_file.filename or "").name
+    upload_files = validate_upload_files(files)
 
-    task_id = str(uuid.uuid4())
-    local_dir = PROJECT_ROOT / "output" / datetime.now().strftime("%Y%m%d") / task_id
-    local_dir.mkdir(parents=True, exist_ok=True)
-    local_file_path = local_dir / safe_name
-
+    # (task_id, 任务目录, 本地文件路径)；落盘失败时按此清单回滚
+    created: list[tuple[str, Path, Path]] = []
     try:
-        add_running_task(task_id, "upload_file")
-        with local_file_path.open("wb") as buffer:
-            shutil.copyfileobj(upload_file.file, buffer)
-        # 记录上传参数：失败重试时要还原资料类型、版本与失效时间
-        save_task_meta(
-            local_dir,
-            file_name=safe_name,
+        for upload_file in upload_files:
+            safe_name = Path(upload_file.filename or "").name
+            task_id = str(uuid.uuid4())
+            local_dir = PROJECT_ROOT / "output" / datetime.now().strftime("%Y%m%d") / task_id
+            local_dir.mkdir(parents=True, exist_ok=True)
+            local_file_path = local_dir / safe_name
+            created.append((task_id, local_dir, local_file_path))
+
+            add_running_task(task_id, "upload_file")
+            with local_file_path.open("wb") as buffer:
+                shutil.copyfileobj(upload_file.file, buffer)
+            # 记录上传参数：失败重试时要还原资料类型、版本与失效时间
+            save_task_meta(
+                local_dir,
+                file_name=safe_name,
+                document_kind=document_kind,
+                document_version=document_version,
+                valid_until=valid_until,
+            )
+            add_done_task(task_id, "upload_file")
+    except OSError as exc:
+        logger.exception(f"文件落盘失败：{exc}")
+        # 整批拒绝：任一文件落盘失败时清掉本批已建任务与目录，避免半批残留
+        for task_id, local_dir, _ in created:
+            clear_task(task_id)
+            shutil.rmtree(local_dir, ignore_errors=True)
+        raise ApiError("save_failed", "文件保存失败，请重试", status_code=500) from exc
+
+    # 先置为排队中：任务在线程池队列里等待，前端不会把空状态误判为「状态不可用」
+    for task_id, _, _ in created:
+        update_task_status(task_id, TASK_STATUS_PENDING)
+
+    for task_id, local_dir, local_file_path in created:
+        background_tasks.add_task(
+            submit_import_graph,
+            task_id=task_id,
+            local_file_path=str(local_file_path),
+            local_dir=str(local_dir),
             document_kind=document_kind,
             document_version=document_version,
             valid_until=valid_until,
         )
-        add_done_task(task_id, "upload_file")
-    except OSError as exc:
-        logger.exception(f"文件落盘失败：{exc}")
-        raise ApiError("save_failed", "文件保存失败", status_code=500) from exc
 
-    background_tasks.add_task(
-        invoke_import_graph,
-        task_id=task_id,
-        local_file_path=str(local_file_path),
-        local_dir=str(local_dir),
-        document_kind=document_kind,
-        document_version=document_version,
-        valid_until=valid_until,
+    if len(created) == 1:
+        message = f"{upload_files[0].filename} 文件上传成功"
+    else:
+        message = f"{len(created)} 个文件上传成功"
+    return UploadResponseSchema(
+        code=200,
+        message=message,
+        task_ids=[task_id for task_id, _, _ in created],
     )
-    return UploadResponseSchema(code=200, message=f"{upload_file.filename} 文件上传成功", task_ids=[task_id])
 
 
 @router.get(
@@ -297,7 +332,7 @@ def retry_import(task_id: str, background_tasks: BackgroundTasks) -> TaskActionR
         save_snapshot(task_id, snapshot(task_id))
 
     background_tasks.add_task(
-        invoke_import_graph,
+        submit_import_graph,
         task_id=task_id,
         local_file_path=str(source_file),
         local_dir=str(task_dir),
