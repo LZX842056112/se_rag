@@ -44,6 +44,18 @@ def test_buffered_events_are_replayed_after_subscribe():
     assert "event: close" in joined
 
 
+def test_buffered_close_ends_stream_after_error():
+    session_id = "sess-buffered-error"
+    drop_channel(session_id)
+    publish(session_id, SSEEvent.ERROR, {"code": "query_failed"})
+    publish(session_id, SSEEvent.CLOSE, {})
+    publish(session_id, SSEEvent.DELTA, {"delta": "late"})
+
+    chunks = asyncio.run(_collect(session_id, 4))
+
+    assert [chunk.splitlines()[0] for chunk in chunks] == ["event: ready", "event: error", "event: close"]
+
+
 def test_missing_channel_reports_error_event():
     drop_channel("sess-missing")
     chunks = asyncio.run(_collect("sess-missing", 1))
