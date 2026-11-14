@@ -15,13 +15,15 @@ from app.process.query.agent.state import QueryGraphState
 from app.rag.query.intent_route_service import OUT_OF_SCOPE
 from app.rag.query.web_search_service import should_search_web
 from app.shared.runtime.logger import logger
+from app.shared.runtime.workflow_monitor import observe
 from app.shared.config import settings
 from app.rag.agentic.budget import selected_mode
 
 
 def node_agentic(state):
     from app.rag.agentic.controller import run_agentic
-    return run_agentic(state)
+    with observe("node_agentic"):
+        return run_agentic(state)
 
 
 def search_embedding_and_web(state):

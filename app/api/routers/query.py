@@ -7,7 +7,7 @@ from fastapi import APIRouter, BackgroundTasks, Request
 from fastapi.responses import StreamingResponse
 
 from app.api.errors import ApiError
-from app.api.session_access import authorize_session
+from app.api.session_access import authorize_session, session_owner_hash
 from app.api.schema.query_schema import (
     HistoryClearResponseSchema,
     HistoryItemResponseSchema,
@@ -24,6 +24,7 @@ from app.rag.query.pipeline import invoke_query_graph
 from app.rag.query.lifecycle import reserve_query, query_is_active
 from app.shared.clients.history_repository import history_repository
 from app.shared.runtime.logger import logger
+from app.shared.runtime.workflow_monitor import Run, query_scope
 from app.shared.utils.sse_broker import stream_events
 from app.shared.utils.task_state import get_done_task_list, snapshot as task_snapshot
 
@@ -45,6 +46,8 @@ def query(background_tasks: BackgroundTasks, query_params: QueryRequestSchema, r
     is_stream = query_params.is_stream
     queued_at = getattr(request.state, "query_received_at", None) if request else None
     turn_id = reserve_query(session_id, query_params.query)
+    monitor = Run(query_scope(session_id, session_owner_hash(request)), turn_id)
+    monitor.begin("pending", "问答")
 
     if is_stream:
         background_tasks.add_task(
@@ -55,6 +58,7 @@ def query(background_tasks: BackgroundTasks, query_params: QueryRequestSchema, r
             rewrite_hint=query_params.rewrite_hint,
             turn_id=turn_id,
             queued_at=queued_at,
+            monitor=monitor,
         )
         return QueryStreamResponseSchema(message=f"已开始查询:{query_params.query}", session_id=session_id, turn_id=turn_id)
 
@@ -65,6 +69,7 @@ def query(background_tasks: BackgroundTasks, query_params: QueryRequestSchema, r
         rewrite_hint=query_params.rewrite_hint,
         turn_id=turn_id,
         queued_at=queued_at,
+        monitor=monitor,
     )
     if state is None:
         raise ApiError("query_failed", "查询流程执行失败", status_code=500)

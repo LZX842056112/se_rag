@@ -18,13 +18,15 @@ from __future__ import annotations
 import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
+from pathlib import Path
 
 from app.process.import_.agent.main_graph import import_app
 from app.process.import_.agent.state import ImportGraphState, create_default_state
 from app.rag.import_.errors import classify_error, is_retryable
 from app.shared.config import settings
 from app.shared.runtime.logger import logger
-from app.shared.utils.task_snapshot import save_snapshot
+from app.shared.runtime.workflow_monitor import IMPORT, Run
+from app.shared.utils.task_snapshot import load_snapshot, save_snapshot
 from app.shared.utils.task_state import (
     TASK_STATUS_COMPLETED,
     TASK_STATUS_FAILED,
@@ -151,11 +153,11 @@ def _import_executor() -> ThreadPoolExecutor:
         return _IMPORT_EXECUTOR
 
 
-def _persist(task_id: str) -> None:
+def _persist(task_id: str, monitor: Run) -> None:
     """把当前内存状态落盘（失败只告警，不影响任务执行）。"""
     payload = snapshot(task_id)
     if payload:
-        save_snapshot(task_id, payload)
+        save_snapshot(task_id, {**payload, "workflow_attempt": monitor.data.get("attempt", 1)})
 
 
 def _run_graph_once(state: ImportGraphState) -> None:
@@ -168,16 +170,21 @@ def _run_graph_once(state: ImportGraphState) -> None:
 
 def invoke_import_graph(task_id: str, local_file_path: str, local_dir: str, document_kind: str = "manual", document_version: str = "", valid_until: float = 0.0) -> None:
     """执行一次导入：抢并发名额 → 跑图（可重试）→ 落状态与快照。"""
+    monitor = Run(IMPORT, task_id)
+    if not monitor.data:
+        saved = load_snapshot(task_id) or {}
+        monitor.begin("pending", Path(local_file_path).name, previous_attempt=max(0, saved.get("workflow_attempt", 1) - 1))
     if not _acquire_slot(task_id):
         update_task_status(task_id, TASK_STATUS_FAILED)
         set_task_error(task_id, "import_busy", "导入并发已满，等待名额超时")
-        _persist(task_id)
+        monitor.status("failed", error_code="import_busy")
+        _persist(task_id, monitor)
         logger.warning(f"导入任务[{task_id}]放弃：等待导入名额超时")
         return
 
     try:
         update_task_status(task_id, TASK_STATUS_PROCESSING)
-        _persist(task_id)
+        _persist(task_id, monitor)
 
         state: ImportGraphState = create_default_state(
             task_id=task_id, local_file_path=local_file_path, local_dir=local_dir,
@@ -187,10 +194,18 @@ def invoke_import_graph(task_id: str, local_file_path: str, local_dir: str, docu
         attempts = max(1, settings.import_.max_retry_attempts)
         for attempt in range(1, attempts + 1):
             try:
-                _run_graph_once(state)
+                if attempt == 1:
+                    monitor.status("processing")
+                else:
+                    monitor.begin("processing", keep=("upload_file", "__start__"))
+                    _persist(task_id, monitor)
+                monitor.node("__start__", "completed")
+                with monitor.activate():
+                    _run_graph_once(state)
             except Exception as exc:  # noqa: BLE001 - 统一分类后落状态
                 code, message = classify_error(exc)
                 if is_retryable(code) and attempt < attempts:
+                    monitor.status("retrying", error_code=code)
                     logger.warning(
                         f"导入任务[{task_id}]第 {attempt}/{attempts} 次失败（{code}），"
                         f"退避后重试：{message}"
@@ -201,12 +216,14 @@ def invoke_import_graph(task_id: str, local_file_path: str, local_dir: str, docu
                 logger.exception(f"导入任务[{task_id}]失败（{code}）：{message}")
                 update_task_status(task_id, TASK_STATUS_FAILED)
                 set_task_error(task_id, code, message)
-                _persist(task_id)
+                monitor.status("failed", error_code=code)
+                _persist(task_id, monitor)
                 return
 
             update_task_status(task_id, TASK_STATUS_COMPLETED)
             set_task_error(task_id, "", "")
-            _persist(task_id)
+            monitor.status("completed")
+            _persist(task_id, monitor)
             return
     finally:
         _release_slot(task_id)

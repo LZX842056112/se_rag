@@ -23,6 +23,17 @@ def snapshot_path(task_id: str) -> Path:
     return _SNAPSHOT_DIR / f"{task_id}.json"
 
 
+def recent_snapshot_ids(cutoff: float):
+    """Yield task IDs and modification times for snapshots inside the retention window."""
+    for path in _SNAPSHOT_DIR.glob("*.json"):
+        try:
+            timestamp = path.stat().st_mtime
+        except FileNotFoundError:
+            continue
+        if timestamp > cutoff:
+            yield path.stem, timestamp
+
+
 def save_snapshot(task_id: str, payload: dict[str, Any]) -> None:
     """写入任务快照（失败仅告警）。"""
     if not task_id:

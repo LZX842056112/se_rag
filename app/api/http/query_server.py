@@ -20,6 +20,7 @@ from app.api.routers import evolution as evolution_router
 from app.api.routers import health as health_router
 from app.api.routers import pages as pages_router
 from app.api.routers import query as query_router
+from app.api.routers import workflows as workflows_router
 from app.evolution.leader import scheduler_leader_loop
 from app.evolution.scheduler import evolution_scheduler_loop
 from app.evolution.flags import writes_enabled
@@ -139,6 +140,7 @@ async def record_query_arrival(request: Request, call_next):
 
 app.include_router(query_router.router)
 app.include_router(evolution_router.router)
+app.include_router(workflows_router.query_router)
 app.include_router(health_router.router)
 app.include_router(pages_router.query_pages_router)
 app.include_router(pages_router.static_router)

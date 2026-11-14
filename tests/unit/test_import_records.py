@@ -93,6 +93,9 @@ def test_retry_resubmits_failed_task_with_original_file(task_dir, monkeypatch):
     assert recorded["saved"] == [task_id]
     # 重新提交后状态应立刻是 pending，第二个重试请求会因此被拒绝
     assert get_task_status(task_id) == TASK_STATUS_PENDING
+    from app.shared.runtime.workflow_events import get_run
+    from app.shared.runtime.workflow_monitor import IMPORT
+    assert get_run(IMPORT, task_id)["attempt"] == 2
 
 
 def test_retry_uses_pdf_not_derived_markdown_when_meta_missing(task_dir, monkeypatch):

@@ -8,6 +8,7 @@ from bson import ObjectId
 from app.evolution.models import KnowledgeCandidate
 from app.evolution.repositories import evolution_repo
 from app.evolution.gap.registration import registration_fields, require_current_claim
+from app.shared.runtime.workflow_monitor import candidate_changed
 
 
 def store_candidate(candidate: KnowledgeCandidate) -> dict:
@@ -16,6 +17,7 @@ def store_candidate(candidate: KnowledgeCandidate) -> dict:
     if not candidate.gap_id:
         doc = candidate.model_dump()
         doc["_id"] = collection.insert_one(doc).inserted_id
+        candidate_changed()
         return doc
     existing = collection.find_one({"gap_id": candidate.gap_id})
     if existing:

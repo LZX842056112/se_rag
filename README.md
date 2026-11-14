@@ -16,7 +16,7 @@
 | 问答 | 流式 SSE / 非流式；引用、页码、章节面包屑、接地性；历史持久化；刷新后恢复 |
 | Agentic | 受限状态机；工具预算；证据校验；先评估后起草，起草后核验 |
 | 知识自进化 | 反馈收集、缺口分级、候选生成、人工审批、发布/下架、召回保护、回测止损、参数自调 |
-| 运维页面 | 客服对话页、文件导入页、自进化审批页 |
+| 运维页面 | 客服对话页、文件导入页、自进化审批页、实时流程监控页 |
 
 ## 界面预览
 
@@ -177,8 +177,13 @@ uv run uvicorn app.api.http.query_server:app --host 0.0.0.0 --port 8001 --worker
 | 客服对话 | `http://127.0.0.1:8001/` | 提问、流式输出、引用、反馈、历史 |
 | 文件导入 | `http://127.0.0.1:8000/import` | 上传、进度、日志、失败重试、删除记录 |
 | 自进化审批 | `http://127.0.0.1:8001/approval` | 候选、缺口、问题、闭环状态、试用指标 |
+| 流程监控 | `http://127.0.0.1:8001/workflows` | 文件导入、问答、调度轮次、候选生命周期 |
 
 导入页需要填写 `IMPORT_ADMIN_TOKEN`。审批页需要填写 `EVOLUTION_ADMIN_TOKEN`。两个令牌相互独立。
+
+从对话页或审批页打开「流程监控」。选择一个流程，再选择运行记录。运行中的节点会高亮。页面自动接收节点状态，并在断线后重新连接。问答视图需要启用会话归属校验，并使用当前浏览器的会话。导入视图使用导入令牌。调度轮次和候选生命周期使用自进化管理令牌。
+
+两个服务默认通过 `127.0.0.1` 和现有服务端口连接。分开部署时，在问答服务设置 `WORKFLOW_IMPORT_ORIGIN`，在导入服务设置 `WORKFLOW_QUERY_ORIGIN`。例如，设置为内部服务地址 `http://import:8000` 和 `http://query:8001`。允许代理实时转发 `text/event-stream` 响应。多 worker 部署时，两个服务使用同一个 Redis。
 
 ## 关键配置
 
@@ -366,7 +371,7 @@ uv run pytest
 E2E_ENABLED=1 uv run pytest -m e2e tests/e2e -s
 
 # 前端脚本测试（Node 18+，使用 node:test）
-node --test tests/frontend
+node --test 'tests/frontend/*.test.cjs'
 ```
 
 离线单测通过 `tests/conftest.py` 的 `offline_guard` 禁止真实 Mongo / Milvus / MinIO / Redis 连接。

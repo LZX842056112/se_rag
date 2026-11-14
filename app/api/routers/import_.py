@@ -38,6 +38,7 @@ from app.rag.import_.task_records import (
 )
 from app.shared.config import settings
 from app.shared.runtime.logger import logger
+from app.shared.runtime.workflow_monitor import IMPORT, Run
 from app.shared.utils.paths import PROJECT_ROOT
 from app.shared.utils.task_snapshot import delete_snapshot, load_snapshot, save_snapshot
 from app.shared.utils.task_state import (
@@ -193,6 +194,10 @@ def upload(background_tasks: BackgroundTasks, files: list[UploadFile], document_
             local_file_path = local_dir / safe_name
             created.append((task_id, local_dir, local_file_path))
 
+            monitor = Run(IMPORT, task_id)
+            monitor.begin("uploading", safe_name)
+            monitor.node("__start__", "completed")
+            monitor.node("upload_file", "running")
             add_running_task(task_id, "upload_file")
             with local_file_path.open("wb") as buffer:
                 shutil.copyfileobj(upload_file.file, buffer)
@@ -205,17 +210,21 @@ def upload(background_tasks: BackgroundTasks, files: list[UploadFile], document_
                 valid_until=valid_until,
             )
             add_done_task(task_id, "upload_file")
+            monitor.node("upload_file", "completed")
     except OSError as exc:
         logger.exception(f"文件落盘失败：{exc}")
         # 整批拒绝：任一文件落盘失败时清掉本批已建任务与目录，避免半批残留
         for task_id, local_dir, _ in created:
             clear_task(task_id)
+            Run(IMPORT, task_id).remove()
             shutil.rmtree(local_dir, ignore_errors=True)
         raise ApiError("save_failed", "文件保存失败，请重试", status_code=500) from exc
 
     # 先置为排队中：任务在线程池队列里等待，前端不会把空状态误判为「状态不可用」
     for task_id, _, _ in created:
         update_task_status(task_id, TASK_STATUS_PENDING)
+        Run(IMPORT, task_id).status("pending")
+        save_snapshot(task_id, snapshot(task_id))
 
     for task_id, local_dir, local_file_path in created:
         background_tasks.add_task(
@@ -329,7 +338,10 @@ def retry_import(task_id: str, background_tasks: BackgroundTasks) -> TaskActionR
         # 清掉上一轮的进度与快照，再把状态置为排队中：第二个重试请求会看到 pending 而被拒绝
         clear_task(task_id)
         update_task_status(task_id, TASK_STATUS_PENDING)
-        save_snapshot(task_id, snapshot(task_id))
+        monitor = Run(IMPORT, task_id)
+        saved = {} if monitor.data else load_snapshot(task_id) or {}
+        monitor.begin("pending", source_file.name, keep=("upload_file",), previous_attempt=saved.get("workflow_attempt", 1))
+        save_snapshot(task_id, {**snapshot(task_id), "workflow_attempt": monitor.data.get("attempt", 2)})
 
     background_tasks.add_task(
         submit_import_graph,
@@ -364,6 +376,7 @@ def delete_import_record(task_id: str) -> TaskActionResponseSchema:
 
         clear_task(task_id)
         delete_snapshot(task_id)
+        Run(IMPORT, task_id).remove()
         delete_task_artifacts(task_id)
     logger.info(f"导入记录已删除：task_id={task_id}")
     return TaskActionResponseSchema(code=200, message="导入记录已删除", task_id=task_id)

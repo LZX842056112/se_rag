@@ -186,8 +186,11 @@ def index_chunks(state: dict) -> dict:
     from app.evolution.governance import invalidate_document
     from app.evolution.flags import recall_enabled, writes_enabled
     if recall_enabled() or writes_enabled():
-        for source_doc_id in {str(row.get('doc_id')) for row in rows if row.get('doc_id')}:
-            invalidate_document(source_doc_id)
+        from app.shared.runtime.workflow_monitor import forward_candidate_updates
+
+        with forward_candidate_updates():
+            for source_doc_id in {str(row.get('doc_id')) for row in rows if row.get('doc_id')}:
+                invalidate_document(source_doc_id)
     new_ids = {str(row["chunk_id"]) for row in rows}
 
     # 1) 先写：分批 upsert

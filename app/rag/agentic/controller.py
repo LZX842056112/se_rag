@@ -16,6 +16,7 @@ from app.rag.agentic.budget import Budget, StopRun, local_tokenizer
 from app.rag.query.eval_evidence import chunk_ids
 from app.shared.config import settings
 from app.shared.runtime.query_metrics import measure_stage
+from app.shared.runtime.workflow_monitor import node_status, observe
 
 
 class Action(BaseModel):
@@ -355,10 +356,17 @@ def _doc(row):
     return evidence_to_doc(row)
 
 
-def _node(stage):
+def _node(name, stage):
     """把 Run 的阶段方法包装成 LangGraph 节点：节点只负责调用并回写 state。"""
     def invoke(state):
-        state['runtime'].step(stage)
+        run = state['runtime']
+        node_id = 'agentic:' + name
+        with observe(node_id):
+            run.step(stage)
+            if run.route == 'finish':
+                if run.trace and run.trace[-1].get('stage') == stage and run.trace[-1].get('error'):
+                    node_status(node_id, 'failed')
+                node_status('agentic:__end__', 'completed')
         return state
     return invoke
 
@@ -374,15 +382,20 @@ def _build_graph():
     # 阶段名 -> Run 上的方法名；execute 方法名与阶段名不一致，故单独映射
     stages = {'bootstrap': 'bootstrap', 'assess': 'assess', 'select': 'select',
               'execute': 'execute_action', 'draft': 'draft', 'verify': 'verify'}
+    routes = {
+        'bootstrap': ('assess',), 'assess': ('draft', 'select'),
+        'select': ('select', 'draft', 'execute'), 'execute': ('assess',),
+        'draft': ('verify',), 'verify': ('draft',),
+    }
     for name, method in stages.items():
         # 每个阶段注册为独立节点，节点执行对应 Run 方法并回写 state
-        graph.add_node(name, _node(method))
+        graph.add_node(name, _node(name, method))
     graph.set_entry_point('bootstrap')  # 从首轮搜索开始
     for name in stages:
         # 条件边：读每个运行实例的 route 字段，跳到同名节点或 finish 结束；
         # 映射表 diff 展开后形如 {bootstrap:.., assess:.., ..., finish:END}
         graph.add_conditional_edges(name, lambda s: s['runtime'].route,
-                                    {**{key: key for key in stages}, 'finish': END})
+                                    {**{key: key for key in routes[name]}, 'finish': END})
     return graph.compile()
 
 
@@ -416,6 +429,7 @@ def run_agentic(state, *, tools=None, model=None, budget=None, persist=True):
         run.halt('business_policy')
     else:
         # 以 Run 实例为图状态运行；最大递归 64 层防止无限循环
+        node_status('agentic:__start__', 'completed')
         _graph.invoke({'runtime': run}, config={'recursion_limit': 64})
     if run.reason == 'answered':
         # 核验通过：采用最终答案并收集证据清单；策略有效性可能在模型请求中变化，故再次应用

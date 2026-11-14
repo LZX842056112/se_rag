@@ -13,6 +13,7 @@ from app.rag.query.business import classify_business
 from app.shared.clients.mongo import get_collection
 from app.shared.config import settings
 from app.shared.runtime.logger import logger
+from app.shared.runtime.workflow_monitor import candidate_changed
 from app.shared.utils.answer import is_no_answer
 
 
@@ -82,12 +83,14 @@ def _resolve_strategy_gap(issue: dict) -> None:
     gap_id = issue.get("gap_id")
     if not ObjectId.is_valid(gap_id):
         return
-    get_collection(settings.mongo.k_gaps_collection).update_one({
+    result = get_collection(settings.mongo.k_gaps_collection).update_one({
         "_id": ObjectId(gap_id), "session_id": issue.get("session_id"),
         "issue_id": str(issue["_id"]), "status": "strategy_pending",
     }, {"$set": {"status": "resolved", "resolved_at": issue.get("completed_at"),
                  "resolved_by_issue_id": str(issue["_id"]),
                  "processing_reason": "策略待办已完成：" + (issue.get("resolution") or "")}})
+    if result.modified_count:
+        candidate_changed()
 
 
 def update_issue(issue_id: str, *, owner: str, status: str, resolution: str) -> tuple[bool, str]:
@@ -134,6 +137,7 @@ def update_issue(issue_id: str, *, owner: str, status: str, resolution: str) -> 
         if status == "resolved":
             for row in members:
                 _resolve_strategy_gap({**row, **patch})
+        candidate_changed()
         return True, ""
     except Exception as exc:
         logger.warning(f"更新待办失败：{exc}")
