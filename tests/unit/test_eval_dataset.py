@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -59,13 +60,65 @@ def test_invalid_json_rejected(tmp_path):
         load_cases(path)
 
 
+def test_load_behavior_expectations(tmp_path):
+    path = _write(tmp_path, [_case(
+        "a", expected_outcome="clarification", required_answer_terms=[" 型号 "],
+        forbidden_answer_terms=["重置"],
+    )])
+
+    case = load_cases(path)[0]
+    assert case.expected_outcome == "clarification"
+    assert case.required_answer_terms == ("型号",)
+    assert case.forbidden_answer_terms == ("重置",)
+
+
+@pytest.mark.parametrize(("field", "value"), [
+    ("expected_outcome", "refused"),
+    ("expected_outcome", []),
+    ("expected_item_names", "产品"),
+    ("required_answer_terms", ["正确", " "]),
+    ("forbidden_answer_terms", [4]),
+])
+def test_reject_malformed_behavior_annotations(tmp_path, field, value):
+    path = _write(tmp_path, [_case("a", **{field: value})])
+
+    with pytest.raises(DatasetError, match=field):
+        load_cases(path)
+
+
+def test_equivalent_chunks_must_belong_to_one_annotated_fact(tmp_path):
+    case = _case("a", gold_chunk_ids=["first", "second"], chunk_equivalents={"first": ["another"]})
+    assert load_cases(_write(tmp_path, [case]))[0].chunk_equivalents == (("first", ("another",)),)
+
+    for invalid in ({"missing": ["another"]}, {"first": ["second"]}, {"first": ["x"], "second": ["x"]}):
+        with pytest.raises(DatasetError, match="chunk_equivalents"):
+            load_cases(_write(tmp_path, [{**case, "chunk_equivalents": invalid}]))
+
+
+def test_sample_wireless_questions_use_the_supported_model():
+    path = Path(__file__).resolve().parents[2] / "app" / "rag_eval" / "datasets" / "sample_cases.json"
+    cases = {case.case_id: case for case in load_cases(path)}
+    for suffix in ("071", "072", "075"):
+        case = cases[f"eval_20261112_{suffix}"]
+        assert "HL-3070CW" in case.question
+        assert "HL-3040CN" not in case.question
+
+
 def test_sample_dataset_covers_required_scenarios():
     """示例集必须覆盖正常场景与边界场景，且 case_id 唯一。"""
     path = Path(__file__).resolve().parents[2] / "app" / "rag_eval" / "datasets" / "sample_cases.json"
     cases = load_cases(path)
     tags = {tag for case in cases for tag in case.tags}
-    assert len(cases) == 100
+    assert len(cases) == 300
     assert len({case.case_id for case in cases}) == len(cases)
+    assert len({case.question for case in cases}) == len(cases)
+    assert Counter(case.expected_outcome for case in cases) == {
+        "answered": 270,
+        "clarification": 8,
+        "handoff": 8,
+        "out_of_scope": 8,
+        "chitchat": 6,
+    }
     for required in (
         "参数设置", "故障排查", "操作步骤", "维护保养",
         "边界-模糊输入", "边界-超范围", "边界-否定问题", "边界-长输入",
@@ -73,12 +126,12 @@ def test_sample_dataset_covers_required_scenarios():
         assert required in tags, f"缺少场景：{required}"
 
     items = {name for case in cases for name in case.expected_item_names}
-    assert len(items) >= 10, f"主体覆盖不足：{len(items)}"
+    assert len(items) == 20, f"主体数不符：{len(items)}"
 
-    # 超范围与否定问题不标注切片，避免把「知识库不覆盖」误算成检索失败
     for case in cases:
-        if set(case.tags) & {"边界-超范围", "边界-否定问题"}:
-            assert case.gold_chunk_ids == (), f"{case.case_id} 不应标注 gold_chunk_ids"
-
-    annotated = [case for case in cases if case.gold_chunk_ids]
-    assert len(annotated) >= 80, f"可计算检索指标的题太少：{len(annotated)}"
+        if case.expected_outcome == "answered":
+            assert case.expected_item_names, case.case_id
+            assert case.must_hit_chunk_ids, case.case_id
+            assert set(case.must_hit_chunk_ids) <= set(case.gold_chunk_ids), case.case_id
+        else:
+            assert not case.gold_chunk_ids and not case.must_hit_chunk_ids, case.case_id

@@ -8,6 +8,7 @@ from app.rag_eval.retrieval_metrics import (
     aggregate,
     evaluate_case,
     mrr_at_k,
+    must_hit_rate,
     ndcg_at_k,
     precision_at_k,
     recall_at_k,
@@ -73,3 +74,36 @@ def test_evaluate_case_and_aggregate_layers():
 def test_ndcg_in_valid_range(k):
     value = ndcg_at_k(["a", "b", "c"], ["b"], k)
     assert 0.0 <= value <= 1.0
+
+
+def test_retrieval_metrics_count_duplicate_hits_once_without_promoting_later_ranks():
+    retrieved = ["a", "a", "b"]
+    gold = ["a", "b"]
+    assert precision_at_k(retrieved, gold, 5) == 0.4
+    assert recall_at_k(retrieved, gold, 2) == 0.5
+    assert must_hit_rate(retrieved, gold, 2) == 0.5
+    assert ndcg_at_k(retrieved, gold, 3) < 1
+
+
+def test_equivalent_evidence_preserves_rank_and_requires_distinct_facts():
+    case = EvalCase.from_dict({
+        "case_id": "c1", "question": "q", "ground_truth": "g",
+        "gold_chunk_ids": ["a", "b"], "must_hit_chunk_ids": ["a", "b"],
+        "chunk_equivalents": {"a": ["another-a"]},
+    })
+    metrics = evaluate_case({"final": ["another-a", "a", "b"]}, case, (2, 3))["final"]
+    assert metrics["mrr@2"] == 1
+    assert metrics["precision@2"] == 0.5
+    assert metrics["must_hit@2"] == 0.5
+    assert metrics["recall@3"] == 1
+    assert metrics["must_hit@3"] == 1
+
+
+def test_skipped_layer_has_no_score_but_executed_empty_layer_scores_zero():
+    case = EvalCase("c1", "q", "g", gold_chunk_ids=("a",))
+    scored = evaluate_case({"agentic_retrieval": ["a"], "final": []}, case, (5,))
+    summary = aggregate([{"retrieval": scored}], (5,))
+    assert "reranked" not in scored
+    assert "reranked" not in summary
+    assert summary["agentic_retrieval"]["recall@5"] == 1
+    assert summary["final"]["recall@5"] == 0

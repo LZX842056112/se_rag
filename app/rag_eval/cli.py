@@ -8,13 +8,15 @@
 from __future__ import annotations
 
 import argparse
+import math
 import sys
 from pathlib import Path
 
-from app.rag_eval.config import EvalConfig
+from app.rag_eval.config import DEFAULT_MAX_DROP, DEFAULT_MAX_LATENCY_INCREASE_MS, EvalConfig
 from app.rag_eval.report import (
     compare_reports,
     load_report,
+    render_comparison,
     render_markdown,
     save_baseline,
     write_report,
@@ -25,6 +27,21 @@ from app.rag_eval.runner import timed_run
 def _parse_ks(value: str) -> tuple[int, ...]:
     items = [int(item.strip()) for item in value.split(",") if item.strip()]
     return tuple(sorted({item for item in items if item > 0})) or (5,)
+
+
+def _non_negative(value: str) -> float:
+    number = float(value)
+    if not math.isfinite(number) or number < 0:
+        raise argparse.ArgumentTypeError("阈值必须是大于或等于零的有限数值")
+    return number
+
+
+def _comparison_options(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--max-drop", default=DEFAULT_MAX_DROP, type=_non_negative, help="质量分数下降阈值")
+    parser.add_argument(
+        "--max-latency-increase-ms", default=DEFAULT_MAX_LATENCY_INCREASE_MS,
+        type=_non_negative, help="延迟增加阈值，单位毫秒",
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -42,18 +59,18 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--tags", default="", help="只跑指定标签，逗号分隔")
     run.add_argument("--no-ragas", action="store_true", help="跳过 RAGAS 生成指标")
     run.add_argument("--baseline", type=Path, help="运行后与该基线对比")
-    run.add_argument("--max-drop", default=0.02, type=float, help="回归阈值")
+    _comparison_options(run)
     run.add_argument("--save-baseline", type=Path, help="把本次结果保存为基线")
     run.add_argument("--fail-on-regression", action="store_true")
 
     compare = sub.add_parser("compare", help="对比两份报告")
     compare.add_argument("--baseline", required=True, type=Path)
     compare.add_argument("--current", required=True, type=Path)
-    compare.add_argument("--max-drop", default=0.02, type=float)
+    _comparison_options(compare)
 
     args = parser.parse_args(argv)
     if args.command == "compare":
-        return _compare(args.baseline, args.current, args.max_drop)
+        return _compare(args)
     return _run(args)
 
 
@@ -70,53 +87,53 @@ def _run(args) -> int:
         run_ragas=not args.no_ragas,
         max_drop=args.max_drop,
         tags=tags,
+        max_latency_increase_ms=args.max_latency_increase_ms,
     )
+    comparison = None
     try:
-        report = timed_run(config, progress=print)
+        report = timed_run(config, progress=lambda message: print(message, flush=True))
+        if args.baseline:
+            comparison = compare_reports(
+                load_report(args.baseline), report, config.max_drop, config.max_latency_increase_ms,
+            )
+            report["comparison"] = comparison
+        path = write_report(report, config.output_dir)
+        conclusion = report["summary"]["conclusion"]
+        if args.save_baseline:
+            if conclusion.get("valid_measurement", False):
+                save_baseline(report, args.save_baseline)
+                print(f"基线已保存：{args.save_baseline}")
+            else:
+                print("基线未保存。请修复执行、行为或分数覆盖率问题。", file=sys.stderr)
     except Exception as exc:  # noqa: BLE001 - CLI 统一转成可读错误与退出码
         print(f"评测失败：{exc}", file=sys.stderr)
         return 2
 
-    comparison = None
-    if args.baseline:
-        # 先对比再落盘，保证 Markdown 报告中同样能看到基线对比结论
-        comparison = compare_reports(load_report(args.baseline), report, config.max_drop)
-        report["comparison"] = comparison
-
-    path = write_report(report, config.output_dir)
     print(f"报告已写入：{path}")
     print(render_markdown(report))
-
-    if args.save_baseline:
-        save_baseline(report, args.save_baseline)
-        print(f"基线已保存：{args.save_baseline}")
-
-    if comparison is not None:
-        _print_comparison(comparison)
-        if args.fail_on_regression and comparison["regressions"]:
-            return 1
+    if conclusion["status"] in ("failed", "warning"):
+        return 1
+    if args.save_baseline and not conclusion.get("valid_measurement", False):
+        return 1
+    if args.fail_on_regression and comparison and _has_regression(comparison):
+        return 1
     return 0
 
 
-def _compare(baseline_path: Path, current_path: Path, max_drop: float) -> int:
+def _compare(args) -> int:
     try:
-        result = compare_reports(load_report(baseline_path), load_report(current_path), max_drop)
+        result = compare_reports(
+            load_report(args.baseline), load_report(args.current), args.max_drop, args.max_latency_increase_ms,
+        )
     except Exception as exc:  # noqa: BLE001
         print(f"对比失败：{exc}", file=sys.stderr)
         return 2
-    _print_comparison(result)
-    return 1 if result["regressions"] else 0
+    print("\n".join(render_comparison(result)))
+    return int(_has_regression(result) or bool(result["acceptance_failures"]))
 
 
-def _print_comparison(result: dict) -> None:
-    print("")
-    print(f"对比指标数：{result['compared_metrics']}，阈值：{result['max_drop']}")
-    for item in result["regressions"]:
-        print(f"回归  {item['metric']}: {item['baseline']} -> {item['current']} ({item['delta']:+.4f})")
-    for item in result["improvements"]:
-        print(f"提升  {item['metric']}: {item['baseline']} -> {item['current']} ({item['delta']:+.4f})")
-    if not result["regressions"] and not result["improvements"]:
-        print("没有超过阈值的指标变化")
+def _has_regression(result: dict) -> bool:
+    return result["comparable"] and bool(result["regressions"] or result["coverage_regressions"])
 
 
 if __name__ == "__main__":
