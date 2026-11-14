@@ -16,5 +16,7 @@ def search_by_embedding(state: QueryGraphState, embedding: dict[str, list] | Non
     :param embedding: 可选的已算好向量（与自进化召回共用，避免重复编码）
     """
     item_names, rewritten_query = require_query_and_items(state)
-    milvus_list = search_chunks(item_names, rewritten_query, embedding=embedding)
+    milvus_list = search_chunks(
+        item_names, rewritten_query, embedding=embedding, heading_path=state.get("requested_heading_path", ""),
+    )
     return to_chunks(milvus_list)

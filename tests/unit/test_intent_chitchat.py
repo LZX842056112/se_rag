@@ -31,6 +31,7 @@ from app.process.query.agent.state import create_query_default_state
 from app.rag.query import chitchat_service as chitchat
 from app.rag.query import history_utils
 from app.rag.query import intent_route_service as intent_svc
+from app.rag.query import item_name_confirm_service as subject_svc
 from app.rag.query import pipeline as pipeline_module
 from app.rag.query.pipeline import invoke_query_graph
 from app.shared.clients import history_repository as history_module
@@ -149,6 +150,86 @@ def test_greeting_runs_real_query_graph_without_product_lookup(monkeypatch):
     assert all(message["intent"] == "chitchat" for message in saved)
 
 
+@pytest.mark.parametrize('question', ['今天上海天气怎么样？', '帮我写一首关于春天的诗。', '公司差旅报销流程是什么？'])
+def test_explicit_out_of_scope_route_responds_without_retrieval_or_generation(monkeypatch, question):
+    from app.rag.query.eval_evidence import build_retrieval_layers
+
+    monkeypatch.setattr(intent_svc, 'CHITCHAT_ENABLED', True)
+    monkeypatch.setattr(intent_svc, 'build_chat_history_context', lambda *a, **k: '')
+    _stub_llm(monkeypatch, content='{"intent":"out_of_scope"}')
+    monkeypatch.setattr(chitchat, 'call_llm_chitchat', _boom)
+    monkeypatch.setattr('app.process.query.agent.nodes.node_item_name_confirm.confirm_item_name', _boom)
+    saved = _saved_messages(monkeypatch)
+    result = main_graph.query_app.invoke(create_query_default_state(session_id='scope', original_query=question))
+    assert result['query_outcome'] == 'out_of_scope'
+    assert result['query_mode'] == 'none'
+    assert '产品知识库' in result['answer']
+    assert build_retrieval_layers(result) == {}
+    assert [message['role'] for message in saved] == ['user', 'assistant']
+
+
+def test_classifier_timeout_reuses_subject_rewrite_to_route_clear_out_of_scope_request(monkeypatch):
+    from concurrent.futures import TimeoutError as FutureTimeout
+    from types import SimpleNamespace
+
+    calls = []
+
+    def chat(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            def timed_out(_):
+                raise FutureTimeout()
+            return SimpleNamespace(invoke=timed_out)
+
+        def rewrite(messages):
+            assert 'out_of_scope' in messages[0].content
+            return _Resp('{"item_names":[],"out_of_scope":true}')
+        return SimpleNamespace(invoke=rewrite)
+
+    monkeypatch.setattr(intent_svc, 'CHITCHAT_ENABLED', True)
+    monkeypatch.setattr(intent_svc, 'build_chat_history_context', lambda *a, **k: '')
+    monkeypatch.setattr(intent_svc.llm_providers, 'chat', chat)
+    monkeypatch.setattr(subject_svc, 'find_pending_clarify', lambda _: None)
+    monkeypatch.setattr(subject_svc, 'get_history_messages_and_context', lambda _: '')
+    monkeypatch.setattr(subject_svc, 'similar_from_query', lambda *args: [])
+    monkeypatch.setattr(chitchat, 'call_llm_chitchat', _boom)
+    saved = _saved_messages(monkeypatch)
+
+    result = main_graph.query_app.invoke(create_query_default_state(
+        session_id='scope-timeout', original_query='公司的差旅费用怎么报销？',
+    ))
+
+    assert len(calls) == 2
+    assert result['query_outcome'] == 'out_of_scope'
+    assert result['query_mode'] == 'none'
+    assert '产品知识库' in result['answer']
+    assert [(message['role'], message['intent']) for message in saved] == [
+        ('user', 'chitchat'), ('assistant', 'chitchat'),
+    ]
+
+
+@pytest.mark.parametrize(('degraded', 'reply', 'matches'), [
+    (True, '{"item_names":[],"out_of_scope":false}', []),
+    (True, '{"item_names":[],"out_of_scope":"true"}', []),
+    (True, '{"item_names":[],"out_of_scope":true}', [{'item_name': 'Brother HAK 180 烫金机'}]),
+    (False, '{"item_names":[],"out_of_scope":true}', []),
+])
+def test_scope_fallback_preserves_clarification_without_unambiguous_scope_evidence(
+    monkeypatch, degraded, reply, matches,
+):
+    _stub_llm(monkeypatch, content=reply)
+    monkeypatch.setattr(subject_svc, 'find_pending_clarify', lambda _: None)
+    monkeypatch.setattr(subject_svc, 'get_history_messages_and_context', lambda _: '')
+    monkeypatch.setattr(subject_svc, 'similar_from_query', lambda *args: matches)
+    monkeypatch.setattr(subject_svc, 'save_history_message', lambda _: None)
+    result = subject_svc.confirm_item_name(create_query_default_state(
+        session_id='scope-product', original_query='机器怎么调？', intent_classification_failed=degraded,
+    ))
+    assert result['query_outcome'] == ''
+    assert result['answer']
+    assert result['item_name_options'] == matches
+
+
 @pytest.mark.parametrize("payload,expected", [
     ('{"intent": "chitchat"}', "chitchat"),
     ('{"intent": "rag"}', "rag"),
@@ -173,14 +254,18 @@ def test_classify_translates_valid_output(monkeypatch, payload, expected):
 ])
 def test_classify_falls_back_to_rag_on_dirty_output(monkeypatch, payload):
     """脏输出一律兜底 rag：意图识别不得把原链路打死。"""
+    monkeypatch.setattr(intent_svc, 'CHITCHAT_ENABLED', True)
+    monkeypatch.setattr(intent_svc, 'build_chat_history_context', lambda *a, **k: '')
     _stub_llm(monkeypatch, content=payload)
-    assert intent_svc.call_llm_classify_intent("无对话记录!", "你好") == "rag"
+    result = intent_svc.route_intent(create_query_default_state(session_id='bad-intent', original_query='它的功率是多少？'))
+    assert result['intent'] == 'rag'
+    assert result['intent_classification_failed'] is True
 
 
 def test_classify_falls_back_when_llm_raises(monkeypatch):
     """LLM 抛异常时降级 rag，且不向上抛。"""
     _stub_llm(monkeypatch, raises=RuntimeError("模型服务不可用"))
-    assert intent_svc.call_llm_classify_intent("无对话记录!", "你好") == "rag"
+    assert intent_svc.call_llm_classify_intent("无对话记录!", "你好") is None
 
 
 def test_route_intent_logs_and_returns_classified(monkeypatch):
@@ -400,12 +485,12 @@ def test_query_graph_wires_chitchat_branch():
     assert 'add_edge("node_chitchat_answer", END)' in source
 
 
-def test_rag_branch_structure_unchanged():
-    """回归锁：主体确认节点的原条件边与四目标映射不得被动过。"""
+def test_rag_branch_keeps_retrieval_and_prefilled_answer_routes():
+    """主体确认后仍可进入本地检索、HyDE 或直接作答。"""
     source = inspect.getsource(main_graph)
     assert 'add_conditional_edges("node_item_name_confirm"' in source
     for node in ("node_search_embedding", "node_search_embedding_hyde",
-                 "node_web_search_mcp", "node_answer_output"):
+                 "node_answer_output"):
         assert f'"{node}": "{node}"' in source, f"RAG 分支目标 {node} 丢失"
     # 原有静态链路保持旧序
     assert source.index('add_edge("node_rrf", "node_rerank")') < source.index(

@@ -141,6 +141,45 @@ def test_hyde_node_failure_degrades_to_empty(monkeypatch):
     assert result == {"hyde_embedding_chunks": []}
 
 
+@pytest.mark.parametrize(("same_chunk", "explicit_web", "global_chunk", "expected_search"), [
+    (True, False, False, False),
+    (False, False, False, True),
+    (True, True, False, True),
+    (True, False, True, True),
+])
+def test_legacy_graph_runs_web_when_manual_evidence_needs_support(
+    monkeypatch, same_chunk, explicit_web, global_chunk, expected_search,
+):
+    from app.process.query.agent.nodes import node_item_name_confirm, node_search_embedding
+    from app.rag.item_name.config import GLOBAL_ITEM_NAME
+
+    _patch_llm(monkeypatch)
+    monkeypatch.setattr("app.shared.config.settings.agentic.mode", "legacy")
+    monkeypatch.setattr("app.shared.config.settings.evolution.enabled", False)
+    subject = "Brother HAK 180"
+    item_name = GLOBAL_ITEM_NAME if global_chunk else subject
+    chunk = {"chunk_id": "manual", "source": "milvus", "item_name": item_name,
+             "content": "HAK 180 随设备附带电源线。"}
+    keyword = chunk if same_chunk else dict(chunk, chunk_id="another")
+    monkeypatch.setattr(node_item_name_confirm, "confirm_item_name",
+                        lambda state: {**state, "item_names": [subject], "rewritten_query": state["original_query"]})
+    monkeypatch.setattr(node_search_embedding, "search_by_embedding", lambda *a, **kw: [chunk.copy()])
+    monkeypatch.setattr(node_search_embedding, "search_manual_keywords", lambda *a: [keyword.copy()])
+    monkeypatch.setattr(hyde_node, "search_by_hyde", lambda state: [])
+    monkeypatch.setattr("app.process.query.agent.nodes.node_rerank.rerank_documents",
+                        lambda state: {**state, "reranked_docs": []})
+    web_calls = []
+    monkeypatch.setattr(web_node, "search_by_web", lambda state: web_calls.append(state["original_query"]) or [])
+    question = "HAK 180 用什么电源线？"
+    if explicit_web:
+        question = "请联网查 HAK 180 用什么电源线。"
+    state = query_app.invoke(create_query_default_state(session_id="s_web_gate", original_query=question))
+
+    assert web_calls == ([question] if expected_search else [])
+    assert state["query_mode"] == "legacy"
+    assert state["rrf_chunks"][0]["chunk_id"] == "manual"
+
+
 def test_rrf_fuse_with_empty_inputs_no_raise():
     """两路召回均空时按零命中融合，不得抛 ValueError。"""
     state = {

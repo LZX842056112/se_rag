@@ -1,26 +1,27 @@
 """重排服务：合并 RRF 与联网结果 → BGE-Reranker 打分 → 动态截断 → 回写 ``reranked_docs``。"""
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
-from contextvars import copy_context
-
-from langchain_core.messages import HumanMessage
-
 from app.process.query.agent.state import QueryGraphState
+from app.rag.query.business import classify_business_request
 from app.rag.query.config import (
+    LEGACY_ANSWER_RESERVE_SECONDS,
     RERANK_GAP_ABS,
     RERANK_GAP_RATIO,
     RERANK_MAX_INPUT_TOKENS,
-    RERANK_MIN_SUMMARY_CHARS,
+    RERANK_MIN_LOCAL_TOPK,
     RERANK_MIN_TOPK,
-    RERANK_SUMMARY_CHAR_RATIO,
-    RERANK_SUMMARY_MAX_WORKERS,
     WEB_MAX_IN_CONTEXT,
     get_rerank_topk,
+    get_rrf_top,
 )
+from app.rag.query.eval_evidence import chunk_ids
+from app.rag.query.manual_evidence_rerank import keep_procedure_context, keep_retrieval_agreement, rank_manual_evidence
+from app.rag.query.manual_keyword_search import matches_requested_heading
 from app.shared.models import llm_providers
+from app.shared.models.reranker import reranker_tokenizer_lock, score_pairs
+from app.shared.runtime.deadline import remaining
 from app.shared.runtime.logger import logger, step_log
-from app.shared.runtime.prompts import load_prompt
+from app.shared.runtime.query_metrics import current_metrics, mark_degraded, measure_stage
 from app.shared.utils.require import require_state_list, require_state_str
 
 
@@ -58,7 +59,9 @@ def deal_rrf_and_web_result(rrf_chunks: list, web_search_docs: list) -> list[dic
             "source": chunk.get("source"),  # 保留来源标志（milvus/evolution）供引用回填
             "url": None,
             "parent_id": chunk.get("parent_id"),
+            "doc_id": chunk.get("doc_id"),
             "page": chunk.get("page"),
+            "seq": chunk.get("seq"),
             "heading_path": chunk.get("heading_path"),
             "file_title": chunk.get("file_title"),
             "document_kind": chunk.get("document_kind", "manual"),
@@ -143,12 +146,6 @@ def ensure_evolution_docs(docs: list[dict], candidates: list[dict]) -> list[dict
     return missing + docs
 
 
-def _summarize_for_rerank(rewritten_query: str, answer: str, limit: int) -> str:
-    """超长文本压缩：仅用于重排打分，不改变最终答案上下文。"""
-    prompt_text = load_prompt("rerank_text_refine", question=rewritten_query, answer=answer, limit=limit)
-    return llm_providers.chat().invoke([HumanMessage(content=prompt_text)]).content
-
-
 def _encode_capped(tokenizer, text: str, max_tokens: int) -> list:
     """按上限截断编码。
 
@@ -156,69 +153,50 @@ def _encode_capped(tokenizer, text: str, max_tokens: int) -> list:
     「Token indices sequence length is longer than ...」告警（旧实现每次重排都会刷），
     这里统一走 ``truncation=True`` 的受限编码：既拿到判断所需长度，又不产生告警。
     """
-    return tokenizer.encode(
-        str(text or ""),
-        add_special_tokens=False,
-        truncation=True,
-        max_length=max(max_tokens, 1),
-    )
+    with reranker_tokenizer_lock:
+        return tokenizer.encode(
+            str(text or ""),
+            add_special_tokens=False,
+            truncation=True,
+            max_length=max(max_tokens, 1),
+        )
 
 
-def _hard_truncate(tokenizer, text: str, max_tokens: int) -> str:
-    """按 token 硬截断（LLM 压缩结果长度不可控，超长会让重排模型报索引越界）。"""
-    if max_tokens <= 0:
-        return ""
+def _hard_truncate(tokenizer, text: str, max_tokens: int) -> tuple[str, int]:
+    """返回限长文本和实际保留的 token 数。"""
     tokens = _encode_capped(tokenizer, text, max_tokens)
-    if len(tokens) < max_tokens:
-        return text  # 未超限，保留原文
-    return tokenizer.decode(tokens[:max_tokens])
+    return (text if len(tokens) < max_tokens else tokenizer.decode(tokens)), len(tokens)
 
 
 @step_log("create_question_answer_lists")
 def create_question_answer_lists(rewritten_query: str, reranker_docs: list[dict]) -> list[list[str]]:
-    """组装 ``[问题, 答案]`` 列表；超长答案先压缩到重排模型可接受的长度。
-
-    压缩需要调用 LLM，文档较多时串行会明显拖慢重排；此处用有界线程池并发（默认 4），
-    任一环节失败自动回退为原文本，保证重排仍可继续。
-    """
+    """按本地模型的 token 预算构造重排输入。保留手册章节路径。"""
     tokenizer = llm_providers.reranker_model().tokenizer
-    query_token_len = len(_encode_capped(tokenizer, rewritten_query, RERANK_MAX_INPUT_TOKENS))
-    # reranker 固定 4 个分隔符 token，为「问题 + 分隔符」预留后再算可用长度
-    available = RERANK_MAX_INPUT_TOKENS - 4 - query_token_len
-    limit = max(RERANK_MIN_SUMMARY_CHARS, int(available / RERANK_SUMMARY_CHAR_RATIO))
-
+    query, query_tokens = _hard_truncate(tokenizer, rewritten_query, RERANK_MAX_INPUT_TOKENS * 3 // 4)
+    fixed_tokens = query_tokens + 4
+    budget = RERANK_MAX_INPUT_TOKENS - fixed_tokens
     pairs: list[list[str]] = []
-    tasks: list[tuple[int, str]] = []
-    for index, doc in enumerate(reranker_docs):
-        answer = doc.get("text") or ""
-        answer_token_len = len(_encode_capped(tokenizer, answer, RERANK_MAX_INPUT_TOKENS))
-        if query_token_len + answer_token_len + 4 > RERANK_MAX_INPUT_TOKENS:
-            tasks.append((index, answer))
-        pairs.append([rewritten_query, answer])
-
-    if tasks:
-        max_workers = min(RERANK_SUMMARY_MAX_WORKERS, len(tasks))
-        try:
-            with ThreadPoolExecutor(max_workers=max_workers) as pool:
-                futures = [pool.submit(copy_context().run, _summarize_for_rerank, rewritten_query, item[1], limit) for item in tasks]
-                results = [future.result() for future in futures]
-            for (index, _), summary in zip(tasks, results):
-                if summary:
-                    pairs[index][1] = summary
-        except Exception as exc:  # noqa: BLE001 - 压缩属优化项，失败则退回原文
-            logger.warning(f"重排长文本压缩失败，回退原文打分：{exc}")
-
-    # 压缩结果长度不可控（或压缩失败），统一按 token 预算硬截断，保证输入不超模型上限
-    budget = RERANK_MAX_INPUT_TOKENS - 4 - query_token_len
-    for pair in pairs:
-        pair[1] = _hard_truncate(tokenizer, pair[1], budget)
+    total_tokens = 0
+    for doc in reranker_docs:
+        text = doc.get("text") or ""
+        heading = doc.get("heading_path")
+        if heading:
+            text = f"{heading}\n{text}"
+        passage, tokens = _hard_truncate(tokenizer, text, budget)
+        pairs.append([query, passage])
+        total_tokens += fixed_tokens + tokens
+    metrics = current_metrics.get()
+    if metrics is not None:
+        with metrics.lock:
+            metrics.rerank_pairs = len(pairs)
+            metrics.rerank_input_tokens = total_tokens
     return pairs
 
 
 @step_log("use_reranker_deal_score")
 def use_reranker_deal_score(question_answer_pair_list: list, reranker_docs: list[dict]) -> None:
     """调用重排模型打分并按分数倒序排序（原地修改 ``reranker_docs``）。"""
-    scores_list = llm_providers.reranker_model().compute_score(question_answer_pair_list, normalize=True)
+    scores_list = score_pairs(llm_providers.reranker_model(), question_answer_pair_list)
     for score, doc in zip(scores_list, reranker_docs):
         doc["score"] = score
     reranker_docs.sort(key=lambda x: x.get("score", 0), reverse=True)
@@ -230,12 +208,12 @@ def dyn_limit_reranker_docs(reranker_docs: list[dict]) -> list[dict]:
 
     相比仅比较相邻两项，累计口径能捕捉「相邻分差细小、但相对头部已明显下滑」的慢坡，
     避免把头尾质量接近的低分长尾一并放进作答上下文。
-    本地有命中时，最低保留数按本地证据计算，联网补充不占其名额。
+    优先保留前五条本地证据，并遵守总条数上限。分差阈值只截断剩余候选。
     """
     if not reranker_docs:
         return []
     top_max = min(get_rerank_topk(), len(reranker_docs))
-    required_local = [doc for doc in reranker_docs if doc.get('type') != 'web'][:min(RERANK_MIN_TOPK, top_max)]
+    required_local = [doc for doc in reranker_docs if doc.get('type') != 'web'][:min(RERANK_MIN_LOCAL_TOPK, top_max)]
     selected_ids = {id(doc) for doc in required_local}
     for doc in reranker_docs:
         if len(selected_ids) >= top_max:
@@ -263,7 +241,7 @@ def dyn_limit_reranker_docs(reranker_docs: list[dict]) -> list[dict]:
 
 @step_log("rerank_documents")
 def rerank_documents(state: QueryGraphState) -> QueryGraphState:
-    """重排服务入口：合并 → 压缩 → 打分排序 → 动态截断 → 回写 ``reranked_docs``。"""
+    """选择手册证据。其他候选由本地模型打分和截断。"""
     rewritten_query, rrf_chunks, web_search_docs = _require_rerank_inputs(state)
 
     if not rrf_chunks and not web_search_docs:
@@ -274,15 +252,57 @@ def rerank_documents(state: QueryGraphState) -> QueryGraphState:
         state["reranked_docs"] = []
         return state
 
-    reranker_docs = deal_rrf_and_web_result(rrf_chunks, web_search_docs)
-    question_answer_pair_list = create_question_answer_lists(rewritten_query, reranker_docs)
-    use_reranker_deal_score(question_answer_pair_list, reranker_docs)
-    # 本地知识优先排序 → 联网只作补充（限条数）→ 动态截断 → 权威条目保底
+    reranker_docs = cap_web_docs(deal_rrf_and_web_result(rrf_chunks, web_search_docs))
+    local = [doc for doc in reranker_docs if doc["type"] != "web"]
+    web = [doc for doc in reranker_docs if doc["type"] == "web"]
+    local_limit = min(RERANK_MIN_LOCAL_TOPK, get_rerank_topk())
+    use_manual_ranking = (
+        local_limit > 0 and len(local) > RERANK_MIN_LOCAL_TOPK
+        and classify_business_request(state) in ("product_knowledge", "troubleshooting")
+        and all(doc["source"] == "milvus" and doc["document_kind"] in (None, "", "manual") for doc in local)
+    )
+    if use_manual_ranking:
+        question = state.get("rewrite_hint") or state.get("original_query") or rewritten_query
+        ranked = rank_manual_evidence(state, local, local_limit)
+        if ranked is not None:
+            state["reranked_chunk_ids"] = chunk_ids(ranked)
+        else:
+            keyword = state.get("keyword_chunks") or []
+            available = remaining()
+            if keyword or (available is not None and available <= LEGACY_ANSWER_RESERVE_SECONDS):
+                mark_degraded("manual_evidence_fusion_fallback")
+                selected = local[:local_limit]
+                if keyword:
+                    leader = keyword[0].get("chunk_id")
+                    protected = selected[-1]
+                    if (leader and leader not in chunk_ids(selected)
+                            and not matches_requested_heading(protected, question)):
+                        candidate = next((doc for doc in local if doc.get("chunk_id") == leader), None)
+                        if candidate is not None:
+                            selected[-1] = candidate
+                ranked = [dict(doc, score=None) for doc in selected]
+        if ranked is not None:
+            selected = keep_procedure_context(question, ranked, local)
+            selected = keep_retrieval_agreement(state, selected, local, local_limit)
+            state["reranked_docs"] = (selected + [dict(doc, score=None) for doc in web])[:get_rerank_topk()]
+            return state
+        # 关键词分支没有候选时，限制本地重排的输入条数。
+        semantic_limit = max(get_rrf_top(), RERANK_MIN_LOCAL_TOPK)
+        reranker_docs = local[:semantic_limit + 2] + web
+
+    state["local_rerank_input_chunk_ids"] = chunk_ids(reranker_docs)
+    with measure_stage("rerank_prepare"):
+        question_answer_pair_list = create_question_answer_lists(rewritten_query, reranker_docs)
+    with measure_stage("local_rerank"):
+        use_reranker_deal_score(question_answer_pair_list, reranker_docs)
+    # 本地知识优先排序 → 动态截断 → 权威条目保底
     reranker_docs = prefer_local_docs(reranker_docs)
-    reranker_docs = cap_web_docs(reranker_docs)
+    state["reranked_chunk_ids"] = chunk_ids(reranker_docs)
     scored_docs = list(reranker_docs)  # 截断前的完整候选（权威条目保底用）
     reranker_docs = dyn_limit_reranker_docs(reranker_docs)
     reranker_docs = ensure_evolution_docs(reranker_docs, scored_docs)
+    if use_manual_ranking:
+        reranker_docs = keep_retrieval_agreement(state, reranker_docs, scored_docs, local_limit)
     state["reranked_docs"] = reranker_docs
     logger.info(
         "重排完成：候选 {} 条，保留 {} 条；Top3={}".format(

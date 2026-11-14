@@ -6,21 +6,42 @@ import re
 import time
 
 # 业务标签 -> 触发关键词。分类走规则匹配，不额外调用分类模型（省成本、稳定可控）。
-# 顺序即优先级：complaint 在最前，命中即返回，避免被售后/价格等词抢先误判。
+# 明确投诉优先。排查中的故障描述不视为投诉。
+_COMPLAINT_WORDS = ("投诉", "骗人", "欺骗")
 _TAG_WORDS = (
-    ("complaint", ("投诉", "骗人", "欺骗", "根本没解决", "一直没解决")),
+    ("complaint", (*_COMPLAINT_WORDS, "根本没解决", "一直没解决")),
     ("after_sales", ("售后", "退货", "退款", "保修", "质保", "发货", "订单", "物流", "购买")),
     ("pricing", ("价格", "多少钱", "报价", "库存", "现货", "折扣", "优惠", "售价")),
-    ("troubleshooting", ("安装", "维修", "故障", "保养", "报错", "异常", "怎么用", "不工作", "怎么换")),
+    ("troubleshooting", ("安装", "维修", "故障", "保养", "报错", "异常", "怎么用", "不工作", "怎么换", "排查", "不进纸", "无法进纸")),
+)
+
+# 排查后的联系条件属于说明书范围。只排除条件中的售后字样，保留同一问题中的真实政策诉求。
+_SERVICE_ESCALATION = re.compile(
+    r"((?:何时|什么时候|什么(?:情况|条件|程度)(?:下)?|是否(?:要|应|需要|必须)?|仍(?:然)?(?:无法|不能)解决|还没解决)"
+    r"[，,]?[^，。！？；,.!?;\n]{0,18})(?:联系|咨询|找|拨打|打)\s*(?:官方|厂家|厂商|品牌)?\s*售后(?:服务|支持|人员|客服|电话)?"
 )
 
 
 def classify_business(query: str) -> str:
     """按关键词给问题打业务标签；无关键字命中则归为普通产品知识。"""
+    troubleshooting = any(word in query for word in _TAG_WORDS[-1][1])
+    if troubleshooting:
+        query = _SERVICE_ESCALATION.sub(r"\1", query)
     for tag, words in _TAG_WORDS:
+        if tag == "complaint" and troubleshooting:
+            words = _COMPLAINT_WORDS
         if any(word in query for word in words):
             return tag  # 首个命中的标签
     return "product_knowledge"
+
+
+def classify_business_request(state: dict) -> str:
+    """根据原句、点选意图与改写结果确定检索和作答的业务范围。"""
+    user_query = "\n".join(str(state.get(key) or "") for key in ("original_query", "rewrite_hint"))
+    tag = classify_business(user_query)
+    if tag == "product_knowledge":
+        tag = classify_business(state.get("rewritten_query") or "")
+    return tag
 
 
 def policy_supported(docs: list[dict], now: float | None = None) -> bool:
@@ -50,9 +71,7 @@ def apply_business_policy(state: dict) -> None:
     - pricing/after_sales：只保留当前有效的政策文档，无有效政策则不给答案转人工。
     前序主体兜底（item_name_options）除投诉外不阻断正常作答。
     """
-    # 用多种来源拼出判定文本，覆盖「原句 / 点选意图 / 改写后」任一形式
-    context = " ".join(str(state.get(key) or "") for key in ("original_query", "rewrite_hint", "rewritten_query"))
-    tag = classify_business(context)
+    tag = classify_business_request(state)
     state["business_tag"] = tag
     # 有可点选主体候选时，先让用户确认主体，不急于按业务标签接管（投诉除外）
     if state.get("item_name_options") and tag != "complaint":

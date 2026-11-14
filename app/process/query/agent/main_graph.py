@@ -1,4 +1,4 @@
-"""查询流程图：意图识别 → 闲聊分流 / 主体确认 → 三路召回（向量 / HyDE / 联网）→ RRF 融合 → 重排 → 父块回溯 → 作答。"""
+"""查询流程图：意图识别 → 主体确认 → 本地和 HyDE 检索 → RRF → 重排 → 作答。"""
 from langgraph.graph import END, StateGraph
 
 from app.process.query.agent.nodes.node_answer_output import node_answer_output
@@ -12,6 +12,8 @@ from app.process.query.agent.nodes.node_search_embedding import node_search_embe
 from app.process.query.agent.nodes.node_search_embedding_hyde import node_search_embedding_hyde
 from app.process.query.agent.nodes.node_web_search_mcp import node_web_search_mcp
 from app.process.query.agent.state import QueryGraphState
+from app.rag.query.intent_route_service import OUT_OF_SCOPE
+from app.rag.query.web_search_service import should_search_web
 from app.shared.runtime.logger import logger
 from app.shared.config import settings
 from app.rag.agentic.budget import selected_mode
@@ -19,8 +21,17 @@ from app.rag.agentic.budget import selected_mode
 
 def node_agentic(state):
     from app.rag.agentic.controller import run_agentic
-    state['query_mode'] = 'agentic'
     return run_agentic(state)
+
+
+def search_embedding_and_web(state):
+    """在同一个分支内先查本地，再决定是否联网。HyDE 与该分支并行。"""
+    result = node_search_embedding(state)
+    retrieval_state = {**state, **result}
+    if should_search_web(retrieval_state):
+        result.update(node_web_search_mcp(retrieval_state))
+    return result
+
 
 query_graph_builder = StateGraph(QueryGraphState)
 
@@ -28,9 +39,8 @@ query_graph_builder = StateGraph(QueryGraphState)
 query_graph_builder.add_node(node_intent_route)          # 意图识别：区分闲聊 / 知识库问答
 query_graph_builder.add_node(node_chitchat_answer)       # 闲聊作答：不经过检索链路
 query_graph_builder.add_node(node_item_name_confirm)     # 主体确认：识别用户问的知识条目标题
-query_graph_builder.add_node(node_search_embedding)      # 向量召回：BGE-M3 稠密+稀疏语义检索
+query_graph_builder.add_node("node_search_embedding", search_embedding_and_web)
 query_graph_builder.add_node(node_search_embedding_hyde) # HyDE 召回：先生成假设答案再检索
-query_graph_builder.add_node(node_web_search_mcp)        # 联网召回：通过 MCP 百炼联网搜索
 query_graph_builder.add_node(node_rrf)                   # RRF 融合：多路召回结果归一化合并
 query_graph_builder.add_node(node_rerank)                # 重排：BGE-Reranker 精排
 query_graph_builder.add_node(node_parent_expand)         # 父块回溯：由切片回溯到章节级父块
@@ -57,29 +67,29 @@ query_graph_builder.add_conditional_edges("node_intent_route", after_node_intent
 
 
 def after_node_item_name_confirm(state: QueryGraphState):
-    """路由：主体已确认则并行三路召回；未确认（state.answer 已就绪）直接作答。"""
+    """主体确认后并行执行本地检索和 HyDE。"""
+    if state.get("query_outcome") == OUT_OF_SCOPE:
+        return "node_chitchat_answer"
     if not state.get("answer"):
         if selected_mode(state.get('session_id', ''), mode=settings.agentic.mode,
                          percent=settings.agentic.gray_percent) == 'agentic':
             return 'node_agentic'
         logger.info(f"主体已确认：{state.get('item_names')}，进入多路召回")
-        return "node_search_embedding", "node_search_embedding_hyde", "node_web_search_mcp"
+        return "node_search_embedding", "node_search_embedding_hyde"
     logger.info("主体未确认，直接进入作答节点（反问/兜底话术）")
     return "node_answer_output"
 
 
 query_graph_builder.add_conditional_edges("node_item_name_confirm", after_node_item_name_confirm, {
+    "node_chitchat_answer": "node_chitchat_answer",
     "node_search_embedding": "node_search_embedding",
     "node_search_embedding_hyde": "node_search_embedding_hyde",
-    "node_web_search_mcp": "node_web_search_mcp",
     "node_answer_output": "node_answer_output",
     "node_agentic": "node_agentic",
 })
 
 # 3. 静态边
-query_graph_builder.add_edge("node_search_embedding", "node_rrf")
-query_graph_builder.add_edge("node_search_embedding_hyde", "node_rrf")
-query_graph_builder.add_edge("node_web_search_mcp", "node_rrf")
+query_graph_builder.add_edge(["node_search_embedding", "node_search_embedding_hyde"], "node_rrf")
 query_graph_builder.add_edge("node_rrf", "node_rerank")
 query_graph_builder.add_edge("node_rerank", "node_parent_expand")
 query_graph_builder.add_edge("node_parent_expand", "node_answer_output")

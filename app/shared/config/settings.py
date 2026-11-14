@@ -42,6 +42,9 @@ class EvaluationSettings:
     base_url: str  # 评测模型服务地址（EVAL_LLM_BASE_URL）
     api_key: str  # 评测 API 密钥（EVAL_LLM_API_KEY）
     timeout_seconds: float = 120  # 单次评测超时（秒），默认 120
+    service_commit: str = ""
+    knowledge_base_version: str = ""
+    query_worker_count: int = 0
 
 @dataclass
 class RerankerSettings:
@@ -99,6 +102,7 @@ class McpSettings:
     base_url: str  # MCP 服务地址（MCP_DASHSCOPE_BASE_URL）
     api_key: str  # 复用 OPENAI_API_KEY
     timeout_seconds: int  # 调用超时（秒），默认 30（MCP_TIMEOUT_SECONDS）
+    legacy_timeout_seconds: float = 8.0  # Legacy 联网总时限（秒，LEGACY_WEB_TIMEOUT_SECONDS）
 
 
 @dataclass
@@ -203,6 +207,7 @@ class RuntimeSettings:
     sse_stream_ttl_seconds: int = 3600  # SSE 事件流保留时间（秒，SSE_STREAM_TTL_SECONDS）
     query_turn_lock_ttl_seconds: int = 600  # 会话查询锁 TTL（秒，QUERY_TURN_LOCK_TTL_SECONDS）
     scheduler_leader_ttl_seconds: int = 90  # 调度器主节点租约 TTL（秒，SCHEDULER_LEADER_TTL_SECONDS）
+    legacy_query_timeout_seconds: float = 45.0  # Legacy 查询时限（秒，LEGACY_QUERY_TIMEOUT_SECONDS）
 
 
 @dataclass
@@ -266,6 +271,9 @@ def _build_settings() -> Settings:
             base_url=env_str("EVAL_LLM_BASE_URL"),  # 评测模型服务地址
             api_key=env_str("EVAL_LLM_API_KEY"),  # 评测 API 密钥
             timeout_seconds=env_float("EVAL_LLM_TIMEOUT_SECONDS", 120),  # 评测超时（秒），默认 120
+            service_commit=env_str("EVAL_SERVICE_COMMIT"),
+            knowledge_base_version=env_str("EVAL_KNOWLEDGE_BASE_VERSION"),
+            query_worker_count=max(0, env_int("EVAL_QUERY_WORKER_COUNT", 0)),
         ),
         llm=LLMSettings(
             base_url=env_str("OPENAI_BASE_URL"),  # OpenAI 兼容服务地址
@@ -312,6 +320,7 @@ def _build_settings() -> Settings:
             base_url=env_str("MCP_DASHSCOPE_BASE_URL"),  # 百炼 MCP 服务地址
             api_key=env_str("OPENAI_API_KEY"),  # 复用对话 API 密钥
             timeout_seconds=env_int("MCP_TIMEOUT_SECONDS", 30),  # 调用超时（秒），默认 30
+            legacy_timeout_seconds=max(0.05, env_float("LEGACY_WEB_TIMEOUT_SECONDS", 8.0)),
         ),
         mongo=MongoSettings(
             url=env_str("MONGO_URL"),  # MongoDB 连接串
@@ -392,6 +401,7 @@ def _build_settings() -> Settings:
             sse_stream_ttl_seconds=max(60, env_int("SSE_STREAM_TTL_SECONDS", 3600)),  # 事件流保留（秒）
             query_turn_lock_ttl_seconds=max(30, env_int("QUERY_TURN_LOCK_TTL_SECONDS", 600)),  # 会话锁 TTL（秒）
             scheduler_leader_ttl_seconds=max(30, env_int("SCHEDULER_LEADER_TTL_SECONDS", 90)),  # 调度器租约（秒）
+            legacy_query_timeout_seconds=max(0.05, env_float("LEGACY_QUERY_TIMEOUT_SECONDS", 45.0)),
         ),
         agentic=AgenticSettings(
             mode=env_str('RAG_MODE', 'agentic'),  # 检索模式，默认 agentic

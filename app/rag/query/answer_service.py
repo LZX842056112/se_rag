@@ -5,6 +5,9 @@
 """
 from __future__ import annotations
 
+from collections.abc import Iterable, Iterator
+import re
+
 from langchain_core.messages import HumanMessage
 
 from app.evolution.online_eval.grounding import compute_groundedness
@@ -18,7 +21,37 @@ from app.shared.config import settings
 from app.shared.models import llm_providers
 from app.shared.runtime.logger import logger
 from app.shared.runtime.prompts import load_prompt
+from app.shared.runtime.query_metrics import measure_stage
+from app.shared.utils.answer import NO_ANSWER_REPLY, is_no_answer
 from app.shared.utils.sse_broker import SSEEvent, publish
+
+
+_GENERAL_LIMITATION = r"(?:某些|部分)(?:特性和)?功能(?:可能)?(?:无法|不能)实现"
+_LIMITATION_QUESTION = re.compile(
+    rf"{_GENERAL_LIMITATION}的?原因(?:可能)?(?:是|有)?(?:哪些|什么)[？?。\s]*$"
+)
+_LIMITATION_PASSAGE = re.compile(
+    r"(?:某些|部分)(?:特性和)?功能可能由于[^。！？\n]+(?:无法|不能)实现"
+)
+
+
+def _select_feature_limitation_evidence(state: QueryGraphState) -> None:
+    """通用原因已有直接说明时，只把适用手册的说明送给模型。"""
+    if state.get("query_mode") != "legacy" or state.get("business_tag") != "product_knowledge":
+        return
+    if len(state.get("item_names") or []) != 1:
+        return
+    question = state.get("rewrite_hint") or state.get("original_query") or ""
+    if not _LIMITATION_QUESTION.search(question) or re.search(r"[？?。；;].+[^？?。；;\s]", question):
+        return
+    direct = [
+        dict(doc, parent_content=None)
+        for doc in state["reranked_docs"]
+        if doc.get("source") == "milvus" and doc.get("document_kind") in (None, "", "manual")
+        and _LIMITATION_PASSAGE.search(doc.get("text") or "")
+    ]
+    if direct:
+        state["reranked_docs"] = direct
 
 
 def state_exists_answer(state: QueryGraphState) -> bool:
@@ -47,11 +80,15 @@ def load_answer_prompt(state: QueryGraphState) -> str:
         source = "网络搜索" if doc.get("type") == "web" else "向量库"
         page = doc.get("page")
         page_text = f",页码:{page}" if isinstance(page, int) and page > 0 else ""
+        heading = doc.get("heading_path")
+        heading_text = f",章节路径:{heading}" if heading else ""
         background = None if state.get("business_tag") in ("pricing", "after_sales") else doc.get("parent_content")
         background_text = f",章节背景:{background}" if background else ""
+        score = doc.get("score")
+        score_text = f",置信度: {score}" if score is not None else ""
         contexts.append(
-            f"第{index}部分,标题:{doc.get('title')},来源:{source} ,"
-            f"置信度: {doc.get('score')}{page_text}{background_text},内容:{doc.get('text')}\n"
+            f"第{index}部分,标题:{doc.get('title')},来源:{source}{score_text}"
+            f"{page_text}{heading_text}{background_text},内容:{doc.get('text')}\n"
         )
     state["answer_contexts"] = contexts
     from app.rag.agentic.evidence import doc_to_evidence
@@ -69,29 +106,63 @@ def load_answer_prompt(state: QueryGraphState) -> str:
     history_text = ("本轮只使用当前有效的业务政策，不使用历史回答中的价格或承诺。"
                     if state.get("business_tag") in ("pricing", "after_sales")
                     else build_history_context(state.get("session_id"), limit=6))
+    rewritten = state.get("rewritten_query") or ""
+    original = state.get("rewrite_hint") or state.get("original_query") or rewritten
+    question = original if not rewritten or original == rewritten else f"{original}\n检索改写：{rewritten}"
     return load_prompt(
         "answer_out",
-        question=state.get("rewritten_query"),
+        question=question,
         context="".join(contexts),
         item_names=item_names,
         history=history_text,
+        no_answer_reply=NO_ANSWER_REPLY,
     )
+
+
+def _answer_chunks(contents: Iterable[str]) -> Iterator[str]:
+    """只缓冲可能组成固定拒答句的后缀，避免已作答后又发出拒答。"""
+    pending = ""
+    leading_text = ""
+    finished = False
+    for content in contents:
+        if finished or not content:
+            continue
+        pending += content
+        before, marker, _ = pending.partition(NO_ANSWER_REPLY)
+        if marker:
+            lead = (leading_text + before).strip(" \t\r\n#*_`>，。！？：,.!?:").casefold()
+            if lead in {"", "抱歉", "很抱歉", "非常抱歉", "对不起", "回答", "结论", "答复", "answer", "conclusion"}:
+                if before:
+                    yield before
+                yield NO_ANSWER_REPLY + "。请交由负责人核实。"
+            elif before.rstrip():
+                yield before.rstrip()
+            finished = True
+            continue
+        # 仅保留与拒答句开头相同的尾部字符。其余内容可立即发送。
+        overlap = next((size for size in range(min(len(pending), len(NO_ANSWER_REPLY) - 1), 0, -1)
+                        if pending.endswith(NO_ANSWER_REPLY[:size])), 0)
+        split_at = len(pending) - overlap
+        safe, pending = pending[:split_at], pending[split_at:]
+        if safe:
+            leading_text = (leading_text + safe.strip())[:64]
+            yield safe
+    if pending and not finished:
+        yield pending
 
 
 def call_llm_deal_answer(state: QueryGraphState, answer_prompt_text: str) -> None:
     """调用 LLM 生成答案；流式模式下逐段推送到 SSE。"""
     session_id = state.get("session_id")
-    llm_client = llm_providers.chat()
     messages = [HumanMessage(content=answer_prompt_text)]
     if state.get("is_stream", False):
-        answer = ""
-        for chunk in llm_client.stream(messages):
-            if chunk.content:
-                publish(session_id, SSEEvent.DELTA, {"delta": chunk.content})
-                answer += chunk.content
-        state["answer"] = answer
+        answer = []
+        for delta in _answer_chunks(llm_providers.stream_chat_text(messages)):
+            publish(session_id, SSEEvent.DELTA, {"delta": delta})
+            answer.append(delta)
+        state["answer"] = "".join(answer)
     else:
-        state["answer"] = llm_client.invoke(messages).content
+        state["answer"] = "".join(_answer_chunks([llm_providers.chat().invoke(messages).content]))
 
 
 def extract_text_image_url(state: QueryGraphState) -> None:
@@ -115,7 +186,7 @@ def backfill_evolution_outputs(state: QueryGraphState) -> QueryGraphState:
     state["citations"] = build_citations(cited, evolution_ids, web_docs, build_doc_meta(reranked_docs))
     state["retrieval_signals"] = {
         "zero_hit": len(reranked_docs) == 0,
-        "no_retrieval": not state.get("embedding_chunks") and not state.get("hyde_embedding_chunks"),
+        "no_retrieval": not any(state.get(key) for key in ("embedding_chunks", "hyde_embedding_chunks", "keyword_chunks")),
         "evolution_hit": bool(evolution_ids),
         "web_hit": bool(web_docs),
     }
@@ -170,8 +241,15 @@ def generate_answer(state: QueryGraphState) -> QueryGraphState:
     state['evidence_manifest'] = []
     apply_business_policy(state)
     if not state_exists_answer(state):
+        _select_feature_limitation_evidence(state)
         answer_prompt_text = load_answer_prompt(state)
-        call_llm_deal_answer(state, answer_prompt_text)
+        with measure_stage("answer_model"):
+            call_llm_deal_answer(state, answer_prompt_text)
+        if is_no_answer(state.get("answer")):
+            state["handoff_required"] = True
+            state["issue_type"] = "missing_material"
+    elif not state.get("handoff_required"):
+        state["query_outcome"] = "clarification"
     extract_text_image_url(state)
     backfill_evolution_outputs(state)
     save_answer_message_history(state)

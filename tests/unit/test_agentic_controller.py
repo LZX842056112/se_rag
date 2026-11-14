@@ -48,6 +48,64 @@ def evidence():
             'content_sha256': 'hash', 'document_version': 'v1'}
 
 
+@pytest.mark.parametrize(('hint', 'expected_tag'), [
+    ('转印失败怎么排查？什么情况下需要联系售后？', 'troubleshooting'),
+    ('转印失败怎么排查？可以申请保修吗？', 'after_sales'),
+    ('转印失败怎么排查？我要投诉。', 'complaint'),
+])
+def test_agentic_and_legacy_apply_same_business_rule_to_rewrite_hint(monkeypatch, hint, expected_tag):
+    from app.rag.query.business import apply_business_policy
+
+    monkeypatch.setattr('app.rag.query.answer_service.build_history_context', lambda *a, **k: '')
+    manual = {'chunk_id': 'a', 'text': '提高转印温度。仍有问题时，请联系经销商。', 'document_kind': 'manual'}
+    state = {'original_query': 'HAK 180', 'rewrite_hint': hint, 'rewritten_query': 'HAK 180 售后问题',
+             'item_names': ['HAK 180']}
+    legacy = {**state, 'reranked_docs': [manual]}
+    apply_business_policy(legacy)
+
+    pre_retrieval_tags = []
+    class ManualTools(Tools):
+        def execute(self, *args):
+            pre_retrieval_tags.append(agentic_state['business_tag'])
+            return super().execute(*args)
+
+    def judge(kind, payload, timeout):
+        if kind == 'assess': return {'coverage': 'supported', 'evidence_ids': ['a']}
+        if kind == 'draft': return {'answer': manual['text']}
+        return {'supported': True, 'evidence_ids': ['a']}
+
+    agentic_state = state.copy()
+    result = run_agentic(agentic_state, tools=ManualTools([{**evidence(), **manual}]), model=judge, persist=False)
+    assert legacy['business_tag'] == result['business_tag'] == expected_tag
+    if expected_tag == 'complaint':
+        assert pre_retrieval_tags == []
+    else:
+        assert pre_retrieval_tags == [expected_tag]
+    assert bool(legacy.get('handoff_required')) == result.get('handoff_required', False) == (expected_tag != 'troubleshooting')
+
+
+@pytest.mark.parametrize(('draft', 'expected_verified'), [
+    ('支持 Telnet 服务器的命令行配置。\n\n现有参考内容与历史对话中未查询到该问题相关信息，无法作答', False),
+    ('该型号不支持无线连接。', True),
+])
+def test_agentic_verifier_does_not_publish_a_draft_with_the_fixed_refusal(monkeypatch, draft, expected_verified):
+    from app.shared.config import settings
+
+    monkeypatch.setattr(settings.agentic, 'max_repairs', 0)
+    monkeypatch.setattr('app.rag.query.answer_service.build_history_context', lambda *a, **k: '')
+    row = {**evidence(), 'text': '支持 Telnet 命令行配置。该型号不支持无线连接。'}
+
+    def judge(kind, payload, timeout):
+        if kind == 'assess': return {'coverage': 'supported', 'evidence_ids': ['a']}
+        if kind == 'draft': return {'answer': draft}
+        return {'supported': True, 'evidence_ids': ['a']}
+
+    result = run_agentic({'item_names': ['打印服务器'], 'rewritten_query': '网络功能'},
+                         tools=Tools([row]), model=judge, persist=False)
+    assert result['agentic_verified'] is expected_verified
+    assert (result['answer'] == draft) is expected_verified
+
+
 def test_supported_draft_only_published_after_verification():
     tools = Tools([evidence()])
     seen = []
@@ -223,6 +281,8 @@ def test_complaint_does_not_call_tools_or_models():
                          model=forbidden, persist=False)
     assert tools.calls == []
     assert result['handoff_required']
+    assert result['issue_type'] == 'complaint'
+    assert result['query_mode'] == 'none'
     assert result['agentic_stop_reason'] == 'business_policy'
 
 
@@ -237,6 +297,8 @@ def test_invalid_evidence_ids_do_not_allow_answer():
 
 
 def test_empty_tools_stop_after_two_attempts():
+    from app.rag.query.eval_evidence import build_retrieval_layers
+
     def model(kind, payload, timeout):
         if kind == 'assess': return {'coverage': 'missing', 'evidence_ids': []}
         return {'action': 'search', 'tool': 'keyword_search', 'arguments': {'terms': ['q']}}
@@ -245,6 +307,44 @@ def test_empty_tools_stop_after_two_attempts():
                          tools=tools, model=model, persist=False)
     assert len(tools.calls) == 2
     assert result['agentic_stop_reason'] == 'no_new_evidence'
+    assert build_retrieval_layers(result) == {'agentic_retrieval': [], 'final': []}
+
+
+def test_agentic_evaluation_keeps_candidate_order_and_actual_answer_contexts(monkeypatch):
+    from app.rag.query.eval_evidence import build_evaluation, build_retrieval_layers
+
+    monkeypatch.setattr('app.rag.query.answer_service.build_history_context', lambda *a, **k: '本轮历史')
+    first = evidence()
+    duplicate = {**first, 'evidence_id': 'a-next-version'}
+    web = {**first, 'evidence_id': 'web', 'source': 'web', 'chunk_id': None, 'text': '网页内容'}
+    final = {**first, 'evidence_id': 'b', 'chunk_id': 'b', 'text': '父章节内容\n\n命中子块',
+             'metadata': {'child_text': '命中子块', 'parent_content': '父章节内容'}}
+
+    class SearchTools:
+        def execute(self, tool, arguments, timeout):
+            return {'status': 'ok', 'evidence': [first, duplicate, web] if tool == 'semantic_search' else [final, first]}
+
+    sent_contexts = []
+    def judge(kind, payload, timeout):
+        if kind == 'assess':
+            if any(row['evidence_id'] == 'b' for row in payload['evidence']):
+                return {'coverage': 'supported', 'evidence_ids': ['b', 'web']}
+            return {'coverage': 'missing', 'evidence_ids': []}
+        if kind == 'select': return {'action': 'search', 'tool': 'keyword_search', 'arguments': {'terms': ['温度']}}
+        if kind == 'draft':
+            sent_contexts.extend(payload['answer_contexts'])
+            return {'answer': '工作温度为10到32度。'}
+        return {'supported': True, 'evidence_ids': ['b', 'web']}
+
+    result = run_agentic({'item_names': ['HAK180'], 'rewritten_query': '温度'},
+                         tools=SearchTools(), model=judge, persist=False)
+    assert build_retrieval_layers(result) == {'agentic_retrieval': ['a', 'b'], 'final': ['b']}
+    evaluation = build_evaluation(result)
+    assert evaluation == {'query_mode': 'agentic', 'outcome': 'answered', 'contexts': sent_contexts}
+    assert len(sent_contexts) == 2
+    assert '父章节内容' in sent_contexts[0] and '命中子块' in sent_contexts[0]
+    assert '网页内容' in sent_contexts[1]
+    assert all('本轮历史' not in context for context in sent_contexts)
 
 
 def test_expired_request_cannot_emit_a_draft():
@@ -286,7 +386,7 @@ def test_mode_switch_preserves_legacy_route(monkeypatch):
     assert main_graph.after_node_item_name_confirm({'session_id': 's'}) == 'node_agentic'
     assert main_graph.after_node_item_name_confirm({'answer': '请选择产品'}) == 'node_answer_output'
     monkeypatch.setattr(main_graph.settings.agentic, 'mode', 'legacy')
-    assert len(main_graph.after_node_item_name_confirm({})) == 3
+    assert main_graph.after_node_item_name_confirm({}) == ("node_search_embedding", "node_search_embedding_hyde")
 
 
 def test_catalog_rpcs_share_the_request_deadline(monkeypatch):
@@ -333,7 +433,7 @@ def test_independent_write_flag_starts_publication_worker(monkeypatch):
     monkeypatch.setattr(settings.evolution, 'write_enabled', True)
     monkeypatch.setattr(settings.evolution, 'scheduler_enabled', True)
     async def check():
-        async with query_server.lifespan(None):
+        async with query_server.lifespan(query_server.app):
             await asyncio.sleep(0)
             assert warmed, "启动时必须先预热检索模型，否则首个查询会耗尽 Agentic 预算"
             assert started

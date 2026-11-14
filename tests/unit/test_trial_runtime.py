@@ -7,11 +7,27 @@ from types import SimpleNamespace
 import pytest
 
 from app.api.errors import ApiError
+from app.evolution.tuning import controller
 from app.rag.query import lifecycle, intent_route_service
 from app.rag.query.business import classify_business, policy_supported
-from app.shared.runtime.query_metrics import QueryMetrics, measure_client
 from app.shared.config import settings
-from app.evolution.tuning import controller
+from app.shared.runtime.query_metrics import QueryMetrics, measure_client
+
+
+@pytest.mark.parametrize(('question', 'expected'), [
+    ('我这边用 HAK 180 做小批量烫金，纸张是已经用激光打印机打印好的 A4 纸，最近发现有的位置烫金膜附着力很差，用手一擦就掉，另一些位置又出现打印内容缺失，我想在不换纸、不换烫金膜的前提下先自己排查，请问应该优先调整什么参数，调整时要注意什么，调到什么程度需要联系售后？', 'troubleshooting'),
+    ('我有一台 HAK 180，最近烫金膜有的地方转印不上，有的地方一擦就掉，纸张是激光打印机打的 A4 纸，烫金膜盒刚换过，设备也用了半年，清洁过外部但没有清洁分离辊，请问我应该先检查哪些部件，按什么顺序排查，什么情况下必须联系售后？', 'troubleshooting'),
+    ('故障怎么排查，什么情况下需要联系售后？也请告诉我能否退款。', 'after_sales'),
+    ('故障怎么排查，何时需要联系售后，现货多少钱？', 'pricing'),
+    ('怎么安装？怎么联系售后？', 'after_sales'),
+    ('无法进纸怎么处理，如何判断是否需要联系厂家售后？', 'troubleshooting'),
+    ('HAK 180 不进纸，清洁后一直没解决。应该怎么排查，什么时候联系售后？', 'troubleshooting'),
+    ('HAK 180 怎么排查进纸故障，什么时候该打售后电话？', 'troubleshooting'),
+    ('故障怎么排查，什么情况下需要联系售后？我要投诉。', 'complaint'),
+    ('故障怎么排查？在什么情况下投诉并联系售后？', 'complaint'),
+])
+def test_business_classification_preserves_troubleshooting_and_real_policy_requests(question, expected):
+    assert classify_business(question) == expected
 
 
 def test_session_admission_rejects_overlap_and_releases():
@@ -34,7 +50,7 @@ def test_classifier_deadline_is_total(monkeypatch):
         return SimpleNamespace(content='{"intent":"chitchat"}')
     monkeypatch.setattr(intent_route_service.llm_providers, "chat", lambda **kw: SimpleNamespace(invoke=slow))
     start = time.perf_counter()
-    assert intent_route_service.call_llm_classify_intent("", "hello") == "rag"
+    assert intent_route_service.call_llm_classify_intent("", "hello") is None
     assert time.perf_counter() - start < .12
 
 

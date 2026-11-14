@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 
-def fake_server(monkeypatch, *, fail_at=None, hang_at=None, payload='{"pages": []}'):
+def fake_server(monkeypatch, *, fail_at=None, hang_at=None, hang_seconds=10, payload='{"pages": []}'):
     from app.shared.clients import mcp_web
     events, instances = [], []
 
@@ -17,7 +17,7 @@ def fake_server(monkeypatch, *, fail_at=None, hang_at=None, payload='{"pages": [
         async def step(self, name):
             events.append(name)
             if hang_at == name:
-                await asyncio.sleep(10)
+                await asyncio.sleep(hang_seconds)
             if fail_at == name:
                 raise RuntimeError(name)
 
@@ -36,27 +36,28 @@ def fake_server(monkeypatch, *, fail_at=None, hang_at=None, payload='{"pages": [
     return events, instances
 
 
-def test_legacy_request_keeps_retries_margin_and_page_count(monkeypatch):
+@pytest.mark.parametrize(("mcp_timeout", "expected"), [(12, 8), (4, 4)])
+def test_legacy_request_limits_wait_and_keeps_page_count(monkeypatch, mcp_timeout, expected):
     events, instances = fake_server(monkeypatch)
     from app.rag.query import web_search_service as legacy
     from app.shared.clients import mcp_web
     from app.shared.config import settings
-    monkeypatch.setattr(settings.mcp, "timeout_seconds", 12)
+    monkeypatch.setattr(settings.mcp, "timeout_seconds", mcp_timeout)
     windows = []
-    timeout_context = asyncio.timeout
+    timeout_context = mcp_web.fail_after
     def capture_window(seconds):
         windows.append(seconds)
         return timeout_context(seconds)
-    monkeypatch.setattr(mcp_web.asyncio, "timeout", capture_window)
+    monkeypatch.setattr(mcp_web, "fail_after", capture_window)
     result = asyncio.run(legacy._call_bailian_web_search("HAK180"))
     assert result.content[0].text == '{"pages": []}'
     assert events == ["connect", "call", "cleanup"]
     server = instances[0]
-    assert server.options["params"]["timeout"] == 12
-    assert "sse_read_timeout" not in server.options["params"]
-    assert "client_session_timeout_seconds" not in server.options
-    assert server.options["max_retry_attempts"] == 3
-    assert windows == [17]
+    assert server.options["params"]["timeout"] == expected
+    assert server.options["params"]["sse_read_timeout"] == expected
+    assert server.options["client_session_timeout_seconds"] == expected
+    assert server.options["max_retry_attempts"] == 0
+    assert windows == [expected]
     assert server.arguments == {"tool_name": "bailian_web_search", "arguments": {"query": "HAK180", "count": 5}}
 
 
@@ -94,6 +95,22 @@ def test_transport_times_out_and_cleans_up(monkeypatch, phase):
     assert events.count("cleanup") == 1
 
 
+def test_transport_does_not_wait_for_remote_cleanup_after_call_timeout(monkeypatch):
+    from app.shared.clients import mcp_web
+
+    events, _ = fake_server(monkeypatch, hang_at="call")
+
+    async def cleanup(_self):
+        events.append("cleanup")
+        await asyncio.sleep(0.2)
+        events.append("cleanup_finished")
+
+    monkeypatch.setattr(mcp_web.MCPServerStreamableHttp, "cleanup", cleanup)
+    with pytest.raises(TimeoutError):
+        asyncio.run(mcp_web.request_web_search("q", 1, request_timeout=0.01, overall_timeout=0.01, retries=0))
+    assert events == ["connect", "call", "cleanup"]
+
+
 @pytest.mark.parametrize("phase", ["connect", "call", "cleanup"])
 def test_transport_cancellation_is_not_converted_to_a_result(monkeypatch, phase):
     events, _ = fake_server(monkeypatch, hang_at=phase)
@@ -122,6 +139,87 @@ def test_legacy_invalid_json_and_failure_keep_degradation_codes(monkeypatch):
     fake_server(monkeypatch, fail_at="call")
     assert legacy.search_by_web({"rewritten_query": "q"}) == []
     assert reasons[-1] == "web_error"
+
+
+def test_legacy_discards_malformed_pages_and_keeps_valid_snippets(monkeypatch):
+    import json
+
+    from app.rag.query import web_search_service as legacy
+
+    reasons = []
+    good = {"title": "Page", "snippet": "Text", "url": "https://example.test/valid"}
+    pages = [dict(good, snippet={"text": "Invalid"}), good]
+    fake_server(monkeypatch, payload=json.dumps({"pages": pages}))
+    monkeypatch.setattr(legacy, "mark_degraded", reasons.append)
+    assert legacy.search_by_web({"rewritten_query": "q"}) == [good]
+    assert reasons == ["web_invalid_output"]
+
+
+def test_legacy_web_evidence_requires_the_requested_model(monkeypatch):
+    import json
+
+    from app.rag.query import web_search_service as legacy
+
+    relevant = {"title": "MateBook B7-420", "snippet": "该型号支持指定功能"}
+    other = {"title": "MateBook B7-430", "snippet": "该型号支持其他功能"}
+    generic = {"title": "其他笔记本电脑", "snippet": "某些电脑支持该功能"}
+    fake_server(monkeypatch, payload=json.dumps({"pages": [other, relevant, generic]}))
+    state = {
+        "original_query": "HUAWEI MateBook B7-420 支持这个功能吗？",
+        "rewritten_query": "HUAWEI MateBook B7-420 规格",
+        "item_names": ["HUAWEI MateBook B7-420"],
+    }
+
+    assert legacy.search_by_web(state) == [relevant]
+
+
+def test_legacy_web_evidence_uses_requested_variant_within_shared_manual(monkeypatch):
+    import json
+
+    from app.rag.query import web_search_service as legacy
+
+    relevant = {"title": "HL-3070CW", "snippet": "网络打印"}
+    other = {"title": "HL-3040CN", "snippet": "网络打印"}
+    fake_server(monkeypatch, payload=json.dumps({"pages": [other, relevant]}))
+    state = {
+        "original_query": "Brother HL-3070CW 支持哪些协议？",
+        "rewritten_query": "Brother 打印服务器网络协议",
+        "item_names": ["Brother HL-3040CN / HL-3070CW 网络打印服务器"],
+    }
+
+    assert legacy.search_by_web(state) == [relevant]
+
+
+def test_legacy_web_timeout_leaves_time_for_local_answer(monkeypatch):
+    import time
+
+    from app.rag.query import web_search_service as legacy
+    from app.shared.runtime.deadline import query_deadline, remaining
+    from app.shared.runtime.query_metrics import QueryMetrics, current_metrics
+
+    events, _ = fake_server(
+        monkeypatch, hang_at="call", hang_seconds=0.4, payload='{"pages": [{"title": "Web"}]}',
+    )
+    metrics = QueryMetrics("session", "turn")
+    metrics_token = current_metrics.set(metrics)
+    deadline_token = query_deadline.set(time.monotonic() + 12.1)
+    try:
+        assert legacy.search_by_web({"rewritten_query": "HAK180 接线方式"}) == []
+        assert remaining() > 11
+        assert metrics.degraded_reasons == ["web_timeout"]
+    finally:
+        query_deadline.reset(deadline_token)
+        current_metrics.reset(metrics_token)
+    assert events == ["connect", "call", "cleanup"]
+
+
+@pytest.mark.parametrize("question", ["HAK180 多少钱", "HAK180 保修期", "投诉 HAK180"])
+def test_legacy_web_skips_cases_that_require_policy_or_handoff(monkeypatch, question):
+    from app.rag.query import web_search_service as legacy
+
+    events, _ = fake_server(monkeypatch, payload='{"pages": [{"title": "Web"}]}')
+    assert legacy.search_by_web({"original_query": question, "rewritten_query": "HAK180"}) == []
+    assert not events
 
 
 @pytest.mark.parametrize("external_cancel,previous_cancel", [(False, False), (False, True), (True, False)])

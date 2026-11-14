@@ -1,7 +1,7 @@
 # query模块所有json相关的类型
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, StringConstraints
+from pydantic import BaseModel, Field, StringConstraints, model_serializer
 
 from app.evolution.schema import CitationModel
 from app.rag.query.contracts import Intent, HistoryIntent
@@ -13,6 +13,7 @@ class HealthResponseSchema(BaseModel):
     message:str=None
     # 当前静态资源内容指纹：前端据此判断「页面里的脚本是否已过期」，提示用户刷新
     asset_version:str=""
+    evaluation: dict | None = None
 
 # 查询接口的请求参数json
 class QueryRequestSchema(BaseModel):
@@ -49,6 +50,12 @@ class QueryTaskStatusResponseSchema(BaseModel):
     error_code:str | None=None
     message:str | None=None
 
+class QueryEvaluationSchema(BaseModel):
+    query_mode: Literal["legacy", "agentic", "none"]
+    outcome: Literal["answered", "clarification", "handoff", "chitchat", "out_of_scope"]
+    contexts: list[str]
+
+
 class QueryNotStreamResponseSchema(BaseModel):
     message:str
     session_id:str
@@ -74,7 +81,15 @@ class QueryNotStreamResponseSchema(BaseModel):
     metrics: dict = Field(default_factory=dict)
     # 仅在请求 include_evidence=true 时填充：评测所需的证据正文与分层检索结果
     evidence: list[dict] = Field(default_factory=list)
-    retrieval_layers: dict = Field(default_factory=dict)
+    retrieval_layers: dict[str, list[str]] = Field(default_factory=dict)
+    evaluation: QueryEvaluationSchema | None = None
+
+    @model_serializer(mode="wrap")
+    def _serialize(self, handler):
+        data = handler(self)
+        if self.evaluation is None:
+            data.pop("evaluation", None)
+        return data
 
 # 会话记录
 class HistoryClearResponseSchema(BaseModel):

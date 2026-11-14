@@ -5,8 +5,9 @@ from langchain_core.messages import HumanMessage
 
 from app.process.query.agent.state import QueryGraphState
 from app.rag.query.chunk_search import require_query_and_items, search_chunks, to_chunks
-from app.rag.query.config import HYDE_GATE_ENABLED, HYDE_GATE_SHORT_CHARS
+from app.rag.query.config import HYDE_GATE_ENABLED, HYDE_GATE_SHORT_CHARS, LEGACY_ANSWER_RESERVE_SECONDS
 from app.shared.models import llm_providers
+from app.shared.runtime.deadline import deadline_window
 from app.shared.runtime.logger import logger
 from app.shared.runtime.prompts import load_prompt
 
@@ -15,6 +16,7 @@ _FACTUAL_MARKERS: tuple[str, ...] = (
     "多少", "几", "参数", "规格", "功率", "电压", "电流", "配对码", "序列号",
     "型号", "价格", "电话", "网址", "http", "是多少", "多大", "多重",
 )
+_HYDE_TIMEOUT_SECONDS = 8.0
 
 
 def _skip_hyde(rewritten_query: str) -> bool:
@@ -39,6 +41,10 @@ def search_by_hyde(state: QueryGraphState) -> list:
     if _skip_hyde(rewritten_query):
         logger.info(f"HyDE 分流：短事实型查询跳过假设答案生成，query={rewritten_query[:50]}")
         return []
-    hypothetical_answer = call_llm_answer(rewritten_query)
-    milvus_list = search_chunks(item_names, f"{rewritten_query}:{hypothetical_answer}")
+    with deadline_window(_HYDE_TIMEOUT_SECONDS, reserve_seconds=LEGACY_ANSWER_RESERVE_SECONDS):
+        state["hyde_executed"] = True
+        hypothetical_answer = call_llm_answer(rewritten_query)
+        milvus_list = search_chunks(
+            item_names, f"{rewritten_query}:{hypothetical_answer}", heading_path=state.get("requested_heading_path", ""),
+        )
     return to_chunks(milvus_list)

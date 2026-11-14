@@ -1,6 +1,5 @@
 """查询链路编排：执行 LangGraph 查询图，维护任务进度并推送 SSE 事件。"""
 from __future__ import annotations
-import time
 
 from app.evolution.feedback.collector import flush_session_signals
 from app.evolution.issues import register_unresolved
@@ -9,7 +8,6 @@ from app.process.query.agent.state import QueryGraphState, create_query_default_
 from app.rag.query.answer_payload import answer_fields
 from app.rag.query.errors import classify_query_error
 from app.rag.query.lifecycle import reserve_query, release_query
-from app.shared.config import settings
 from app.shared.clients.history_repository import history_repository
 from app.shared.runtime.logger import logger
 from app.shared.runtime.query_metrics import QueryMetrics, current_metrics, record_query
@@ -31,6 +29,7 @@ def invoke_query_graph(
     is_stream: bool,
     rewrite_hint: str | None = None,
     turn_id: str | None = None,
+    queued_at: float | None = None,
 ) -> QueryGraphState | None:
     """执行一次查询：清空旧进度 → 跑图 → 推送最终事件 → 写入未解决信号。
 
@@ -40,15 +39,11 @@ def invoke_query_graph(
     只有通道里留有本轮事件，前端才能在刷新后重新接管这一轮问答。
     """
     turn_id = turn_id or reserve_query(session_id, original_query)
-    metrics = QueryMetrics(session_id, turn_id)
+    metrics = QueryMetrics(session_id, turn_id, queued_at=queued_at)
     metrics_token = current_metrics.set(metrics)
-    from app.rag.agentic.budget import selected_mode
-    from app.shared.runtime.deadline import query_deadline
-    use_agentic = selected_mode(session_id, mode=settings.agentic.mode,
-                                percent=settings.agentic.gray_percent) == 'agentic'
-    deadline_token = query_deadline.set((query_deadline.get() or time.monotonic() + settings.agentic.timeout_seconds) if use_agentic else None)
     final_state = {}
     final_status = "failed"
+    error_details = None
     try:
         update_task_status(session_id, TASK_STATUS_PROCESSING, push_queue=is_stream)
 
@@ -65,6 +60,8 @@ def invoke_query_graph(
             history_repository.attach_issue(session_id, result_state["answer_id"], result_state["issue_id"], bool(result_state.get("handoff_required")))
         final_state = result_state
         final_status = "completed"
+        if is_stream and result_state.get("answer"):
+            metrics.first_text()
         result_state["metrics"] = metrics.document(result_state.get("intent", "rag"), "completed")
         if result_state.get('agentic_metrics'):
             result_state['metrics']['agentic'] = result_state['agentic_metrics']
@@ -91,19 +88,31 @@ def invoke_query_graph(
         return result_state
     except Exception as exc:  # noqa: BLE001 - 分类后转失败状态 + SSE 错误事件
         code, message = classify_query_error(exc)
+        final_status = "failed"
+        error_details = {"code": code, "type": type(exc).__name__}
+        cause = exc.__cause__ or exc.__context__
+        if cause is not None:
+            error_details["cause_type"] = type(cause).__name__
+        status_code = getattr(exc, "status_code", None)
+        if isinstance(status_code, int):
+            error_details["upstream_status"] = status_code
+        upstream_code = getattr(exc, "code", None)
+        if (isinstance(upstream_code, str) and len(upstream_code) <= 64 and upstream_code.isascii()
+                and upstream_code.replace("_", "").replace("-", "").isalnum()):
+            error_details["upstream_code"] = upstream_code
         update_task_status(session_id, TASK_STATUS_FAILED, push_queue=is_stream)
         set_task_error(session_id, code, message)
         publish(session_id, SSEEvent.ERROR, {
             "code": code,
             "message": f"{session_id} 业务失败，原因：{message}",
         })
+        publish(session_id, SSEEvent.CLOSE, {})
         logger.exception(f"执行查询流程报错（{code}）：{message}")
         return None
 
     finally:
         try:
-            record_query(metrics, final_state or {}, final_status, original_query)
+            record_query(metrics, final_state, final_status, original_query, error=error_details)
         finally:
             current_metrics.reset(metrics_token)
-            query_deadline.reset(deadline_token)
             release_query(session_id, turn_id)

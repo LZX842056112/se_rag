@@ -1,6 +1,7 @@
 """按查询记录模型调用、耗时和已配置的估算费用。未知费用保持空值。"""
 from __future__ import annotations
 
+from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 import hashlib
@@ -21,6 +22,10 @@ class QueryMetrics:
     started: float = field(default_factory=time.perf_counter)
     first_token_ms: float | None = None
     classification_ms: float = 0.0
+    queued_at: float | None = None
+    stage_ms: dict[str, float] = field(default_factory=dict)
+    rerank_pairs: int | None = None
+    rerank_input_tokens: int | None = None
     llm_calls: int = 0
     completed_calls: int = 0
     input_tokens: int = 0
@@ -41,6 +46,11 @@ class QueryMetrics:
                 "session_id": self.session_id, "turn_id": self.turn_id,
                 "intent": intent, "status": status, "ts": time.time(),
                 "duration_ms": (time.perf_counter() - self.started) * 1000,
+                "queue_ms": (max(0, self.started - self.queued_at) * 1000
+                             if self.queued_at is not None else None),
+                "stage_ms": {name: round(ms, 2) for name, ms in self.stage_ms.items()},
+                "rerank_pairs": self.rerank_pairs,
+                "rerank_input_tokens": self.rerank_input_tokens,
                 "first_token_ms": self.first_token_ms,
                 "classification_ms": self.classification_ms,
                 "llm_calls": self.llm_calls, "input_tokens": self.input_tokens,
@@ -52,6 +62,21 @@ class QueryMetrics:
 
 
 current_metrics: ContextVar[QueryMetrics | None] = ContextVar("query_metrics", default=None)
+
+
+@contextmanager
+def measure_stage(name: str):
+    metrics = current_metrics.get()
+    if metrics is None:
+        yield
+        return
+    started = time.perf_counter()
+    try:
+        yield
+    finally:
+        elapsed_ms = (time.perf_counter() - started) * 1000
+        with metrics.lock:
+            metrics.stage_ms[name] = metrics.stage_ms.get(name, 0.0) + elapsed_ms
 
 
 def mark_degraded(reason: str) -> None:
@@ -128,7 +153,7 @@ def instrument_client(client, model: str | None = None):
     return measure_client(client, metrics, model, prices)
 
 
-def record_query(metrics: QueryMetrics, state: dict, status: str, query: str):
+def record_query(metrics: QueryMetrics, state: dict, status: str, query: str, *, error: dict | None = None):
     from app.shared.clients.mongo import get_collection
     doc = metrics.document(state.get("intent", "rag"), status)
     doc.update({
@@ -136,10 +161,12 @@ def record_query(metrics: QueryMetrics, state: dict, status: str, query: str):
         "business_tag": state.get("business_tag", ""),
         "handoff": bool(state.get("handoff_required")),
         "query_hash": hashlib.sha256("".join(query.lower().split()).encode()).hexdigest(),
-        "query_mode": state.get('query_mode', 'agentic'),
+        "query_mode": state.get('query_mode', 'none'),
         "agentic_stop_reason": state.get('agentic_stop_reason', ''),
         "agentic_metrics": state.get('agentic_metrics', {}),
     })
+    if error:
+        doc["error"] = error
     try:
         get_collection(settings.mongo.query_runs_collection).update_one(
             {"turn_id": metrics.turn_id}, {"$setOnInsert": doc}, upsert=True,

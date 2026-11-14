@@ -1,6 +1,8 @@
 """重排输入长度控制：LLM 压缩不足时必须按 token 硬截断。"""
 from __future__ import annotations
 
+import pytest
+
 from app.rag.query import rerank_service
 from app.shared.models import llm_providers
 
@@ -25,9 +27,7 @@ class _FakeReranker:
 
 def test_overlong_answer_is_hard_truncated(monkeypatch):
     monkeypatch.setattr(llm_providers, "reranker_model", lambda: _FakeReranker())
-    # 压缩无效（原样返回超长文本）时，仍必须满足 token 预算
-    monkeypatch.setattr(rerank_service, "_summarize_for_rerank", lambda query, answer, limit: answer)
-    monkeypatch.setattr(llm_providers, "chat", lambda *a, **k: None)  # 避免真实建链
+    monkeypatch.setattr(llm_providers, "chat", lambda *a, **k: pytest.fail("本地重排不应等待模型压缩"))
 
     docs = [{"text": " ".join(f"w{i}" for i in range(600))}]
     pairs = rerank_service.create_question_answer_lists("q1 q2", docs)

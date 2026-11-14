@@ -2,6 +2,7 @@
 import asyncio
 
 from agents.mcp import MCPServerStreamableHttp
+from anyio import fail_after
 
 from app.shared.config import settings
 
@@ -22,24 +23,26 @@ async def request_web_search(query: str, count: int, *, request_timeout: float,
     server = MCPServerStreamableHttp(
         name=name, params=params, cache_tools_list=True, max_retry_attempts=retries, **options,
     )
+
     async def call():
         # SDK 的 AnyIO 取消作用域必须在同一任务中连接并释放。
-        try:
-            await server.connect()
-            return await server.call_tool(
-                tool_name="bailian_web_search", arguments={"query": query, "count": count},
-            )
-        finally:
-            await server.cleanup()
+        # 截止后，清理期间的网络等待也使用同一取消作用域。
+        with fail_after(overall_timeout):
+            try:
+                await server.connect()
+                return await server.call_tool(
+                    tool_name="bailian_web_search", arguments={"query": query, "count": count},
+                )
+            finally:
+                await server.cleanup()
 
     caller = asyncio.current_task()
     initial_cancels = caller.cancelling()
-    async with asyncio.timeout(overall_timeout):
-        task = asyncio.create_task(call())
-        try:
-            return await task
-        except asyncio.CancelledError as exc:
-            if caller.cancelling() > initial_cancels:
-                raise
-            # SDK 后台任务失败可能取消自身任务；它是传输故障，不能取消主查询。
-            raise ConnectionError("MCP transport cancelled") from exc
+    task = asyncio.create_task(call())
+    try:
+        return await task
+    except asyncio.CancelledError as exc:
+        if caller.cancelling() > initial_cancels:
+            raise
+        # SDK 后台任务失败可能取消自身任务；它是传输故障，不能取消主查询。
+        raise ConnectionError("MCP transport cancelled") from exc

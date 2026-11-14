@@ -13,7 +13,9 @@ from langgraph.graph import END, StateGraph
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.rag.agentic.budget import Budget, StopRun, local_tokenizer
+from app.rag.query.eval_evidence import chunk_ids
 from app.shared.config import settings
+from app.shared.runtime.query_metrics import measure_stage
 
 
 class Action(BaseModel):
@@ -59,6 +61,7 @@ def _model(kind, payload, timeout):
               '必须逐项核对对象、属性、用途和条件。名称近似或产品相同不能证明两个功能、参数或凭据共用一个值。'
               '同份手册中的其他型号功能不适用于当前型号；封面通用介绍不能证明全部型号支持。'
               '必须核对型号适用范围，保留参数前提和安全限制；无法确认时继续读取或澄清。'
+              '排障证据必须适用于问题所述症状和型号。不要用同一手册里其他症状的操作来补充答案。'
               'search参数为query或terms，read参数为chunk_ids。answer只允许在证据充足时。\n'
               + json.dumps(payload, ensure_ascii=False))
     if kind == 'assess':
@@ -73,7 +76,9 @@ def _model(kind, payload, timeout):
     elif kind == 'draft':
         prompt += '\n按answer_prompt生成答案。引用已另存结构化来源，正文不需要展示内部证据哈希。'
     elif kind == 'verify':
-        prompt += '\n只检查draft的事实与安全限制是否由answer_contexts支持。来源ID只能从给定evidence_ids中逐字选择。'
+        prompt += ('\n逐项检查draft的结论和操作是否由answer_contexts直接支持且回答question。'
+                   '其他症状的操作、未经请求且非必要的步骤、遗漏的安全条件或同时作答和拒答都判为不通过。'
+                   '来源ID只能从给定evidence_ids中逐字选择。')
     if kind == 'select':
         # 动作选择：输出必须严格命中 Action 的 JSON Schema，不允许多余字段
         prompt += ('\n动作必须符合以下JSON Schema，不得增加reason等字段：' +
@@ -138,6 +143,8 @@ class Run:
         self.no_gain = self.invalid = self.repairs = self.model_calls = 0
         self.answer = ''        # 最终答案文本
         self.final_ids = []     # 支撑答案的最终证据 id 列表
+        self.retrieval_chunk_ids: dict[str, None] = {}
+        self.answer_contexts: list[str] = []
         self.validation_feedback = []  # select 输出未通过校验时的错误摘要
 
     def payload(self):
@@ -161,7 +168,9 @@ class Run:
                        'evidence_ids': self.final_ids, 'draft': self.answer}
             if kind == 'draft':
                 payload['answer_prompt'] = self.state.get('prompt', '')  # 草稿阶段把答案提示词一并传入
-        result = self.model(kind, payload, timeout)
+                self.answer_contexts = payload['answer_contexts']
+        with measure_stage(f"agentic_{kind}"):
+            result = self.model(kind, payload, timeout)
         self.budget.remaining()  # 出模型后再查一次时长，防止调用期间超预算
         if not isinstance(result, dict):
             raise ValueError('invalid_model_output')
@@ -179,16 +188,20 @@ class Run:
         """
         self.budget.take(tool, arguments)
         started = time.monotonic()
-        result = self.tools.execute(tool, arguments, self.budget.remaining())
+        timeout = self.budget.remaining()
+        self.state['query_mode'] = 'agentic'
+        with measure_stage("agentic_retrieval"):
+            result = self.tools.execute(tool, arguments, timeout)
         # 兼容 pydantic 结果对象与普通 dict
         result = result.model_dump() if hasattr(result, 'model_dump') else result
-        self.budget.remaining()
         # 只有 status==ok 才接受证据；否则 entries 为空
         entries = result.get('evidence', []) if result.get('status') == 'ok' else []
+        rows = [entry.model_dump() if hasattr(entry, 'model_dump') else dict(entry) for entry in entries]
+        self.retrieval_chunk_ids.update(dict.fromkeys(chunk_ids(rows)))
+        self.budget.remaining()
         new = 0
         ids = []
-        for entry in entries:
-            row = entry.model_dump() if hasattr(entry, 'model_dump') else dict(entry)
+        for row in rows:
             eid = str(row.get('evidence_id') or '')
             if not eid or not row.get('text'):
                 continue  # 缺 id 或无正文的条目丢弃
@@ -309,7 +322,12 @@ class Run:
 
     def verify(self):
         """核验草稿：所有事实与安全限制都须由最终证据支持，才可作为最终答案。"""
-        result = self.call('verify')
+        from app.rag.query.answer_service import NO_ANSWER_REPLY
+
+        if NO_ANSWER_REPLY in self.answer:
+            result = {'supported': False, 'unsupported': ['草稿含有固定拒答句']}
+        else:
+            result = self.call('verify')
         ids = result.get('evidence_ids')
         # 通过条件：明确 supported、无列出 unsupported 项、且引用的 id 都在最终证据内
         if (result.get('supported') is True and not result.get('unsupported') and
@@ -378,10 +396,10 @@ def run_agentic(state, *, tools=None, model=None, budget=None, persist=True):
     的兜底；同时把诊断、轨迹、指标写入 state 供上层记录与展示。
     """
     from app.rag.query import answer_service as answers
-    from app.rag.query.business import apply_business_policy, classify_business
+    from app.rag.query.business import apply_business_policy, classify_business_request
     cfg = settings.agentic
-    state['query_mode'] = 'agentic'  # 标记走 agentic 链路
-    state['business_tag'] = classify_business(state.get('original_query') or state.get('rewritten_query', ''))
+    state['query_mode'] = 'none'
+    state['business_tag'] = classify_business_request(state)
     if tools is None:
         from app.rag.agentic.tools import RetrievalTools
         tools = RetrievalTools(state)  # 默认检索工具集（持有 state 上下文）
@@ -409,7 +427,9 @@ def run_agentic(state, *, tools=None, model=None, budget=None, persist=True):
         # 未能给出有把握的答案（或业务要求转人工）：落到「资料不足」的兜底话术
         state['answer'] = state.get('answer') if state.get('handoff_required') else '现有证据不足以确认答案，请补充资料或交由负责人核实。'
         state['handoff_required'] = True
-        state['issue_type'] = 'missing_material'
+        if not state.get('issue_type'):
+            state['issue_type'] = 'missing_material'
+        state['evaluation_contexts'] = run.answer_contexts
         state['reranked_docs'], state['answer_contexts'], state['evidence_manifest'] = [], [], []
     else:
         # verify 返回二元结论；没有独立数值评分时不得把它显示为100%。
@@ -417,6 +437,7 @@ def run_agentic(state, *, tools=None, model=None, budget=None, persist=True):
     # 回写判定结论、停止原因、轨迹及诊断信息
     state['agentic_verified'] = run.reason == 'answered' and not state.get('handoff_required')
     state['agentic_stop_reason'] = run.reason
+    state['agentic_retrieval_chunk_ids'] = list(run.retrieval_chunk_ids)
     state['agentic_trace'] = run.trace
     state['agentic_diagnostics'] = {
         'evidence_sufficient': run.coverage == 'supported',  # evidence 是否充足

@@ -131,7 +131,7 @@ def test_confirm_item_name_offers_options_when_no_name_extracted(monkeypatch):
     monkeypatch.setattr(service, "get_history_messages_and_context", lambda session_id: "")
     monkeypatch.setattr(
         service, "call_llm_item_name_and_rewritten",
-        lambda history_text, original_query: {"item_names": [], "rewritten_query": "烫金机怎么安装"},
+        lambda history_text, original_query, **kwargs: {"item_names": [], "rewritten_query": "烫金机怎么安装"},
     )
     monkeypatch.setattr(history_module.history_repository, "save_message", lambda **kwargs: None)
 
@@ -141,3 +141,27 @@ def test_confirm_item_name_offers_options_when_no_name_extracted(monkeypatch):
     assert result["item_name_options"], "没抽出主体时必须给出可点选主体"
     assert result["item_name_options"][0]["item_name"] == "Brother HAK 180 烫金机"
     assert "请点击下方主体直接提问" in result["answer"]
+
+
+@pytest.mark.parametrize(("question", "expected_count"), [
+    ("首次连接USB打印机到华为擎云G540时，系统会自动执行什么操作？", 1),
+    ("华为擎云G540 如何连接 HL-3040CN？", 2),
+])
+def test_confirm_item_name_keeps_explicit_models(monkeypatch, question, expected_count):
+    from app.rag.query import item_name_confirm_service as service
+
+    names = ["华为擎云G540", "Brother HL-3040CN / HL-3070CW 网络打印服务器"]
+    rewritten = f"{names[0]} 与 {names[1]} 的连接操作。"
+    monkeypatch.setattr(service, "find_pending_clarify", lambda session: {})
+    monkeypatch.setattr(service, "get_history_messages_and_context", lambda session: "无有效对话记录!")
+    monkeypatch.setattr(service, "call_llm_item_name_and_rewritten", lambda *args, **kwargs: {
+        "item_names": names, "rewritten_query": rewritten,
+    })
+    monkeypatch.setattr(service, "search_by_item_names", lambda subjects: {})
+    monkeypatch.setattr(service, "select_item_names", lambda hits: {
+        "confirmed_list": [{"item_name": name} for name in names],
+    })
+    monkeypatch.setattr(service, "save_history_message", lambda state: None)
+    result = service.confirm_item_name(create_query_default_state(session_id="s1", original_query=question))
+    assert result["item_names"] == names[:expected_count]
+    assert result["rewritten_query"] == (question if expected_count == 1 else rewritten)

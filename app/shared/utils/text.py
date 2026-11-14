@@ -15,6 +15,7 @@ MIN_SUFFIX_LEN = 4
 
 # 多主体分隔符（写入端用逗号连接多个主体名）
 _SUBJECT_SEPARATOR = re.compile(r"[,，]")
+_PRODUCT_MODEL = re.compile(r"(?<![a-z0-9])[a-z]+[- ]?\d+[a-z0-9]*(?:-\d+[a-z0-9]*)*(?![a-z0-9])")
 
 
 def normalize_item_name(name: object) -> str:
@@ -48,6 +49,12 @@ def is_same_entity(name_a: object, name_b: object) -> bool:
 def name_tokens(name: object) -> list[str]:
     """主体名切分：NFKC 归一 + 小写 + 按空白切 token（保留 token 边界）。"""
     return unicodedata.normalize("NFKC", str(name or "")).lower().split()
+
+
+def product_model_tokens(text: str) -> set[str]:
+    """提取型号并归一化空格与连字符。"""
+    return {model.replace("-", "").replace(" ", "")
+            for model in _PRODUCT_MODEL.findall(unicodedata.normalize("NFKC", text).casefold())}
 
 
 def token_prefix_match(a: list[str], b: list[str]) -> bool:

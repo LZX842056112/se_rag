@@ -14,8 +14,12 @@ def node_search_embedding_hyde(state):
     既有口径一致），不得把整笔查询打成 500。
     """
     try:
-        return {"hyde_embedding_chunks": search_by_hyde(state)}
+        chunks = search_by_hyde(state)
     except Exception as exc:
         mark_degraded("hyde_error")  # noqa: BLE001 - HyDE 失败降级为空，由 zero_hit 信号体现
         logger.warning(f"HyDE 检索失败，降级为该路空结果：{exc}")
-        return {"hyde_embedding_chunks": []}
+        chunks = []
+    result = {"hyde_embedding_chunks": chunks}
+    if state.get("hyde_executed"):
+        result["hyde_executed"] = True
+    return result

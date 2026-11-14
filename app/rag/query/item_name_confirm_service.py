@@ -12,12 +12,14 @@ from langchain_core.messages import HumanMessage
 from app.process.query.agent.state import QueryGraphState
 from app.rag.item_name.match import search_by_item_names, select_item_names, similar_from_query
 from app.rag.query.history_utils import build_history_context
+from app.rag.query.intent_route_service import OUT_OF_SCOPE
 from app.shared.clients.history_repository import history_repository
 from app.shared.models import llm_providers
 from app.shared.runtime.logger import logger, step_log
 from app.shared.runtime.prompts import load_prompt
 from app.shared.utils.json_utils import parse_json_object
 from app.shared.utils.require import require_state_str
+from app.shared.utils.text import normalize_item_name, product_model_tokens
 
 
 @step_log("get_history_messages_and_context")
@@ -27,12 +29,17 @@ def get_history_messages_and_context(session_id: str) -> str:
 
 
 @step_log("call_llm_item_name_and_rewritten")
-def call_llm_item_name_and_rewritten(history_text: str, original_query: str) -> dict:
+def call_llm_item_name_and_rewritten(history_text: str, original_query: str, *, check_scope: bool = False) -> dict:
     """调用模型识别主体名并改写问题（历史上下文放在规则之后，避免干扰规则读取）。"""
     json_llm_client = llm_providers.chat(json_mode=True)
     history_prompt_text = load_prompt(
         "rewritten_query_and_itemnames", query=original_query, history_text=history_text
     )
+    if check_scope:
+        history_prompt_text = (
+            '在 JSON 中额外返回布尔字段 "out_of_scope"。只有请求明确与产品、使用或售后无关时才返回 true。'
+            '缺少型号、表述含糊或可能是产品追问时返回 false。\n\n' + history_prompt_text
+        )
     response = json_llm_client.invoke([HumanMessage(content=history_prompt_text)])
     result_dict = parse_json_object(response.content)
     # 参数校验赋予默认值：模型可能只返回其中一个字段
@@ -295,7 +302,7 @@ def apply_item_name_result(state: QueryGraphState, list_dict: dict[str, list], r
             )
         return
 
-    state["answer"] = "本次问题没有关联到任何主体，也没有找到相似主体。请补充产品名称后再提问。"
+    state["answer"] = "请提供产品名称或型号。请说明具体现象或要调整的项目。"
 
 
 @step_log("save_history_message")
@@ -311,6 +318,26 @@ def save_history_message(state: QueryGraphState) -> None:
         intent="rag",
         turn_id=state.get("turn_id", ""),
     )
+
+
+def _keep_supported_subjects(confirmed: list[dict], question: str, history: str) -> list[dict]:
+    """已有明确主体时，检查附加型号是否在问题或历史中出现。"""
+    if len(confirmed) < 2:
+        return confirmed
+    normalized_question = normalize_item_name(question)
+    if not any(normalize_item_name(item["item_name"]) in normalized_question for item in confirmed):
+        return confirmed
+
+    source = f"{question}\n{history}"
+    normalized_source = normalize_item_name(source)
+    source_models = product_model_tokens(source)
+    supported = []
+    for item in confirmed:
+        name = item["item_name"]
+        models = product_model_tokens(name)
+        if not models or models & source_models or normalize_item_name(name) in normalized_source:
+            supported.append(item)
+    return supported
 
 
 @step_log("confirm_item_name")
@@ -338,12 +365,18 @@ def confirm_item_name(state: QueryGraphState) -> QueryGraphState:
         return state
 
     history_text = get_history_messages_and_context(session_id)
-    result = call_llm_item_name_and_rewritten(history_text, original_query)
+    check_scope = state.get("intent_classification_failed", False)
+    result = call_llm_item_name_and_rewritten(history_text, original_query, check_scope=check_scope)
 
     list_dict: dict[str, list] = {}
     if result.get("item_names"):
         milvus_result = search_by_item_names(result["item_names"])
         list_dict = select_item_names(milvus_result)
+        confirmed = list_dict["confirmed_list"]
+        supported = _keep_supported_subjects(confirmed, original_query, history_text)
+        if len(supported) < len(confirmed):
+            list_dict["confirmed_list"] = supported
+            result["rewritten_query"] = original_query
     else:
         # 模型没抽出主体（例如只说了品类「烫金机」）：仍然要用**问句本身**在目录里找相似主体，
         # 否则同一界面上「hak180 给选项、烫金机怎么安装 只回请补充产品名称」，用户无法理解。
@@ -353,6 +386,9 @@ def confirm_item_name(state: QueryGraphState) -> QueryGraphState:
             logger.info(
                 f"模型未抽出主体，按问句给出相似主体供点选：{[item['item_name'] for item in similar]}"
             )
+        elif check_scope and result.get("out_of_scope") is True:
+            state["query_outcome"] = OUT_OF_SCOPE
+            return state
         else:
             logger.info(f"模型未抽出主体，且问句中未出现库内关键词：query={original_query}")
 
