@@ -183,6 +183,10 @@ uv run uvicorn app.api.http.query_server:app --host 0.0.0.0 --port 8001 --worker
 
 从对话页或审批页打开「流程监控」。选择一个流程，再选择运行记录。运行中的节点会高亮。页面自动接收节点状态，并在断线后重新连接。问答视图需要启用会话归属校验，并使用当前浏览器的会话。导入视图使用导入令牌。调度轮次和候选生命周期使用自进化管理令牌。
 
+桌面默认显示 3D 场景。拖动旋转，滚轮或双指缩放。手机默认显示平面图，可用场景按钮切换。活动连线上的光束沿流程方向移动。启用减少动态效果时，节点保留静态高亮。
+
+在 [workflow-scene-config.js](app/resources/js/workflow-scene-config.js) 中配置场景。用 `nodes` 按节点 ID 设置展示名称 `label`、造型 `shape` 和高度 `height`。造型支持 `module`、`stack` 和 `gateway`。用 `views.<view>.space` 和 `views.<view>.flat` 设置两种视图的行与列，用 `null` 留空。用 `spacing` 设置 3D 场景的列距和行距，用 `camera` 设置初始方位角和俯角。用 `flowSpeed` 设置光束每秒移动的像素数。实时事件中的 `graph.nodes` 和 `graph.edges` 决定实际呈现的节点和连线。
+
 两个服务默认通过 `127.0.0.1` 和现有服务端口连接。分开部署时，在问答服务设置 `WORKFLOW_IMPORT_ORIGIN`，在导入服务设置 `WORKFLOW_QUERY_ORIGIN`。例如，设置为内部服务地址 `http://import:8000` 和 `http://query:8001`。允许代理实时转发 `text/event-stream` 响应。多 worker 部署时，两个服务使用同一个 Redis。
 
 ## 关键配置

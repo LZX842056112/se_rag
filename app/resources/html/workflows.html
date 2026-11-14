@@ -7,12 +7,12 @@
   <link rel="stylesheet" href="/static/app.css?v={{ASSET_V}}">
   <link rel="stylesheet" href="/static/workflows.css?v={{ASSET_V}}">
 </head>
-<body>
+<body class="workflow-body">
   <main class="workflow-page">
     <header class="workflow-header">
-      <div class="brand">
-        <div class="logo" aria-hidden="true">知</div>
-        <div class="title"><strong>知汇</strong><span>流程监控</span></div>
+      <div class="workflow-brand">
+        <span class="workflow-brand-mark" aria-hidden="true"></span>
+        <div><strong>知汇</strong><span>运行中心</span></div>
       </div>
       <nav class="workflow-nav" aria-label="业务页面">
         <a href="/">返回对话</a>
@@ -21,7 +21,10 @@
     </header>
 
     <div class="workflow-heading">
-      <h1>流程监控</h1>
+      <div>
+        <p class="workflow-kicker">数字孪生</p>
+        <h1>实时流程监控</h1>
+      </div>
       <p id="workflowConnection" class="workflow-connection" role="status" data-state="idle">等待连接</p>
     </div>
     <nav id="workflowViews" class="workflow-views" aria-label="流程类型">
@@ -36,11 +39,22 @@
       <button class="btn" type="submit">连接</button>
     </form>
 
+    <dl id="workflowMetrics" class="workflow-metrics" aria-label="运行列表统计">
+      <div><dt>进行中</dt><dd id="workflowActive">—</dd></div>
+      <div><dt>已完成</dt><dd id="workflowCompleted">—</dd></div>
+      <div><dt>需关注</dt><dd id="workflowAlerts" aria-live="polite">—</dd></div>
+      <div><dt>最新更新</dt><dd id="workflowUpdated">—</dd></div>
+    </dl>
+
     <div class="workflow-workspace">
       <section class="workflow-runs workflow-panel" aria-labelledby="runsHeading">
         <div class="workflow-panel-title"><h2 id="runsHeading">运行记录</h2><span id="workflowCount"></span></div>
         <p id="workflowEmpty" class="workflow-empty">暂无运行记录</p>
         <div id="workflowRuns" class="workflow-run-list"></div>
+        <div id="workflowAttention" class="workflow-attention" hidden>
+          <h3>节点告警</h3>
+          <ul id="workflowAlertList"></ul>
+        </div>
       </section>
       <section class="workflow-main workflow-panel" aria-labelledby="graphHeading">
         <div class="workflow-graph-header">
@@ -51,21 +65,40 @@
           <span class="workflow-status" id="workflowRunStatus" hidden></span>
         </div>
         <p id="workflowNotice" class="workflow-notice" role="status" hidden></p>
+        <div id="workflowControls" class="workflow-controls" hidden>
+          <div class="workflow-mode" role="group" aria-label="视图">
+            <button type="button" data-mode="space" aria-pressed="false">3D 场景</button>
+            <button type="button" data-mode="flat" aria-pressed="false">平面</button>
+          </div>
+          <div id="workflowCamera" class="workflow-camera" role="group" aria-label="场景操作">
+            <button type="button" data-camera="left" aria-label="向左旋转" title="向左旋转">↶</button>
+            <button type="button" data-camera="right" aria-label="向右旋转" title="向右旋转">↷</button>
+            <button type="button" data-camera="out" aria-label="缩小" title="缩小">−</button>
+            <span id="workflowZoom" aria-label="缩放比例">100%</span>
+            <button type="button" data-camera="in" aria-label="放大" title="放大">+</button>
+            <button type="button" data-camera="reset" aria-label="复位视角" title="复位视角">复位</button>
+          </div>
+        </div>
+        <p id="workflowCameraHint" class="workflow-camera-hint" hidden></p>
+        <div id="workflowDiagram" class="workflow-diagram" role="region" aria-label="流程场景" aria-describedby="workflowCameraHint" hidden>
+          <canvas id="workflowEdges" class="workflow-edges" aria-hidden="true"></canvas>
+          <canvas id="workflowFlow" class="workflow-flow" aria-hidden="true"></canvas>
+          <div id="workflowNodes" class="workflow-nodes"></div>
+          <ul id="workflowEdgeList" class="workflow-sr-only" aria-label="节点连接"></ul>
+        </div>
         <div class="workflow-legend" aria-label="节点状态" id="workflowLegend" hidden>
           <span class="workflow-status" data-state="running"><i aria-hidden="true">●</i>运行中</span>
           <span class="workflow-status" data-state="completed"><i aria-hidden="true">✓</i>已完成</span>
           <span class="workflow-status" data-state="idle"><i aria-hidden="true">○</i>未执行</span>
           <span class="workflow-status" data-state="failed"><i aria-hidden="true">!</i>失败</span>
-        </div>
-        <div id="workflowDiagram" class="workflow-diagram" hidden>
-          <canvas id="workflowEdges" class="workflow-edges" aria-hidden="true"></canvas>
-          <div id="workflowNodes" class="workflow-nodes"></div>
-          <ul id="workflowEdgeList" class="workflow-sr-only" aria-label="节点连接"></ul>
+          <span class="workflow-status" data-state="retrying"><i aria-hidden="true">↻</i>等待重试</span>
         </div>
       </section>
     </div>
   </main>
   <script src="/static/app.js?v={{ASSET_V}}"></script>
+  <script src="/static/workflow-scene-config.js?v={{ASSET_V}}"></script>
+  <script src="/static/workflow-scene.js?v={{ASSET_V}}"></script>
   <script src="/static/workflows.js?v={{ASSET_V}}"></script>
 </body>
 </html>

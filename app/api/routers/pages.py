@@ -30,6 +30,8 @@ _ASSETS: dict[str, tuple[str, str]] = {
     "import.css": ("css/import.css", "text/css"),
     "import.js": ("js/import.js", "text/javascript"),
     "workflows.css": ("css/workflows.css", "text/css"),
+    "workflow-scene-config.js": ("js/workflow-scene-config.js", "text/javascript"),
+    "workflow-scene.js": ("js/workflow-scene.js", "text/javascript"),
     "workflows.js": ("js/workflows.js", "text/javascript"),
 }
 
