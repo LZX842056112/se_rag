@@ -1,13 +1,19 @@
 """模型能力统一入口：业务层通过 ``llm_providers`` 获取对话/视觉/向量/重排能力。"""
 from __future__ import annotations
 
+from collections.abc import Iterator
+
+import httpx
 from langchain_openai import ChatOpenAI
+from openai import APIConnectionError
 
 from app.shared.config import settings
 from app.shared.models.embedding import embed_text, generate_embeddings
 from app.shared.models.llm import get_llm_client
-from app.shared.runtime.query_metrics import instrument_client
 from app.shared.models.reranker import get_reranker_model
+from app.shared.runtime.deadline import remaining
+from app.shared.runtime.logger import logger
+from app.shared.runtime.query_metrics import instrument_client, mark_degraded
 
 
 class LLMProvider:
@@ -16,7 +22,6 @@ class LLMProvider:
     def chat(self, model_name: str | None = None, json_mode: bool = False, *, timeout_seconds: float | None = None, max_retries: int | None = None) -> ChatOpenAI:
         """获取对话模型；``model_name`` 为空时使用配置中的默认模型。"""
         options = {}
-        from app.shared.runtime.deadline import remaining
         available = remaining()
         if available is not None:
             timeout_seconds = min(available, timeout_seconds or settings.import_.llm_timeout_seconds)
@@ -26,6 +31,25 @@ class LLMProvider:
         if max_retries is not None:
             options["max_retries"] = max_retries
         return instrument_client(get_llm_client(model=model_name, json_mode=json_mode, **options), model_name)
+
+    def stream_chat_text(self, messages) -> Iterator[str]:
+        """Retry one transport failure before the model emits any text."""
+        for attempt in range(2):
+            emitted_text = False
+            try:
+                for chunk in self.chat().stream(messages):
+                    if chunk.content:
+                        emitted_text = True
+                        yield chunk.content
+                return
+            except (APIConnectionError, httpx.NetworkError, httpx.RemoteProtocolError, httpx.TimeoutException) as exc:
+                if emitted_text or attempt:
+                    raise
+                available = remaining()
+                if available is not None and available < 1.0:
+                    raise
+                mark_degraded("llm_stream_retry")
+                logger.warning(f"流式模型在输出文本前断开，重试一次。错误类型 {type(exc).__name__}")
 
     def vision_chat(self, vision_model_name: str | None = None) -> ChatOpenAI:
         """获取视觉语言模型（用于 Markdown 图片理解）。"""

@@ -191,6 +191,16 @@ def test_persistent_coalescing_keeps_known_contexts_separate(db, different):
     assert db[settings.mongo.k_gaps_collection].count_documents({}) == 2
 
 
+def test_cursor_does_not_skip_feedback_with_the_same_timestamp(db):
+    timestamp = time.time()
+    first = event(db, ts=timestamp)
+    assert len(detector.scan_unresolved_feedbacks(batch=1)) == 1
+    second = event(db, ts=timestamp, item_names=["HL3040"])
+    assert len(detector.scan_unresolved_feedbacks(batch=1)) == 1
+    feedback = db[settings.mongo.fb_events_collection]
+    assert all("gap_scanned_at" in feedback.find_one({"_id": row["_id"]}) for row in (first, second))
+
+
 def test_legacy_completed_strategy_target_does_not_absorb_new_answer(db):
     event(db)
     assert scheduler.run_scan_and_generate_once()["strategy"] == 1

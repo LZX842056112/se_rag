@@ -11,7 +11,7 @@ from typing import Iterable
 from app.rag_eval.dataset import EvalCase
 
 # 参与聚合的检索层：与查询图 state 的字段一一对应
-LAYERS: tuple[str, ...] = ("embedding", "hyde", "rrf", "reranked")
+LAYERS: tuple[str, ...] = ("embedding", "keyword", "hyde", "rrf", "reranked", "selected", "agentic_retrieval", "final")
 
 
 def _ids(values: Iterable[object] | None) -> list[str]:
@@ -19,7 +19,12 @@ def _ids(values: Iterable[object] | None) -> list[str]:
 
 
 def _hit_flags(retrieved: list[str], gold: set[str], k: int) -> list[int]:
-    return [1 if chunk_id in gold else 0 for chunk_id in retrieved[:k]]
+    remaining = gold.copy()
+    flags = []
+    for chunk_id in retrieved[:k]:
+        flags.append(int(chunk_id in remaining))
+        remaining.discard(chunk_id)
+    return flags
 
 
 def precision_at_k(retrieved: list[str] | None, gold: list[str] | None, k: int) -> float | None:
@@ -27,10 +32,7 @@ def precision_at_k(retrieved: list[str] | None, gold: list[str] | None, k: int) 
     gold_set = set(_ids(gold))
     if not gold_set:
         return None
-    ids = _ids(retrieved)[:k]
-    if not ids:
-        return 0.0
-    return sum(1 for chunk_id in ids if chunk_id in gold_set) / len(ids)
+    return len(gold_set.intersection(_ids(retrieved)[:k])) / k if k > 0 else 0.0
 
 
 def recall_at_k(retrieved: list[str] | None, gold: list[str] | None, k: int) -> float | None:
@@ -38,8 +40,7 @@ def recall_at_k(retrieved: list[str] | None, gold: list[str] | None, k: int) -> 
     gold_set = set(_ids(gold))
     if not gold_set:
         return None
-    hits = sum(1 for chunk_id in _ids(retrieved)[:k] if chunk_id in gold_set)
-    return hits / len(gold_set)
+    return len(gold_set.intersection(_ids(retrieved)[:k])) / len(gold_set)
 
 
 def mrr_at_k(retrieved: list[str] | None, gold: list[str] | None, k: int) -> float | None:
@@ -70,15 +71,17 @@ def must_hit_rate(retrieved: list[str] | None, must_hit: list[str] | None, k: in
     must_set = set(_ids(must_hit))
     if not must_set:
         return None
-    hits = sum(1 for chunk_id in _ids(retrieved)[:k] if chunk_id in must_set)
-    return hits / len(must_set)
+    return len(must_set.intersection(_ids(retrieved)[:k])) / len(must_set)
 
 
 def evaluate_case(result_layers: dict[str, list[str]], case: EvalCase, ks: tuple[int, ...]) -> dict:
     """计算单题、分层、多 k 的检索指标。"""
+    equivalents = {alias: primary for primary, aliases in case.chunk_equivalents for alias in aliases}
     layers: dict[str, dict] = {}
     for layer in LAYERS:
-        retrieved = _ids(result_layers.get(layer))
+        if layer not in result_layers:
+            continue
+        retrieved = [equivalents.get(chunk_id, chunk_id) for chunk_id in _ids(result_layers[layer])]
         metrics: dict[str, float | None] = {}
         for k in ks:
             prefix = f"@{k}"
@@ -111,5 +114,6 @@ def aggregate(case_rows: list[dict], ks: tuple[int, ...]) -> dict:
                 if values:
                     metrics[key] = round(sum(values) / len(values), 4)
                     metrics[f"{key}_n"] = len(values)
-        summary[layer] = metrics
+        if metrics:
+            summary[layer] = metrics
     return summary

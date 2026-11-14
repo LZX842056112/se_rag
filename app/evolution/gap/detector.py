@@ -27,18 +27,19 @@ from app.shared.runtime.logger import logger
 # 聚类窗口内视为同一缺口（秒）
 _DEDUP_WINDOW = 3600
 
-# 扫描游标（进程内）：按 ``ts`` **升序**推进。
+# 扫描游标（进程内）：按 ``ts`` 与 ``_id`` 升序推进。
 # 真实问题：早期实现 `.sort("ts", -1).limit(batch)` 只取「最新 batch 条」，反馈事件一多，
 # 更早的未解决信号就永远排不进窗口（永远扫不到）。改为升序 + 游标前进后，窗口内的信号
 # 一定会在有限轮次内被逐条看到；游标用尽（窗口内没有更新的信号）时回到窗口起点复扫，
 # 已处理反馈有持久标记。游标重置或反馈时间更新不会重复登记。
-_CURSOR: dict[str, float] = {"ts": 0.0}
+_cursor: tuple[float, ObjectId | None] = (0.0, None)
 _CURSOR_EPSILON = 1e-6  # 冷启动/复扫时包含窗口边界上的事件
 
 
 def reset_scan_cursor() -> None:
     """重置扫描游标（测试与排障用）。"""
-    _CURSOR["ts"] = 0.0
+    global _cursor
+    _cursor = (0.0, None)
 
 
 def _duplicate_gap(event: dict) -> dict | None:
@@ -130,32 +131,36 @@ def detect_and_classify(fb_doc: dict[str, Any], transcript_slice: str = "") -> K
 def scan_unresolved_feedbacks(batch: int = 50) -> list[KnowledgeGap]:
     """扫描观察窗内未解决的反馈，产出 strong 缺口（其余归档为 pending）。
 
-    按 ``ts`` 升序 + 游标推进：每轮最多消费 ``batch`` 条，**不饿死**更早的未解决信号。
+    按 ``ts`` 和 ``_id`` 升序：同一时间的反馈也能跨批次处理。
     """
+    global _cursor
     if not writes_enabled():
         return []
     gaps: list[KnowledgeGap] = []
     try:
         ensure_gap_feedback_index(evolution_repo.k_gaps)
         since = time.time() - settings.evolution.observe_window_days * 86400
-        cursor_ts = max(_CURSOR["ts"], since - _CURSOR_EPSILON)
+        last_ts, last_id = _cursor
+        cursor_ts = max(last_ts, since - _CURSOR_EPSILON)
+        after_cursor = {"ts": {"$gt": cursor_ts}}
+        if last_id is not None and last_ts == cursor_ts:
+            after_cursor = {"$or": [after_cursor, {"ts": cursor_ts, "_id": {"$gt": last_id}}]}
         # 解决状态优先于历史点踩。持久标记保留在反馈文档中，不受 ts 更新影响。
         events = (
             evolution_repo.fb_events.find({
-                "ts": {"$gt": cursor_ts},
+                "$and": [after_cursor, unresolved_filter()],
                 "gap_scanned_at": {"$exists": False},
-                **unresolved_filter(),
             })
-            .sort("ts", 1)
+            .sort([("ts", 1), ("_id", 1)])
             .limit(batch)
         )
         events = list(events)
         decisions = ignored_contexts(events)
         scanned = 0
-        last_ts = _CURSOR["ts"]
         for doc in events:
             scanned += 1
             last_ts = float(doc.get("ts") or 0.0)
+            last_id = doc["_id"]
             # 兼容修复前误写入的闲聊信号。保留原事件，不制造知识缺口。
             if doc.get("intent") == "chitchat" or is_plain_greeting(doc.get("query", "")):
                 continue
@@ -212,10 +217,10 @@ def scan_unresolved_feedbacks(batch: int = 50) -> list[KnowledgeGap]:
                     gap.gap_id = str(oid)
                     gaps.append(gap)
         # 扫到东西 → 游标前进；窗口内已无更新信号 → 归零，下一轮从窗口起点复扫
-        _CURSOR["ts"] = last_ts if scanned else 0.0
+        _cursor = (last_ts, last_id) if scanned else (0.0, None)
         logger.info(
             f"缺口扫描完成：消费信号 {scanned} 条，产出 strong 缺口 {len(gaps)} 条，"
-            f"游标 {cursor_ts:.0f} → {_CURSOR['ts']:.0f}"
+            f"游标 {cursor_ts:.0f} → {_cursor[0]:.0f}"
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning(f"缺口扫描失败：{exc}")

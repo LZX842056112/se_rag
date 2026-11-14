@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from app.process.query.agent.state import QueryGraphState
 from app.rag.query.config import NODE_RRF_K, NODE_RRF_LIMIT_TOP, get_rrf_k, get_rrf_top
+from app.rag.query.manual_keyword_search import KEYWORD_CANDIDATE_LIMIT
 from app.shared.config import settings
 from app.shared.runtime.logger import logger, step_log
 from app.shared.utils.require import require_state_list
@@ -57,10 +58,22 @@ def fuse_by_rrf(state: QueryGraphState) -> QueryGraphState:
     if evolution_chunks:
         rrf_list.append((settings.evolution.rrf_weight, evolution_chunks))
 
-    rrf_chunks = use_by_rrf(rrf_list, top=get_rrf_top(), k=get_rrf_k())
+    keyword_result = state.get("keyword_chunks")
+    keyword_chunks = keyword_result or []
+    manual_recall = keyword_result is not None and not evolution_chunks and all(
+        chunk.get("document_kind") in (None, "", "manual") for branch in (embedding_chunks, hyde_chunks) for chunk in branch
+    )
+    top = get_rrf_top()
+    if manual_recall:
+        top = max(top, len(embedding_chunks) + len(hyde_chunks))
+    rrf_chunks = use_by_rrf(rrf_list, top=top, k=get_rrf_k())
+    if manual_recall:
+        existing_ids = {chunk["chunk_id"] for chunk in rrf_chunks}
+        keyword_extra = [chunk for chunk in keyword_chunks if chunk["chunk_id"] not in existing_ids]
+        rrf_chunks.extend(keyword_extra[:KEYWORD_CANDIDATE_LIMIT])
 
-    if not embedding_chunks and not hyde_chunks and not evolution_chunks:
-        logger.warning("本地三路召回均为空，按零命中继续（检索降级）")
+    if not rrf_chunks and not evolution_chunks:
+        logger.warning("本地召回为空，按零命中继续")
 
     # 自进化权威条目防挤出：已召回的演进 FAQ 若未被 RRF top-N 收录则强制并入，交由重排裁决。
     # 否则权威 FAQ 会被主库弱相关分片（设备/电源线等泛化片段）竞争掉，出现「已入库却永远
@@ -74,6 +87,6 @@ def fuse_by_rrf(state: QueryGraphState) -> QueryGraphState:
     state["rrf_chunks"] = rrf_chunks
     logger.info(
         f"RRF 融合完成：输入 kb={len(embedding_chunks)}, hyde={len(hyde_chunks)}, "
-        f"evolution={len(evolution_chunks)}，输出 {len(rrf_chunks)} 条"
+        f"keyword={len(keyword_chunks)}, evolution={len(evolution_chunks)}，输出 {len(rrf_chunks)} 条"
     )
     return state

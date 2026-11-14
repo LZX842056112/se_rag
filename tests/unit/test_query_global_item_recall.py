@@ -7,6 +7,10 @@
 """
 from __future__ import annotations
 
+from types import SimpleNamespace
+
+import pytest
+
 from app.rag.query import chunk_search
 from app.rag.query.chunk_search import search_chunks
 
@@ -74,3 +78,67 @@ def test_search_chunks_returns_empty_when_gateway_none(monkeypatch):
     _patch(monkeypatch, ["A"])
 
     assert search_chunks(["A"], "q") == []
+
+
+def test_manual_heading_scope_keeps_product_filter_and_falls_back_if_section_is_absent(monkeypatch):
+    gateway = _patch(monkeypatch, ['Product A'])
+    filters = []
+    documents = [[{'entity': {'chunk_id': 'fallback'}}]]
+
+    def search(**_kwargs):
+        filters.append(gateway.expr)
+        return [[]] if len(filters) == 1 else documents
+
+    monkeypatch.setattr(gateway, 'hybrid_search', search)
+    result = search_chunks(['Product A'], '手册的连接设置一节如何配置？', heading_path='设备规格 / 连接设置')
+
+    assert result == documents[0]
+    assert len(filters) == 2
+    assert filters[0].startswith("item_name in ['Product A'] and ")
+    assert "heading_path == '设备规格 / 连接设置'" in filters[0]
+    assert "heading_path like '设备规格 / 连接设置 / %'" in filters[0]
+    assert 'default_item_name' not in filters[0]
+    assert 'default_item_name' in filters[1]
+
+
+def test_named_manual_section_results_do_not_mix_in_unscoped_chunks(monkeypatch):
+    gateway = _patch(monkeypatch, ['Product A'])
+    filters = []
+
+    def search(**_kwargs):
+        filters.append(gateway.expr)
+        return [[{'entity': {'chunk_id': 'named-section'}}]]
+
+    monkeypatch.setattr(gateway, 'hybrid_search', search)
+    assert search_chunks(['Product A'], 'q', heading_path='设备规格 / 连接设置') == [
+        {'entity': {'chunk_id': 'named-section'}},
+    ]
+    assert len(filters) == 1
+    assert "heading_path == '设备规格 / 连接设置'" in filters[0]
+
+
+@pytest.mark.parametrize(('question', 'expected'), [
+    ('手册中，设备规格的连接设置表列出哪些模式？', '设备规格 / 3.2 连接设置'),
+    ('请查手册的设备规格章节。该章节的连接设置表列出哪些模式？', '设备规格 / 3.2 连接设置'),
+    ('请查手册的连接设置一节。', ''),
+    ('请查手册的《不存在》章节。', ''),
+    ('设备支持哪些连接设置？', ''),
+])
+def test_resolve_manual_heading_uses_literal_titles_in_confirmed_product(monkeypatch, question, expected):
+    paths = ['设备规格 / 3.2 连接设置', '设备规格 / 3.2 连接设置 / 注意事项', '安装步骤 / 连接设置']
+    queries = []
+
+    def query(**kwargs):
+        queries.append(kwargs)
+        return [{'heading_path': path} for path in paths]
+
+    _patch(monkeypatch, ['Product A'])
+    monkeypatch.setattr(chunk_search.milvus_gateway, 'milvus_client', SimpleNamespace(query=query), raising=False)
+
+    assert chunk_search.resolve_manual_heading(['Product A'], question) == expected
+    if '手册' in question:
+        assert len(queries) == 1
+        assert queries[0]['filter'] == "item_name in ['Product A']"
+        assert queries[0]['output_fields'] == ['heading_path']
+    else:
+        assert queries == []

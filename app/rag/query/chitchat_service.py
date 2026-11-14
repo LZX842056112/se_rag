@@ -13,7 +13,7 @@ from langchain_core.messages import HumanMessage
 
 from app.process.query.agent.state import QueryGraphState
 from app.rag.query.history_utils import build_chat_history_context
-from app.rag.query.intent_route_service import INTENT_CHITCHAT
+from app.rag.query.intent_route_service import INTENT_CHITCHAT, OUT_OF_SCOPE
 from app.shared.clients.history_repository import history_repository
 from app.shared.models import llm_providers
 from app.shared.runtime.logger import logger, step_log
@@ -43,18 +43,18 @@ def load_chitchat_prompt(state: QueryGraphState) -> str:
 def call_llm_chitchat(state: QueryGraphState, prompt_text: str) -> None:
     """调用 LLM 生成闲聊回复；流式逐段推送 SSE delta，失败降级为兜底话术。"""
     messages = [HumanMessage(content=prompt_text)]
+    answer = ""
     try:
-        llm_client = llm_providers.chat()
         if state.get("is_stream", False):
-            answer = ""
-            for chunk in llm_client.stream(messages):
-                if chunk.content:
-                    publish(state.get("session_id"), SSEEvent.DELTA, {"delta": chunk.content})
-                    answer += chunk.content
+            for text in llm_providers.stream_chat_text(messages):
+                publish(state.get("session_id"), SSEEvent.DELTA, {"delta": text})
+                answer += text
             state["answer"] = answer or CHITCHAT_FALLBACK_ANSWER
         else:
-            state["answer"] = llm_client.invoke(messages).content or CHITCHAT_FALLBACK_ANSWER
+            state["answer"] = llm_providers.chat().invoke(messages).content or CHITCHAT_FALLBACK_ANSWER
     except Exception as exc:  # noqa: BLE001 - 闲聊失败降级，口径同 HyDE/联网
+        if answer:
+            raise
         mark_degraded("chitchat_error")
         logger.warning(f"闲聊作答失败，使用兜底话术：{exc}")
         if not state.get("answer"):
@@ -85,7 +85,9 @@ def save_chitchat_history(state: QueryGraphState) -> None:
 @step_log("generate_chitchat_answer")
 def generate_chitchat_answer(state: QueryGraphState) -> QueryGraphState:
     """闲聊入口：取旧历史 → 保存提问 → 生成回复 → 保存回答。"""
-    prompt_text = load_chitchat_prompt(state)
+    out_of_scope = state.get("query_outcome") == OUT_OF_SCOPE
+    if not out_of_scope:
+        prompt_text = load_chitchat_prompt(state)
     history_repository.save_message(
         session_id=state.get("session_id"),
         role="user",
@@ -95,7 +97,12 @@ def generate_chitchat_answer(state: QueryGraphState) -> QueryGraphState:
         intent=INTENT_CHITCHAT,
         turn_id=state.get("turn_id", ""),
     )
-    call_llm_chitchat(state, prompt_text)
+    if out_of_scope:
+        state["answer"] = "这个请求超出产品知识库的范围。请提出与产品使用相关的问题。"
+        if state.get("is_stream"):
+            publish(state["session_id"], SSEEvent.DELTA, {"delta": state["answer"]})
+    else:
+        call_llm_chitchat(state, prompt_text)
     state["business_tag"] = "chitchat"
     state["intent"] = INTENT_CHITCHAT
     state["citations"] = []

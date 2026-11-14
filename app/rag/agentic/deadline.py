@@ -1,4 +1,4 @@
-"""Agentic 模式的查询预算与 Mongo 超时边界。"""
+"""查询预算与 Mongo 超时边界。"""
 import time
 from functools import wraps
 
@@ -13,13 +13,21 @@ def bounded_query(function):
         from app.rag.agentic.budget import selected_mode
         import pymongo
         session = kwargs.get('session_id', args[0] if args else '')
-        if selected_mode(session, mode=settings.agentic.mode,
-                         percent=settings.agentic.gray_percent) != 'agentic':
-            return function(*args, **kwargs)
-        token = query_deadline.set(time.monotonic() + settings.agentic.timeout_seconds)
+        use_agentic = selected_mode(
+            session, mode=settings.agentic.mode, percent=settings.agentic.gray_percent,
+        ) == 'agentic'
+        timeout = settings.agentic.timeout_seconds if use_agentic else settings.runtime.legacy_query_timeout_seconds
+        deadline = time.monotonic() + timeout
+        inherited = query_deadline.get()
+        if not use_agentic and inherited is not None:
+            deadline = min(deadline, inherited)
+        token = query_deadline.set(deadline)
         try:
-            with pymongo.timeout(settings.agentic.timeout_seconds):
-                return function(*args, **kwargs)
+            if use_agentic:
+                with pymongo.timeout(timeout):
+                    return function(*args, **kwargs)
+            # Legacy 使用 Mongo 客户端的选主时限。PyMongo 的请求时限会覆盖它。
+            return function(*args, **kwargs)
         finally:
             query_deadline.reset(token)
     return invoke

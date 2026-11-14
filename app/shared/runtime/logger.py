@@ -108,11 +108,14 @@ def node_log(node_name: str):
     def deco(func):
         @wraps(func)
         def wrapper(state, *args, **kwargs):
+            from app.shared.runtime.query_metrics import measure_stage
+
             trace_id = _trace_id(state)
             start_ts = time.time()
             logger.info(f"[{node_name}] 节点开始，追踪ID={trace_id}")
             try:
-                result = func(state, *args, **kwargs)
+                with measure_stage(node_name.removeprefix("node_")):
+                    result = func(state, *args, **kwargs)
             except Exception:
                 logger.exception(f"[{node_name}] 节点异常，追踪ID={trace_id}")
                 raise

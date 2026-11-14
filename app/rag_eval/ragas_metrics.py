@@ -15,9 +15,13 @@ import asyncio
 import hashlib
 import importlib.metadata
 import math
+from copy import copy
 from dataclasses import replace
+from functools import partial
 
 RAGAS_VERSION = "0.4.3"
+_JUDGE_MAX_TOKENS = 4096
+_RETRY_MAX_TOKENS = 8192
 
 METRIC_NAMES: tuple[str, ...] = (
     "faithfulness",
@@ -117,16 +121,23 @@ class RagasScorer:
             # 云端 judge 在并发下偶发连接重置，开启重试避免整题指标丢失
             max_retries=3,
         )
-        llm = llm_factory(config.model, client=self.client, temperature=0, max_tokens=4096, max_retries=2)
-        self.embeddings = _make_embeddings()
-        self.faithfulness = Faithfulness(llm=llm)
-        self.answer_relevancy = AnswerRelevancy(llm=llm, embeddings=self.embeddings, strictness=3)
-        self.context_precision = ContextPrecision(llm=llm)
-        self.context_recall = ContextRecall(llm=llm)
+        self._runner = asyncio.Runner()
+        try:
+            self._make_llm = partial(llm_factory, config.model, client=self.client, temperature=0, max_retries=2)
+            self._retry_llm = None
+            llm = self._make_llm(max_tokens=_JUDGE_MAX_TOKENS)
+            self.embeddings = _make_embeddings()
+            self.faithfulness = Faithfulness(llm=llm)
+            self.answer_relevancy = AnswerRelevancy(llm=llm, embeddings=self.embeddings, strictness=3)
+            self.context_precision = ContextPrecision(llm=llm)
+            self.context_recall = ContextRecall(llm=llm)
+        except BaseException:
+            self.close()
+            raise
 
     def score(self, question: str, answer: str, contexts: list[str], ground_truth: str) -> dict:
         """同步评分入口；单个指标失败只记录原因，不影响其他指标。"""
-        return asyncio.run(self.ascore(question, answer, contexts, ground_truth))
+        return self._runner.run(self.ascore(question, answer, contexts, ground_truth))
 
     async def ascore(self, question: str, answer: str, contexts: list[str], ground_truth: str) -> dict:
         contexts = [text for text in contexts if text.strip()]
@@ -135,41 +146,73 @@ class RagasScorer:
             reason = "答案为空" if not answer.strip() else "没有可用上下文"
             return {name: None for name in METRIC_NAMES} | {"error": reason}
 
-        tasks = {
-            "faithfulness": self.faithfulness.ascore(
-                user_input=question, response=answer, retrieved_contexts=contexts
-            ),
-            "answer_relevancy": self.answer_relevancy.ascore(user_input=question, response=answer),
-            "context_precision": self.context_precision.ascore(
-                user_input=question, reference=ground_truth, retrieved_contexts=contexts
-            ),
-            "context_recall": self.context_recall.ascore(
-                user_input=question, retrieved_contexts=contexts, reference=ground_truth
-            ),
+        inputs = {
+            "faithfulness": {"user_input": question, "response": answer, "retrieved_contexts": contexts},
+            "answer_relevancy": {"user_input": question, "response": answer},
+            "context_precision": {"user_input": question, "reference": ground_truth, "retrieved_contexts": contexts},
+            "context_recall": {"user_input": question, "reference": ground_truth, "retrieved_contexts": contexts},
         }
-        keys = list(tasks)
-        scores: dict[str, float | None] = {}
+        scores: dict = {}
         errors: dict[str, str] = {}
+        retries: list[dict] = []
         # 逐项评分：四项同时发请求会放大云端 judge 的连接抖动
-        for key in keys:
+        for key, kwargs in inputs.items():
+            metric = getattr(self, key)
+            retry = None
             try:
-                result = await tasks[key]
+                try:
+                    result = await metric.ascore(**kwargs)
+                except Exception as exc:
+                    if not _output_was_truncated(exc):
+                        raise
+                    retry = {
+                        "metric": key, "max_tokens": _RETRY_MAX_TOKENS,
+                        "previous_error": "max_tokens", "status": "scorer_failed",
+                    }
+                    retries.append(retry)
+                    if self._retry_llm is None:
+                        self._retry_llm = self._make_llm(max_tokens=_RETRY_MAX_TOKENS)
+                    # 并发题目继续使用原评分器的 token 上限。
+                    retry_metric = copy(metric)
+                    retry_metric.llm = self._retry_llm
+                    result = await retry_metric.ascore(**kwargs)
             except Exception as exc:  # noqa: BLE001 - 单指标失败不影响其余指标
                 scores[key] = None
                 errors[key] = str(exc) or exc.__class__.__name__
                 continue
             value = getattr(result, "value", result)
-            scores[key] = round(float(value), 4) if isinstance(value, (int, float)) else None
+            if finite_score(value):
+                scores[key] = round(float(value), 4)
+                if retry is not None:
+                    retry["status"] = "scored"
+            else:
+                scores[key] = None
+                errors[key] = "评分器未返回有限数值"
         if errors:
             scores["error"] = "; ".join(f"{key}: {message}" for key, message in errors.items())
+        if retries:
+            scores["retries"] = retries
         return scores
 
     def close(self) -> None:
         """关闭 judge 客户端。"""
         try:
-            asyncio.run(self.client.close())
+            self._runner.run(self.client.close())
         except Exception:  # noqa: BLE001 - 关闭失败不影响报告
             pass
+        finally:
+            self._runner.close()
+
+
+def _output_was_truncated(error: BaseException | None) -> bool:
+    from instructor.core import IncompleteOutputException
+    from openai import LengthFinishReasonError
+
+    while error is not None:
+        if isinstance(error, (IncompleteOutputException, LengthFinishReasonError)):
+            return True
+        error = error.__cause__
+    return False
 
 
 def _ensure_ragas() -> str:
@@ -190,7 +233,7 @@ def aggregate_ragas(case_rows: list[dict]) -> dict:
         values = [
             row["ragas"][name]
             for row in case_rows
-            if row.get("ragas") and isinstance(row["ragas"].get(name), (int, float))
+            if finite_score(row.get("ragas", {}).get(name))
         ]
         if values:
             summary[name] = round(sum(values) / len(values), 4)
@@ -199,3 +242,7 @@ def aggregate_ragas(case_rows: list[dict]) -> dict:
     if failed:
         summary["failed_cases"] = failed
     return summary
+
+
+def finite_score(value) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)

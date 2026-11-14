@@ -18,6 +18,7 @@ class QueryGraphState(TypedDict):
     # 意图识别结果："rag"=知识库问答（默认）/"chitchat"=闲聊；
     # 由图入口 node_intent_route 回填，决定走检索链路还是闲聊作答分支。
     intent: Intent
+    intent_classification_failed: bool
     turn_id: str
     answer_id: str
     business_tag: str
@@ -31,12 +32,16 @@ class QueryGraphState(TypedDict):
     agentic_stop_reason: str
     agentic_verified: bool
     query_mode: str
+    query_outcome: str
     agentic_revalidation: list
     agentic_diagnostics: dict
+    agentic_retrieval_chunk_ids: list[str]
 
     # 检索过程中的中间数据
     embedding_chunks: list  # 普通向量检索回来的切片
+    keyword_chunks: list | None  # 产品范围内的正文和章节关键词命中
     hyde_embedding_chunks: list  # HyDE 检索回来的切片
+    hyde_executed: bool
     web_search_docs: list  # 网络搜索回来的文档
 
     # 支持额外检索源 (自进化召回) 的混合检索结果
@@ -45,10 +50,15 @@ class QueryGraphState(TypedDict):
     # 排序过程中的数据
     rrf_chunks: list  # RRF 融合排序后的切片
     reranked_docs: list  # 重排序后的最终 Top-K 文档
+    manual_rerank_input_chunk_ids: list[str] | None
+    local_rerank_input_chunk_ids: list[str] | None
+    reranked_chunk_ids: list[str] | None  # 重排后、动态截断前
+    selected_chunk_ids: list[str] | None  # 动态截断后、业务策略前
 
     # 生成过程中的数据
     answer: str  # 最终生成的答案
-    answer_contexts: list[str]  # 实际送入答案提示词的证据；不属于公开 API
+    answer_contexts: list[str]  # 实际送入答案提示词的证据
+    evaluation_contexts: list[str]  # 草稿被拒绝时，记录生成模型收到的证据
 
     # 自进化辅助输出
     cited_chunk_ids: list  # 被采纳的引用 id（chunk_id / evo_doc_id）
@@ -61,6 +71,7 @@ class QueryGraphState(TypedDict):
     # 辅助信息
     item_names: List[str]  # 提取出的商品名称
     rewritten_query: str  # 改写后的问题
+    requested_heading_path: str  # 用户点名的手册章节路径
     is_stream: bool  # 是否流式输出标记
     image_urls: List[str]  # 答案中引用的图片链接
 
@@ -73,6 +84,7 @@ query_graph_default_state: QueryGraphState = {
     "original_query": "",
     "rewrite_hint": "",
     "intent": "rag",
+    "intent_classification_failed": False,
     "turn_id": "",
     "answer_id": "",
     "business_tag": "",
@@ -84,17 +96,26 @@ query_graph_default_state: QueryGraphState = {
     "agentic_metrics": {},
     "agentic_stop_reason": "",
     "agentic_verified": False,
-    "query_mode": "agentic",
+    "query_mode": "none",
+    "query_outcome": "",
     "agentic_revalidation": [],
     "agentic_diagnostics": {},
+    "agentic_retrieval_chunk_ids": [],
     "embedding_chunks": [],
+    "keyword_chunks": None,
     "hyde_embedding_chunks": [],
+    "hyde_executed": False,
     "web_search_docs": [],
     "evolution_chunks": [],
     "rrf_chunks": [],
     "reranked_docs": [],
+    "manual_rerank_input_chunk_ids": None,
+    "local_rerank_input_chunk_ids": None,
+    "reranked_chunk_ids": None,
+    "selected_chunk_ids": None,
     "answer": "",
     "answer_contexts": [],
+    "evaluation_contexts": [],
     "cited_chunk_ids": [],
     "groundedness": None,
     "retrieval_signals": {},
@@ -103,6 +124,7 @@ query_graph_default_state: QueryGraphState = {
     "item_name_options": [],
     "item_names": [],
     "rewritten_query": "",
+    "requested_heading_path": "",
     "is_stream": False,
     "image_urls": []
 }

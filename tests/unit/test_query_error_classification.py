@@ -7,10 +7,14 @@ HTTP 契约不变（非流式仍返回 ``query_failed`` / 500）。
 from __future__ import annotations
 
 import grpc
+import httpx
+from openai import APIConnectionError
+import pytest
 from pymongo.errors import ServerSelectionTimeoutError
 
 from app.rag.query import pipeline
 from app.rag.query.errors import DEFAULT_CODE, classify_query_error
+from app.rag.query.lifecycle import query_is_active
 from app.shared.utils import task_state
 from app.shared.utils.sse_broker import SSEEvent
 
@@ -46,22 +50,50 @@ def test_unclassifiable_error_keeps_default_code():
     assert "完全未知的故障" in message
 
 
-def test_pipeline_exposes_classified_code(monkeypatch):
-    """图执行抛错时：返回 None、任务状态与 SSE error 都带上分类码。"""
+@pytest.mark.parametrize(("error", "code", "is_stream"), [
+    (RuntimeError("Milvus 混合检索执行失败"), "milvus_unavailable", False),
+    (TimeoutError("query deadline exceeded"), "llm_timeout", True),
+])
+def test_pipeline_exposes_classified_code_and_ends_failed_turn(monkeypatch, error, code, is_stream):
+    """图执行失败后，发布分类错误，结束 SSE，释放会话锁。"""
     events: list[tuple[str, dict]] = []
     monkeypatch.setattr(
         pipeline, "publish", lambda sid, ev, payload: events.append((ev, payload))
     )
 
     def _boom(_state):
-        raise RuntimeError("Milvus 混合检索执行失败")
+        raise error
 
     monkeypatch.setattr(pipeline.query_app, "invoke", _boom)
 
-    result = pipeline.invoke_query_graph("s_err", "q", is_stream=False)
+    result = pipeline.invoke_query_graph("s_err", "q", is_stream=is_stream)
 
     assert result is None
-    assert task_state.get_task_error("s_err")[0] == "milvus_unavailable"
-    error_payloads = [payload for ev, payload in events if ev == SSEEvent.ERROR]
-    assert error_payloads, "必须推送 error 事件"
-    assert error_payloads[0]["code"] == "milvus_unavailable"
+    assert task_state.get_task_error("s_err")[0] == code
+    assert task_state.get_task_status("s_err") == task_state.TASK_STATUS_FAILED
+    assert not query_is_active("s_err")
+    assert [event for event, _ in events] == [SSEEvent.ERROR, SSEEvent.CLOSE]
+    assert events[0][1]["code"] == code
+
+
+def test_pipeline_persists_model_failure_diagnostics(monkeypatch):
+    request = httpx.Request("POST", "https://example.test/v1/chat/completions")
+    error = APIConnectionError(request=request)
+    error.__cause__ = httpx.RemoteProtocolError("server closed the response", request=request)
+
+    def fail(_):
+        raise error
+
+    monkeypatch.setattr(pipeline.query_app, "invoke", fail)
+    events = []
+    monkeypatch.setattr(pipeline, "publish", lambda sid, event, payload: events.append(event))
+    saved = []
+    monkeypatch.setattr(pipeline, "record_query", lambda *args, **kwargs: saved.append(kwargs))
+
+    assert pipeline.invoke_query_graph("s_model_err", "q", is_stream=True) is None
+    assert saved[0]["error"] == {
+        "code": "llm_failed",
+        "type": "APIConnectionError",
+        "cause_type": "RemoteProtocolError",
+    }
+    assert events == [SSEEvent.ERROR, SSEEvent.CLOSE]

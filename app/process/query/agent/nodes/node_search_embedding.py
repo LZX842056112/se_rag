@@ -4,7 +4,9 @@
 同一段文本被编码两次的开销。
 """
 from app.evolution.retrieval import search_evolution_items
+from app.rag.query.business import classify_business_request
 from app.rag.query.embedding_search_service import search_by_embedding
+from app.rag.query.manual_keyword_search import search_manual_keywords
 from app.shared.config import settings
 from app.shared.models import llm_providers
 from app.shared.runtime.logger import logger, node_log
@@ -20,6 +22,13 @@ def node_search_embedding(state):
     embedding = llm_providers.embed_text(rewritten_query) if rewritten_query else None
 
     embedding_chunks = search_by_embedding(state, embedding=embedding)
+    keyword_chunks = None
+    if classify_business_request(state) in ("product_knowledge", "troubleshooting"):
+        keyword_chunks = search_manual_keywords(
+            state.get("item_names", []),
+            state.get("rewrite_hint") or state.get("original_query") or rewritten_query,
+            state.get("requested_heading_path", ""),
+        )
 
     evolution_chunks: list = []
     if settings.evolution.enabled:
@@ -35,6 +44,8 @@ def node_search_embedding(state):
             evolution_chunks = []
 
     return {
+        "query_mode": "legacy",
         "embedding_chunks": embedding_chunks,
+        "keyword_chunks": keyword_chunks,
         "evolution_chunks": evolution_chunks,
     }

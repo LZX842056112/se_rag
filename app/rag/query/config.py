@@ -10,17 +10,18 @@ NODE_RRF_LIMIT_TOP = 5
 # reranker 重排序参数
 RERANK_MAX_TOPK: int = 6
 RERANK_MIN_TOPK: int = 2
+# 保留前五条本地证据。联网补充不占用这些位置。
+RERANK_MIN_LOCAL_TOPK: int = 5
 RERANK_GAP_RATIO: float = 0.2
 RERANK_GAP_ABS: float = 0.2
 RERANK_MAX_INPUT_TOKENS: int = 512
-RERANK_SUMMARY_CHAR_RATIO: float = 1.3
-RERANK_MIN_SUMMARY_CHARS: int = 50
-# 长文本压缩的并发上限（超过该值的文档串行处理，避免打爆模型侧限流）
-RERANK_SUMMARY_MAX_WORKERS: int = 4
 # 最终上下文里联网结果的条数上限：本地（知识库 / 自进化）有命中时，联网只作补充。
 # 事故背景：某次提问的 4 条联网结果分数 0.999x，把本地手册与已审批 FAQ 全部挤出上下文，
 # 表现为「明明入库了却仍答无法作答且无引用」。
 WEB_MAX_IN_CONTEXT: int = env_int("WEB_MAX_IN_CONTEXT", 2)
+
+# 可选检索分支为作答保留的请求时间（秒）。
+LEGACY_ANSWER_RESERVE_SECONDS = 12.0
 
 # HyDE 分流开关：默认关闭——保持现有「三路无条件扇出」检索行为不变。
 # 开启后，短事实型查询跳过 HyDE：这类问题词汇鸿沟小，假设性文档容易生成

@@ -8,6 +8,10 @@
 """
 from __future__ import annotations
 
+from types import SimpleNamespace
+
+import pytest
+
 from app.rag.query.answer_service import extract_text_image_url
 from app.shared.utils.answer import is_no_answer
 
@@ -54,3 +58,60 @@ def test_is_no_answer_markers():
     assert is_no_answer("抱歉，无法作答。")
     assert not is_no_answer("该机型保修期为 12 个月。")
     assert not is_no_answer(None)
+
+
+@pytest.mark.parametrize('is_stream', [False, True])
+@pytest.mark.parametrize(('chunks', 'expected'), [
+    (['打印服务器支持 Telnet 命令行配置。', '\n\n现有参考内容与', '历史对话中未查询到该问题相关信息，无法', '作答'],
+     '打印服务器支持 Telnet 命令行配置。'),
+    (['该型号', '不支持彩色打印。'], '该型号不支持彩色打印。'),
+    (['现有参考内容与', '历史对话中未查询到该问题相关信息，无法作答'], NO_ANSWER + '。请交由负责人核实。'),
+    (['**Answer:**\n', NO_ANSWER], '**Answer:**\n' + NO_ANSWER + '。请交由负责人核实。'),
+    (['### 结论\n', NO_ANSWER], '### 结论\n' + NO_ANSWER + '。请交由负责人核实。'),
+    (['抱', '歉，现有参考内容与', '历史对话中未查询到该问题相关信息，无法作答。'],
+     '抱歉，' + NO_ANSWER + '。请交由负责人核实。'),
+])
+def test_model_answer_does_not_emit_a_fixed_refusal_after_an_answer(monkeypatch, chunks, expected, is_stream):
+    from app.rag.query import answer_service as answers
+
+    events = []
+    monkeypatch.setattr(answers, 'publish', lambda session, kind, payload: events.append(payload['delta']))
+    monkeypatch.setattr(answers.llm_providers, 'chat', lambda: SimpleNamespace(
+        invoke=lambda _: SimpleNamespace(content=''.join(chunks)),
+        stream=lambda _: (SimpleNamespace(content=chunk) for chunk in chunks),
+    ))
+    state = {'is_stream': is_stream, 'session_id': 's'}
+    answers.call_llm_deal_answer(state, 'prompt')
+    assert state['answer'].strip() == expected
+    assert (''.join(events).strip() if is_stream else '') == (expected if is_stream else '')
+
+
+def test_legacy_fixed_refusal_is_reported_as_a_handoff(monkeypatch):
+    from app.rag.query import answer_service as answers
+    from app.rag.query.eval_evidence import build_evaluation
+
+    monkeypatch.setattr(answers, 'build_history_context', lambda *a, **k: '')
+    monkeypatch.setattr(answers, 'save_answer_message_history', lambda state: None)
+    monkeypatch.setattr(answers.llm_providers, 'chat', lambda: SimpleNamespace(
+        invoke=lambda _: SimpleNamespace(content=NO_ANSWER),
+    ))
+    result = answers.generate_answer({'query_mode': 'legacy', 'rewritten_query': '设备支持该功能吗？'})
+    assert result['handoff_required'] is True
+    assert build_evaluation(result) == {'query_mode': 'legacy', 'outcome': 'handoff', 'contexts': []}
+
+
+def test_partial_answer_is_not_reported_as_a_handoff(monkeypatch):
+    from app.rag.query import answer_service as answers
+    from app.rag.query.eval_evidence import build_evaluation
+
+    answer = "VLAN 按逻辑划分网络。手册没有设备配置步骤，这部分无法作答。"
+    monkeypatch.setattr(answers, 'build_history_context', lambda *args, **kwargs: '')
+    monkeypatch.setattr(answers, 'save_answer_message_history', lambda state: None)
+    monkeypatch.setattr(answers, 'compute_groundedness', lambda *args: 1.0)
+    monkeypatch.setattr(answers.llm_providers, 'chat', lambda: SimpleNamespace(
+        invoke=lambda _: SimpleNamespace(content=answer),
+    ))
+    state = {'query_mode': 'legacy', 'rewritten_query': '什么是 VLAN？', 'reranked_docs': _docs()}
+    result = answers.generate_answer(state)
+    assert result['answer'] == answer
+    assert build_evaluation(result)['outcome'] == 'answered'

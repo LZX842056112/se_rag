@@ -10,6 +10,8 @@ from pathlib import Path
 
 # 默认检索指标截断位置
 DEFAULT_KS: tuple[int, ...] = (3, 5, 10)
+DEFAULT_MAX_DROP = 0.02
+DEFAULT_MAX_LATENCY_INCREASE_MS = 1000.0
 
 
 @dataclass
@@ -24,8 +26,9 @@ class EvalConfig:
     timeout_seconds: float = 180.0  # 单题超时（秒）
     retries: int = 1  # 网络/5xx 重试次数
     run_ragas: bool = True  # 是否执行 RAGAS 生成指标
-    max_drop: float = 0.02  # 回归阈值：指标下降超过该值视为回归
+    max_drop: float = DEFAULT_MAX_DROP
     tags: tuple[str, ...] = field(default_factory=tuple)  # 只跑指定标签（空表示全部）
+    max_latency_increase_ms: float = DEFAULT_MAX_LATENCY_INCREASE_MS
 
     def selected(self, tags: list[str] | None) -> bool:
         """按标签过滤；未配置标签时全部选中。"""

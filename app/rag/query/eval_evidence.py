@@ -11,29 +11,15 @@ from typing import Any
 # 单次回传的证据上限：评测只需要 Top-N，过大既拖慢响应也无意义
 _MAX_EVIDENCE_DOCS = 20
 
-# 分层名称与查询图 state 的字段一一对应（顺序即检索顺序）
-LAYER_FIELDS: tuple[tuple[str, str], ...] = (
-    ("embedding", "embedding_chunks"),
-    ("hyde", "hyde_embedding_chunks"),
-    ("rrf", "rrf_chunks"),
-    ("reranked", "reranked_docs"),
-)
-
-
 def _chunk_id(doc: dict) -> str:
     value = doc.get("chunk_id")
     return str(value) if value is not None else ""
 
 
-def _dedupe_keep_order(values: list[str]) -> list[str]:
-    out: list[str] = []
-    seen: set[str] = set()
-    for value in values:
-        if not value or value in seen:
-            continue
-        seen.add(value)
-        out.append(value)
-    return out
+def chunk_ids(docs: list | None) -> list[str]:
+    """按输入顺序保留有 chunk_id 的条目并去重。"""
+    return list(dict.fromkeys(chunk_id for doc in docs or []
+                              if isinstance(doc, dict) and (chunk_id := _chunk_id(doc))))
 
 
 def build_evidence(docs: list | None) -> list[dict[str, Any]]:
@@ -69,7 +55,43 @@ def build_evidence(docs: list | None) -> list[dict[str, Any]]:
 def build_retrieval_layers(state: dict[str, Any]) -> dict[str, list[str]]:
     """按检索层输出 chunk_id 列表，用于分层 Recall@k / MRR / NDCG。"""
     layers: dict[str, list[str]] = {}
-    for name, field in LAYER_FIELDS:
-        docs = state.get(field) or []
-        layers[name] = _dedupe_keep_order([_chunk_id(doc) for doc in docs if isinstance(doc, dict)])
+    mode = state.get("query_mode")
+    if mode == "legacy":
+        layers["embedding"] = chunk_ids(state.get("embedding_chunks"))
+        if state.get("keyword_chunks") is not None:
+            layers["keyword"] = chunk_ids(state["keyword_chunks"])
+        if state.get("hyde_executed"):
+            layers["hyde"] = chunk_ids(state.get("hyde_embedding_chunks"))
+        layers["rrf"] = chunk_ids(state.get("rrf_chunks"))
+        for name in ("manual_rerank_input", "local_rerank_input"):
+            ids = state.get(f"{name}_chunk_ids")
+            if ids is not None:
+                layers[name] = ids
+        if state.get("reranked_chunk_ids") is not None:
+            layers["reranked"] = state["reranked_chunk_ids"]
+        if state.get("selected_chunk_ids") is not None:
+            layers["selected"] = state["selected_chunk_ids"]
+    elif mode == "agentic":
+        layers["agentic_retrieval"] = state.get("agentic_retrieval_chunk_ids", [])
+    if layers:
+        layers["final"] = chunk_ids(state.get("reranked_docs"))
     return layers
+
+
+def build_evaluation(state: dict[str, Any]) -> dict[str, Any]:
+    """输出查询的实际路径、结果及生成模型收到的证据片段。"""
+    outcome = state.get("query_outcome")
+    if state.get("handoff_required"):
+        outcome = "handoff"
+    elif not outcome:
+        if state.get("intent") == "chitchat":
+            outcome = "chitchat"
+        elif state.get("item_name_options"):
+            outcome = "clarification"
+        else:
+            outcome = "answered"
+    return {
+        "query_mode": state.get("query_mode") or "none",
+        "outcome": outcome,
+        "contexts": state.get("evaluation_contexts") or state.get("answer_contexts") or [],
+    }

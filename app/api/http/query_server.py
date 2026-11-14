@@ -8,8 +8,9 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
+import time
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from starlette.middleware.cors import CORSMiddleware
 
 from app.api.errors import install_error_handlers
@@ -76,6 +77,9 @@ async def lifespan(_app: FastAPI):
         ensure_indexes()
         # 接收请求前先加载模型：否则第一个查询会把 60 秒预算耗在冷启动上
         await asyncio.to_thread(warmup_models)
+        _app.state.evaluation = await asyncio.to_thread(
+            health_router.query_provenance, "redis" if multi_worker else "memory",
+        )
         scheduler_task = None
         # 仅当允许写入且调度器开关开启时才启动后台循环（只读/导入进程不启动）。
         if writes_enabled() and settings.evolution.scheduler_enabled:
@@ -125,6 +129,14 @@ app.add_middleware(
 install_error_handlers(app)
 install_session_cookie(app)
 
+
+@app.middleware("http")
+async def record_query_arrival(request: Request, call_next):
+    if request.method == "POST" and request.url.path == "/api/query":
+        request.state.query_received_at = time.perf_counter()
+    return await call_next(request)
+
+
 app.include_router(query_router.router)
 app.include_router(evolution_router.router)
 app.include_router(health_router.router)
@@ -133,15 +145,20 @@ app.include_router(pages_router.static_router)
 
 
 if __name__ == "__main__":
+    import os
+
     import uvicorn
 
     if redis_gateway.using_redis():
+        worker_count = settings.api.query_workers
+        settings.evaluation.query_worker_count = worker_count
+        os.environ["EVAL_QUERY_WORKER_COUNT"] = str(worker_count)
         # 多 worker 必须用导入字符串启动，uvicorn 才能派生多个进程
         uvicorn.run(
             "app.api.http.query_server:app",
             host=settings.api.host,
             port=settings.api.query_port,
-            workers=settings.api.query_workers,
+            workers=worker_count,
         )
     else:
         uvicorn.run(app, host=settings.api.host, port=settings.api.query_port)

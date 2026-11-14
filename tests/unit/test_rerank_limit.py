@@ -17,8 +17,10 @@ def test_flat_scores_keep_all_up_to_cap():
     assert len(dyn_limit_reranker_docs(docs)) == 5
 
 
-def test_big_drop_truncates():
+def test_big_drop_truncates_web_only_evidence():
     docs = _docs([0.95, 0.94, 0.6, 0.59, 0.58])
+    for doc in docs:
+        doc["type"] = "web"
     assert [d["chunk_id"] for d in dyn_limit_reranker_docs(docs)] == [0, 1]
 
 

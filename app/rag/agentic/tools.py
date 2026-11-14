@@ -17,6 +17,7 @@ from app.rag.item_name import catalog
 from app.rag.item_name.config import GLOBAL_ITEM_NAME
 from app.rag.query.chunk_search import CHUNK_OUTPUT_FIELDS, to_chunks
 from app.rag.query.config import CHUNK_DENSE_METRIC, PARENT_MAX_CHARS, PARENT_TOTAL_BUDGET_CHARS
+from app.rag.query.web_search_service import filter_web_pages
 from app.shared.clients import milvus_gateway as milvus_module
 from app.shared.clients.milvus_gateway import eq_expr, in_expr, milvus_gateway
 from app.shared.clients.mongo import get_collection
@@ -463,9 +464,11 @@ class RetrievalTools:
         pages = json.loads(result.content[0].text).get("pages", [])
         if not isinstance(pages, list):
             raise ValueError("invalid web search output")
+        question = self.state.get("rewrite_hint") or self.state.get("original_query") or query
+        pages = filter_web_pages([page for page in pages if isinstance(page, dict)], scope.item_names, question)
         fetched = time.time()
         return [{**page, "text": page.get("snippet") or page.get("content") or "", "source": "web", "type": "web",
-                 "fetched_at": fetched} for page in pages[:limit] if isinstance(page, dict)]
+                 "fetched_at": fetched} for page in pages[:limit]]
 
     @staticmethod
     async def _request_web(query, limit, deadline):

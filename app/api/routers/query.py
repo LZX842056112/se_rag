@@ -18,7 +18,7 @@ from app.api.schema.query_schema import (
     QueryTaskStatusResponseSchema,
 )
 from app.rag.query.answer_payload import answer_fields
-from app.rag.query.eval_evidence import build_evidence, build_retrieval_layers
+from app.rag.query.eval_evidence import build_evaluation, build_evidence, build_retrieval_layers
 from app.evolution.feedback.collector import feedback_states
 from app.rag.query.pipeline import invoke_query_graph
 from app.rag.query.lifecycle import reserve_query, query_is_active
@@ -43,6 +43,7 @@ def query(background_tasks: BackgroundTasks, query_params: QueryRequestSchema, r
     session_id = query_params.session_id or str(uuid.uuid4())
     authorize_session(request, session_id, create=True)
     is_stream = query_params.is_stream
+    queued_at = getattr(request.state, "query_received_at", None) if request else None
     turn_id = reserve_query(session_id, query_params.query)
 
     if is_stream:
@@ -53,6 +54,7 @@ def query(background_tasks: BackgroundTasks, query_params: QueryRequestSchema, r
             is_stream=is_stream,
             rewrite_hint=query_params.rewrite_hint,
             turn_id=turn_id,
+            queued_at=queued_at,
         )
         return QueryStreamResponseSchema(message=f"已开始查询:{query_params.query}", session_id=session_id, turn_id=turn_id)
 
@@ -62,6 +64,7 @@ def query(background_tasks: BackgroundTasks, query_params: QueryRequestSchema, r
         is_stream=is_stream,
         rewrite_hint=query_params.rewrite_hint,
         turn_id=turn_id,
+        queued_at=queued_at,
     )
     if state is None:
         raise ApiError("query_failed", "查询流程执行失败", status_code=500)
@@ -71,6 +74,7 @@ def query(background_tasks: BackgroundTasks, query_params: QueryRequestSchema, r
     if query_params.include_evidence:
         fields["evidence"] = build_evidence(state.get("reranked_docs"))
         fields["retrieval_layers"] = build_retrieval_layers(state)
+        fields["evaluation"] = build_evaluation(state)
     return QueryNotStreamResponseSchema(
         message=f"已完成{query_params.query}的内容检索",
         session_id=session_id,

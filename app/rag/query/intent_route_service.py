@@ -1,12 +1,11 @@
 """意图路由服务（查询链路首节点）。
 
-职责：判定本轮提问是「知识库问答(rag)」还是「闲聊(chitchat)」，把结论写进
-``state["intent"]``，由图的条件边决定走检索链路还是闲聊作答分支。
+职责：区分知识库问答、闲聊和明确超出产品范围的请求。后两种不执行产品检索。
 
 三条设计约束：
 1. 保守边界——拿不准、识别失败一律按 rag：误判闲聊会让用户得不到答案，
    误判 rag 只是多走一次检索；
-2. 失败不死链路——LLM 异常 / 脏输出全部降级为 rag，绝不升级成 500；
+2. 分类失败继续主体确认。复用问题改写识别明确超范围的请求；
 3. 开关关闭时零外部调用——``CHITCHAT_ENABLED=false`` 时纯透传，检索与
    作答行为逐字节等价。
 """
@@ -34,6 +33,7 @@ from app.shared.utils.require import require_state_str
 
 INTENT_RAG = "rag"
 INTENT_CHITCHAT = "chitchat"
+OUT_OF_SCOPE = "out_of_scope"
 
 # 意图分类的历史上下文条数：与 answer_service 的历史口径一致
 _INTENT_HISTORY_LIMIT = 6
@@ -43,13 +43,8 @@ _INTENT_SLOTS = threading.BoundedSemaphore(4)
 
 
 @step_log("call_llm_classify_intent")
-def call_llm_classify_intent(history_text: str, original_query: str) -> str:
-    """调用 LLM 做 rag/chitchat 二分类；任何异常或脏输出都兜底为 rag。
-
-    兜底口径：LLM 抛异常、返回非法 JSON、JSON 非对象、``intent`` 取值不在
-    枚举内、字段缺失或为空——一律 ``INTENT_RAG``。意图识别是分流开关，
-    不是业务步骤，不得把原链路打死。
-    """
+def call_llm_classify_intent(history_text: str, original_query: str) -> str | None:
+    """调用 LLM 区分产品问答、闲聊和超范围请求。分类失败时返回 None。"""
     try:
         llm_client = llm_providers.chat(json_mode=True, timeout_seconds=INTENT_TIMEOUT_SECONDS, max_retries=0)
         prompt_text = load_prompt(
@@ -58,7 +53,7 @@ def call_llm_classify_intent(history_text: str, original_query: str) -> str:
         # 信号量限流：拿不到并发名额立即降级为 rag，避免意图分类挤占不可控资源
         if not _INTENT_SLOTS.acquire(blocking=False):
             mark_degraded("intent_busy")
-            return INTENT_RAG
+            return None
         # copy_context 把调用链的上下文字典（如 metrics）透传到线程池线程，保证子线程隔离可续
         context = copy_context()
         def invoke():
@@ -75,19 +70,18 @@ def call_llm_classify_intent(history_text: str, original_query: str) -> str:
             response = future.result(timeout=INTENT_TIMEOUT_SECONDS)
         except FutureTimeout:
             mark_degraded("intent_timeout")
-            return INTENT_RAG  # 超时兜底：按知识库问答处理，不中断主链路
+            return None
         # 解析 LLM 返回的 JSON，取 intent 字段；缺失/为空也计入字段缺失分支由下方统一兜底
         result_dict = parse_json_object(response.content)
         intent = str(result_dict.get("intent") or "").strip().lower()
     except Exception as exc:  # noqa: BLE001 - 分类失败必须降级，不能升级成 500
         mark_degraded("intent_error")
         logger.warning(f"意图识别失败，按知识库问答处理：{exc}")
-        return INTENT_RAG
-    # 枚举校验：输出不在 rag/chitchat 之内依旧按 rag 处理，宁可多查一次也不漏答
-    if intent not in (INTENT_RAG, INTENT_CHITCHAT):
+        return None
+    if intent not in (INTENT_RAG, INTENT_CHITCHAT, OUT_OF_SCOPE):
         mark_degraded("intent_invalid_output")
         logger.warning(f"意图识别输出不在枚举内，按知识库问答处理：intent={intent!r}")
-        return INTENT_RAG
+        return None
     return intent
 
 
@@ -100,7 +94,7 @@ def route_intent(state: QueryGraphState) -> QueryGraphState:
     2. ``rewrite_hint`` 非空——点选主体后的重问一定是知识诉求，确定性回填 rag
        （与 ``resolve_by_hint`` 同一哲学：结构化直传比模型推断可靠）；
     3. 纯寒暄——完整输入命中确定性规则，不依赖历史或分类模型；
-    4. 常规流程——历史上下文 + LLM 二分类，失败兜底 rag。
+    4. 常规流程——历史上下文 + LLM 分类，失败时继续主体确认。
     """
     state["business_tag"] = classify_business(state.get("original_query") or "")
     if not CHITCHAT_ENABLED:
@@ -119,7 +113,12 @@ def route_intent(state: QueryGraphState) -> QueryGraphState:
         return state
     history_text = build_chat_history_context(session_id, limit=_INTENT_HISTORY_LIMIT)
     started = time.perf_counter()
-    state["intent"] = call_llm_classify_intent(history_text, original_query)
+    intent = call_llm_classify_intent(history_text, original_query)
+    state["intent_classification_failed"] = intent is None
+    if intent == OUT_OF_SCOPE:
+        state["query_outcome"] = OUT_OF_SCOPE
+        intent = INTENT_CHITCHAT
+    state["intent"] = intent or INTENT_RAG
     metrics = current_metrics.get()
     if metrics:
         metrics.classification_ms = (time.perf_counter() - started) * 1000

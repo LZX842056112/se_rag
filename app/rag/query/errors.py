@@ -12,6 +12,8 @@ LLM 超时错分成 mineru_timeout、把 Milvus 挂错分成 index_failed。
 from __future__ import annotations
 
 import grpc
+import httpx
+from openai import APIError, APITimeoutError
 from pymilvus.exceptions import MilvusException
 from pymongo.errors import PyMongoError
 
@@ -29,15 +31,6 @@ _KEYWORD_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 
 
-def _openai_types() -> tuple[type[BaseException], ...]:
-    """openai 异常类型（langchain-openai 的间接依赖，懒加载防缺失）。"""
-    try:
-        from openai import APITimeoutError, APIError
-    except ImportError:  # pragma: no cover - 无 openai 时退回关键字判定
-        return ()
-    return (APITimeoutError, APIError)
-
-
 def classify_query_error(exc: BaseException) -> tuple[str, str]:
     """把异常映射为 ``(错误码, 中文提示)``；无法归类时返回 ``("query_failed", 原始消息)``。"""
     message = str(exc) or exc.__class__.__name__
@@ -46,14 +39,10 @@ def classify_query_error(exc: BaseException) -> tuple[str, str]:
         return "milvus_unavailable", message
     if isinstance(exc, PyMongoError):
         return "mongo_unavailable", message
-    openai_types = _openai_types()
-    if openai_types and isinstance(exc, openai_types[0]):  # APITimeoutError
+    if isinstance(exc, (TimeoutError, APITimeoutError, httpx.TimeoutException)):
         return "llm_timeout", message
-    if openai_types and isinstance(exc, openai_types[1]):  # APIError 及其子类
+    if isinstance(exc, (APIError, httpx.NetworkError, httpx.RemoteProtocolError)):
         return "llm_failed", message
-    if isinstance(exc, TimeoutError):
-        # 查询侧的长超时等待点主要是 LLM 客户端（asyncio.TimeoutError 亦为其子类）
-        return "llm_timeout", message
 
     lowered = message.lower()
     for code, keywords in _KEYWORD_RULES:

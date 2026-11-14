@@ -179,15 +179,18 @@ async def _stream_events_redis(session_id: str, request: Request) -> AsyncIterat
     try:
         client = _redis_client()
         stream = _stream_key(session_id)
-        if not client.exists(stream) and not client.exists(_exists_key(session_id)):
-            yield _pack(SSEEvent.ERROR, {"code": "stream_not_found", "message": "流式会话不存在或已结束"})
-            return
-        yield _pack(SSEEvent.READY, {})
-        last_id = "0-0"
+        last_id = None
         while True:
             if await request.is_disconnected():
                 return
             try:
+                if last_id is None:
+                    exists = await asyncio.to_thread(client.exists, stream, _exists_key(session_id))
+                    if not exists:
+                        yield _pack(SSEEvent.ERROR, {"code": "stream_not_found", "message": "流式会话不存在或已结束"})
+                        return
+                    last_id = "0-0"
+                    yield _pack(SSEEvent.READY, {})
                 result = await asyncio.to_thread(
                     client.xread, {stream: last_id}, count=64, block=1000
                 )
@@ -371,7 +374,10 @@ async def stream_events(session_id: str, request: Request) -> AsyncIterator[str]
     try:
         yield _pack(SSEEvent.READY, {})
         for message in pending:
-            yield _pack(message["event"], message["data"])
+            event = message["event"]
+            yield _pack(event, message["data"])
+            if event == SSEEvent.CLOSE:
+                return
 
         while True:
             if await request.is_disconnected():

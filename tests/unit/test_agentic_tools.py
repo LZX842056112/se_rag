@@ -267,10 +267,14 @@ def test_web_result_has_fetch_time_and_source_but_respects_request_budget(servic
     calls = []
     async def request(query, limit, deadline):
         calls.append((query, limit, tools.remaining_seconds(deadline)))
-        return SimpleNamespace(content=[SimpleNamespace(text='{"pages":[{"title":"Reset","snippet":"E01 reset","url":"https://example.test/reset"}]}')])
+        return SimpleNamespace(content=[SimpleNamespace(text=(
+            '{"pages":[{"title":"HAK 1800 Reset","snippet":"Other model"},'
+            '{"title":"HAK 180 Reset","snippet":"E01 reset","url":"https://example.test/reset"}]}'
+        ))])
     monkeypatch.setattr(retriever, "_request_web", request)
-    result = retriever.execute("web_search", {"query": "Reset E01"}, 1)
+    result = retriever.execute("web_search", {"query": "Reset E01", "limit": 1}, 1)
     assert result.status == "ok"
+    assert [ref.title for ref in result.evidence] == ["HAK 180 Reset"]
     assert result.evidence[0].source == "web" and result.evidence[0].fetched_at > 0
     assert 0 < calls[0][2] <= 1
 
