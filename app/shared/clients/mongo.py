@@ -81,6 +81,7 @@ def ensure_indexes() -> None:
         db[mongo.chat_message_collection].create_index([("session_id", 1), ("ts", -1)])
         db[mongo.fb_events_collection].create_index([("session_id", 1), ("ts", -1)])
         db[mongo.fb_events_collection].create_index([("ts", -1)])
+        db[mongo.fb_events_collection].create_index([("ts", 1), ("_id", 1)])
         db[mongo.k_gaps_collection].create_index([("session_id", 1), ("ts", -1)])
         ensure_gap_feedback_index(db[mongo.k_gaps_collection])
         db[mongo.k_candidates_collection].create_index([("faq_question", 1)])
