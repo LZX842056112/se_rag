@@ -182,7 +182,8 @@ def test_classifier_timeout_reuses_subject_rewrite_to_route_clear_out_of_scope_r
             return SimpleNamespace(invoke=timed_out)
 
         def rewrite(messages):
-            assert 'out_of_scope' in messages[0].content
+            # 超时时，同一模型调用必须在输出格式中声明第三个字段。
+            assert '"out_of_scope": false' in messages[0].content
             return _Resp('{"item_names":[],"out_of_scope":true}')
         return SimpleNamespace(invoke=rewrite)
 

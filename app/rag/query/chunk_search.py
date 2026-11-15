@@ -127,6 +127,7 @@ def search_chunks(
     collection_name: str | None = None,
     output_fields: list[str] | None = None,
     dense_metric: str = CHUNK_DENSE_METRIC,
+    raise_on_unavailable: bool = False,
 ) -> list:
     """对 ``query_text`` 做 BGE-M3 混合检索（稠密+稀疏），返回 Milvus 原始命中列表。
 
@@ -174,6 +175,8 @@ def search_chunks(
     milvus_result = hybrid(expr)
     if milvus_result is None:
         mark_degraded("milvus_unavailable")
+        if raise_on_unavailable:
+            raise RuntimeError("Milvus 检索失败")
     return milvus_result[0] if milvus_result else []
 
 

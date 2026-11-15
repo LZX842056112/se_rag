@@ -9,10 +9,12 @@ import json
 import math
 import threading
 import time
-from typing import Any
+from typing import Any, Literal
 
 from app.shared.config import settings
 from app.shared.runtime.logger import logger
+
+StageOutcome = Literal["skipped", "failed", "empty", "partial", "succeeded"]
 
 
 @dataclass
@@ -24,6 +26,7 @@ class QueryMetrics:
     classification_ms: float = 0.0
     queued_at: float | None = None
     stage_ms: dict[str, float] = field(default_factory=dict)
+    stage_outcomes: dict[str, StageOutcome] = field(default_factory=dict)
     rerank_pairs: int | None = None
     rerank_input_tokens: int | None = None
     llm_calls: int = 0
@@ -49,6 +52,7 @@ class QueryMetrics:
                 "queue_ms": (max(0, self.started - self.queued_at) * 1000
                              if self.queued_at is not None else None),
                 "stage_ms": {name: round(ms, 2) for name, ms in self.stage_ms.items()},
+                "stage_outcomes": dict(self.stage_outcomes),
                 "rerank_pairs": self.rerank_pairs,
                 "rerank_input_tokens": self.rerank_input_tokens,
                 "first_token_ms": self.first_token_ms,
@@ -77,6 +81,13 @@ def measure_stage(name: str):
         elapsed_ms = (time.perf_counter() - started) * 1000
         with metrics.lock:
             metrics.stage_ms[name] = metrics.stage_ms.get(name, 0.0) + elapsed_ms
+
+
+def mark_stage_outcome(name: str, outcome: StageOutcome) -> None:
+    metrics = current_metrics.get()
+    if metrics is not None:
+        with metrics.lock:
+            metrics.stage_outcomes[name] = outcome
 
 
 def mark_degraded(reason: str) -> None:

@@ -7,7 +7,12 @@
 """
 from __future__ import annotations
 
+import pytest
+
+from app.process.query.agent.nodes.node_search_embedding_hyde import node_search_embedding_hyde
 from app.rag.query import hyde_search_service as hyde
+from app.rag.query import chunk_search
+from app.shared.runtime.query_metrics import QueryMetrics, current_metrics
 
 
 def test_gate_disabled_by_default_never_skips(monkeypatch):
@@ -51,3 +56,25 @@ def test_search_by_hyde_skips_llm_when_gated(monkeypatch):
 
     assert result == []
     assert calls["n"] == 0, "分流命中时不得调用假设答案生成"
+
+
+@pytest.mark.parametrize(("gate", "milvus_result", "outcome"), [
+    (True, None, "skipped"), (False, None, "failed"), (False, [[]], "empty"),
+    (False, [[{"entity": {"chunk_id": "a"}}]], "succeeded"),
+])
+def test_hyde_reports_gate_and_milvus_outcomes(monkeypatch, gate, milvus_result, outcome):
+    monkeypatch.setattr(hyde, "HYDE_GATE_ENABLED", gate)
+    monkeypatch.setattr(hyde, "HYDE_GATE_SHORT_CHARS", 24)
+    monkeypatch.setattr(hyde, "call_llm_answer", lambda _query: "假设答案")
+    monkeypatch.setattr(chunk_search, "expand_item_names", lambda names: names)
+    monkeypatch.setattr(chunk_search.llm_providers, "embed_text", lambda _: {"dense": [[0.1]], "sparse": [{1: 0.5}]})
+    monkeypatch.setattr(chunk_search.milvus_gateway, "hybrid_search", lambda **_: milvus_result)
+    metrics = QueryMetrics("s", "t")
+    token = current_metrics.set(metrics)
+    try:
+        result = node_search_embedding_hyde({"item_names": ["HAK 180"], "rewritten_query": "配对码是多少"})
+    finally:
+        current_metrics.reset(token)
+    assert result.get("hyde_executed", False) is not gate
+    assert metrics.document("rag", "ok")["stage_outcomes"] == {"hyde": outcome}
+    assert bool(result["hyde_embedding_chunks"]) == (outcome == "succeeded")

@@ -16,7 +16,7 @@ from app.rag.query.config import (
 )
 from app.rag.query.eval_evidence import chunk_ids
 from app.rag.query.manual_evidence_rerank import keep_procedure_context, keep_retrieval_agreement, rank_manual_evidence
-from app.rag.query.manual_keyword_search import matches_requested_heading
+from app.rag.query.manual_keyword_search import matches_requested_heading, rank_shared_manual_fallback
 from app.shared.models import llm_providers
 from app.shared.models.reranker import reranker_tokenizer_lock, score_pairs
 from app.shared.runtime.deadline import remaining
@@ -64,6 +64,7 @@ def deal_rrf_and_web_result(rrf_chunks: list, web_search_docs: list) -> list[dic
             "seq": chunk.get("seq"),
             "heading_path": chunk.get("heading_path"),
             "file_title": chunk.get("file_title"),
+            "item_name": chunk.get("item_name"),
             "document_kind": chunk.get("document_kind", "manual"),
             "document_version": chunk.get("document_version", ""),
             "valid_until": chunk.get("valid_until", 0.0),
@@ -239,6 +240,10 @@ def dyn_limit_reranker_docs(reranker_docs: list[dict]) -> list[dict]:
     return reranker_docs[:topk]
 
 
+def _manual_answer_context(local: list[dict], web: list[dict]) -> list[dict]:
+    return [dict(doc, score=None) for doc in (local + web)[:get_rerank_topk()]]
+
+
 @step_log("rerank_documents")
 def rerank_documents(state: QueryGraphState) -> QueryGraphState:
     """选择手册证据。其他候选由本地模型打分和截断。"""
@@ -266,7 +271,17 @@ def rerank_documents(state: QueryGraphState) -> QueryGraphState:
         ranked = rank_manual_evidence(state, local, local_limit)
         if ranked is not None:
             state["reranked_chunk_ids"] = chunk_ids(ranked)
+            if len(ranked) < local_limit:
+                ranked_ids = set(state["reranked_chunk_ids"])
+                remaining_docs = (doc for doc in local if str(doc.get("chunk_id")) not in ranked_ids)
+                ranked = (ranked + [dict(doc, score=None) for doc in remaining_docs])[:local_limit]
         else:
+            shared = rank_shared_manual_fallback(local, question, state.get("item_names") or [], limit=local_limit)
+            if shared:
+                mark_degraded("manual_evidence_fusion_fallback")
+                mark_degraded("manual_evidence_shared_scope_fallback")
+                state["reranked_docs"] = _manual_answer_context(shared, web)
+                return state
             keyword = state.get("keyword_chunks") or []
             available = remaining()
             if keyword or (available is not None and available <= LEGACY_ANSWER_RESERVE_SECONDS):
@@ -284,7 +299,7 @@ def rerank_documents(state: QueryGraphState) -> QueryGraphState:
         if ranked is not None:
             selected = keep_procedure_context(question, ranked, local)
             selected = keep_retrieval_agreement(state, selected, local, local_limit)
-            state["reranked_docs"] = (selected + [dict(doc, score=None) for doc in web])[:get_rerank_topk()]
+            state["reranked_docs"] = _manual_answer_context(selected, web)
             return state
         # 关键词分支没有候选时，限制本地重排的输入条数。
         semantic_limit = max(get_rrf_top(), RERANK_MIN_LOCAL_TOPK)

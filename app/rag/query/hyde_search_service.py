@@ -46,5 +46,6 @@ def search_by_hyde(state: QueryGraphState) -> list:
         hypothetical_answer = call_llm_answer(rewritten_query)
         milvus_list = search_chunks(
             item_names, f"{rewritten_query}:{hypothetical_answer}", heading_path=state.get("requested_heading_path", ""),
+            raise_on_unavailable=True,
         )
     return to_chunks(milvus_list)
