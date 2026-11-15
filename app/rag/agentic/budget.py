@@ -90,10 +90,10 @@ class Budget:
         """消耗一段文本的 token 计入总量；超过上限则抛 ``StopRun('context_budget')``。"""
         # 有本地 tokenizer 用精确 token 计数；否则按 UTF-8 字节数作为上界近似
         count = len(self.tokenizer.encode(text)) if self.tokenizer else len(text.encode('utf-8'))
-        self.tokens += count
-        if self.tokens > self.max_tokens:
-            raise StopRun('context_budget')
         self.remaining()
+        if self.tokens + count > self.max_tokens:
+            raise StopRun('context_budget')
+        self.tokens += count
 
 
 def local_tokenizer(path):
