@@ -315,6 +315,14 @@
     "question": "Aolynk CB304n 网桥重启后会立即生效吗？",
     "ground_truth": "手册说明，单击“重启”按钮会重启路由器。手册没有说明配置更改是否会在重启后立即生效。",
     "expected_outcome": "answered",
+    "required_answer_terms": [
+      "重启",
+      "没有说明重启后何时生效"
+    ],
+    "forbidden_answer_terms": [
+      "将立即执行",
+      "会立即触发"
+    ],
     "expected_item_names": [
       "Aolynk CB304n Cable网桥"
     ],
@@ -398,6 +406,11 @@
     "must_hit_chunk_ids": [
       "094eeaa0a83e40c7b4fa2afdd25b18003f8aa812"
     ],
+    "chunk_equivalents": {
+      "094eeaa0a83e40c7b4fa2afdd25b18003f8aa812": [
+        "f6b999d044266ae638a5f3c0a3c1806c01a4e362"
+      ]
+    },
     "tags": [
       "参数设置"
     ]

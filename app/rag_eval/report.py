@@ -5,11 +5,12 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
 from app.rag_eval.config import DEFAULT_MAX_DROP, DEFAULT_MAX_LATENCY_INCREASE_MS
-from app.rag_eval.ragas_metrics import METRIC_NAMES, finite_score
+from app.rag_eval.ragas_metrics import METRIC_NAMES, ZERO_SCORE_REASONS, finite_score
 from app.rag_eval.retrieval_metrics import LAYERS
 
 # 延迟是「越小越好」，其余指标是「越大越好」
@@ -213,6 +214,9 @@ def render_markdown(report: dict) -> str:
             lines.append(f"- {key} `{'未知' if value is None else value}`")
         lines.append(f"- 实际查询路径 {summary.get('query_modes', {})}")
         lines.append(f"- 实际结果类型 {summary.get('outcomes', {})}")
+        for correction in meta.get("annotation_corrections") or []:
+            if isinstance(correction, dict) and correction.get("case_id") and correction.get("reason"):
+                lines.append(f"- 用例 `{correction['case_id']}` 更新了标注。{correction['reason']}")
     lines.append("")
 
     conclusion = summary.get("conclusion") or {}
@@ -247,16 +251,31 @@ def render_markdown(report: dict) -> str:
 
     attempts = summary.get("http_attempts")
     degradation = summary.get("degradation")
-    if attempts or degradation:
+    resume = meta.get("http_resume")
+    if attempts or degradation or resume:
         lines.extend(["## HTTP 请求和服务降级", ""])
         if attempts:
             lines.append(f"- HTTP 请求共 {attempts['total']} 次。{attempts['retried_cases']} 题发生重试。")
             for reason, count in sorted(attempts["failed_attempts_by_reason"].items()):
                 lines.append(f"  - `{reason}` {count} 次")
+        if resume:
+            lines.append(f"- 另有 {resume['previous_http_attempts']} 次失败请求，涉及 {len(resume['cases'])} 题。"
+                         "当前延迟统计使用报告中采集到的请求。")
         if degradation:
             lines.append(f"- 服务提供了 {degradation['reported']} 题的降级标记。其中 {degradation['degraded']} 题降级。")
             for reason, count in degradation["by_reason"].items():
                 lines.append(f"  - `{reason}` {count} 题")
+        lines.append("")
+
+    stage_outcomes = summary.get("stage_outcomes")
+    if stage_outcomes:
+        lines.extend([
+            "## 可选阶段执行结果", "", "只统计服务实际记录的阶段。空结果表示阶段已执行，但没有输出。",
+            "", "| 阶段 | 成功 | 部分完成 | 空结果 | 跳过 | 失败 |", "|---|---|---|---|---|---|",
+        ])
+        for name, outcomes in stage_outcomes.items():
+            values = [outcomes.get(status, 0) for status in ("succeeded", "partial", "empty", "skipped", "failed")]
+            lines.append(f"| {name} | " + " | ".join(map(str, values)) + " |")
         lines.append("")
 
     lines.extend(["## 检索指标", ""])
@@ -292,18 +311,24 @@ def render_markdown(report: dict) -> str:
         lines.append("")
 
     zero_scores = {metric: [] for metric in METRIC_NAMES}
+    zero_reasons: Counter[str] = Counter()
     for row in report.get("cases") or []:
         scores = row.get("ragas") or {}
         for metric in zero_scores:
             value = scores.get(metric)
             if finite_score(value) and value == 0:
                 zero_scores[metric].append(row["case_id"])
+                reason = (row.get("ragas_zero_score_reasons") or {}).get(metric)
+                if reason in ZERO_SCORE_REASONS:
+                    zero_reasons[reason] += 1
     if any(zero_scores.values()):
         lines.extend(["## RAGAS 零分复核", "", "对照答案、参考答案和实际评分证据。保留评分器的原始分数。", ""])
         for metric, case_ids in zero_scores.items():
             if case_ids:
                 ids = "、".join(f"`{case_id}`" for case_id in case_ids)
                 lines.append(f"- `{metric}` 有 {len(case_ids)} 题为零分。用例 {ids}。")
+        for reason, count in zero_reasons.items():
+            lines.append(f"- {ZERO_SCORE_REASONS[reason]}：{count} 题。请人工核对。")
         lines.append("")
 
     latency = summary.get("latency_ms") or {}
@@ -358,9 +383,19 @@ def _render_case_table(report: dict) -> list[str]:
         if metrics.get("degraded") is True:
             reasons = metrics.get("degraded_reasons")
             notes.append("服务降级" + (f" {', '.join(map(str, reasons))}" if isinstance(reasons, list) else ""))
+        stage_outcomes = metrics.get("stage_outcomes")
+        if isinstance(stage_outcomes, dict):
+            notes.extend(f"{stage} {outcome}" for stage, outcome in stage_outcomes.items() if outcome != "succeeded")
+        agentic = metrics.get("agentic")
+        stop_reason = agentic.get("stop_reason") if isinstance(agentic, dict) else None
+        if stop_reason and stop_reason != "answered":
+            notes.append(f"Agentic 停止原因 {stop_reason}")
         for retry in row.get("ragas_retries", ()):
             status = "成功" if retry["status"] == "scored" else "失败"
             notes.append(f"{retry['metric']} 以 {retry['max_tokens']} token 重试{status}")
+        for metric, reason in (row.get("ragas_zero_score_reasons") or {}).items():
+            if reason in ZERO_SCORE_REASONS:
+                notes.append(f"{metric} 零分：{ZERO_SCORE_REASONS[reason]}")
         note = "。".join(str(item) for item in notes if item)
         evidence = str(row.get("evidence_count", "-"))
         if "context_count" in row:
