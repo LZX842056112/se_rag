@@ -16,6 +16,7 @@ from starlette.middleware.cors import CORSMiddleware
 from app.api.errors import install_error_handlers
 from app.api.session_access import install_session_cookie
 from app.shared.runtime.single_worker import SingleWorkerLease
+from app.api.routers import commerce as commerce_router
 from app.api.routers import evolution as evolution_router
 from app.api.routers import health as health_router
 from app.api.routers import pages as pages_router
@@ -139,6 +140,8 @@ async def record_query_arrival(request: Request, call_next):
 
 
 app.include_router(query_router.router)
+app.include_router(commerce_router.router)
+commerce_router.install_commerce_boundary(app)
 app.include_router(evolution_router.router)
 app.include_router(workflows_router.query_router)
 app.include_router(health_router.router)

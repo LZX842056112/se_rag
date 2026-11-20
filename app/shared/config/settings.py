@@ -145,6 +145,21 @@ class ApiSettings:
 
 
 @dataclass
+class CommerceSettings:
+    """商城客服（查询与写操作分别启用）。"""
+
+    enabled: bool = False
+    actions_enabled: bool = False
+    account_login_enabled: bool = False
+    api_base_url: str = ""
+    service_token: str = field(default="", repr=False)
+    session_verify_url: str = ""
+    session_verify_token: str = field(default="", repr=False)
+    session_cookie_name: str = "mall_session"
+    public_origin: str = ""
+
+
+@dataclass
 class EvolutionSettings:
     """自进化闭环的全部开关、阈值与集合名。"""
 
@@ -263,6 +278,7 @@ class Settings:
     runtime: RuntimeSettings
     evaluation: EvaluationSettings
     agentic: AgenticSettings = field(default_factory=AgenticSettings)
+    commerce: CommerceSettings = field(default_factory=CommerceSettings)
 
 
 def _build_settings() -> Settings:
@@ -350,6 +366,17 @@ def _build_settings() -> Settings:
             ),  # 跨域白名单，逗号分隔，默认 *
             query_workers=max(1, env_int("QUERY_APP_WORKERS", 2)),  # 查询服务 worker 数，默认 2
             import_workers=max(1, env_int("IMPORT_APP_WORKERS", 2)),  # 导入服务 worker 数，默认 2
+        ),
+        commerce=CommerceSettings(
+            enabled=env_bool("COMMERCE_ENABLED"),
+            actions_enabled=env_bool("COMMERCE_ACTIONS_ENABLED"),
+            account_login_enabled=env_bool("COMMERCE_ACCOUNT_LOGIN_ENABLED"),
+            api_base_url=env_str("COMMERCE_API_BASE_URL"),
+            service_token=env_str("COMMERCE_SERVICE_TOKEN"),
+            session_verify_url=env_str("MALL_SESSION_VERIFY_URL"),
+            session_verify_token=env_str("MALL_SESSION_VERIFY_TOKEN"),
+            session_cookie_name=env_str("MALL_SESSION_COOKIE_NAME", "mall_session"),
+            public_origin=env_str("COMMERCE_PUBLIC_ORIGIN"),
         ),
         import_=ImportSettings(
             admin_token=env_str("IMPORT_ADMIN_TOKEN", "evoadmin_15946edbb1ed4289ae8296dbaafa57b5aad9bf25bd72a51c"),  # 导入鉴权令牌（空则 fail-closed）
