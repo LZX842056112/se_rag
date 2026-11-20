@@ -84,6 +84,7 @@
     return;
   }
 
+  App.configure({ fallbackPort: 8001 });
   const byId = id => document.getElementById(id);
   const buttons = [...byId('workflowViews').querySelectorAll('[data-view]')];
   const auth = byId('workflowAuth');
@@ -236,7 +237,7 @@
     }
     connection('idle', '正在连接');
     try {
-      const url = `/api/workflows/${view}/events${params.size ? `?${params}` : ''}`;
+      const url = `${App.base}/api/workflows/${view}/events${params.size ? `?${params}` : ''}`;
       const response = await fetch(url, { headers, signal: active.signal, credentials: 'same-origin' });
       if (!response.ok) {
         const error = await response.json().catch(() => ({}));

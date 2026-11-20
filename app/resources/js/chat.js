@@ -47,6 +47,28 @@
     });
   }
 
+  const commerceEnabled = document.documentElement.dataset.commerceEnabled === 'true';
+  if (commerceEnabled) {
+    document.getElementById('chatWelcome').textContent = '你好，我是知汇助手。你可以查订单、物流，也可以问产品使用问题。';
+    document.getElementById('chatWelcomeHint').textContent = '可以问“帮我查最近一笔订单的物流”。';
+  }
+  const commerce = window.createCommerceChat({
+    enabled: commerceEnabled,
+    sessionId,
+    workspace: document.getElementById('commerceWorkspace'),
+    addMessage: addBotMsgSkeleton,
+    askKnowledge(query) {
+      if (sendBtn.disabled) {
+        showToast('请等待当前问答完成。');
+        return false;
+      }
+      sendBtn.disabled = true;
+      sendKnowledge(addBotMsgSkeleton(), query, '');
+      return true;
+    },
+    scrollToBottom
+  });
+
   function addUserMsg(text) {
     chatEl.insertAdjacentHTML('beforeend', `
       <div class="msg user">
@@ -58,6 +80,7 @@
       </div>
     `);
     scrollToBottom();
+    return chatEl.lastElementChild;
   }
 
   function addUserMsgWithTime(text, ts) {
@@ -587,7 +610,12 @@
    *   非字符串入参（如 click 事件对象）会被丢弃。
    */
   async function onSend(rewriteHint) {
+    if (commerceEnabled) await chatReady;
     if (sendBtn.disabled) return; // 按钮禁用时拦截重复提交（含 Enter 快捷键）
+    if (commerce.isBusy()) {
+      showToast('请等待当前商城请求完成。');
+      return;
+    }
     const text = (inputEl.value || '').trim();
     if (!text) return;
     // 挂起的反问只服务一次发送：命中与否都作废，避免残留影响后续提问
@@ -596,10 +624,18 @@
     // 只接受字符串：非字符串（如 click 事件对象）一律丢弃，避免污染请求体
     const hint = resolveSendHint(typeof rewriteHint === 'string', rewriteHint, text, pending);
     inputEl.value = '';
-    addUserMsg(text);
+    const userMsgEl = addUserMsg(text);
     const botMsgEl = addBotMsgSkeleton();
     sendBtn.disabled = true;
 
+    if (typeof rewriteHint !== 'string' && !hint && await commerce.assist(botMsgEl, text, userMsgEl)) {
+      sendBtn.disabled = false;
+      return;
+    }
+    await sendKnowledge(botMsgEl, text, hint);
+  }
+
+  async function sendKnowledge(botMsgEl, text, hint) {
     try {
       const isStream = streamToggle.checked;
       const data = await submitQuery(text, hint);
@@ -693,12 +729,13 @@
     // 清空除首条欢迎消息外的内容
     Array.from(chatEl.querySelectorAll('.msg')).slice(1).forEach(node => node.remove());
     pendingSubjectAsk = null; // 选项栏已被清掉，挂起的反问随之作废
+    commerce.clearConversation();
     scrollToBottom();
   });
 
   apiHealth();
   setInterval(apiHealth, 5000);
   // 不能只调 loadHistory：刷新时后台查询可能仍在跑，需先读任务快照再决定是否重新接管
-  restoreSession();
+  const chatReady = restoreSession().then(commerce.restore);
   setTimeout(() => inputEl.focus(), 200);
 })();

@@ -5,16 +5,18 @@
 2. **内容指纹**：静态资源在 HTML 中以 `?v=<内容哈希>` 引用，文件一改版本号即变，
    因此可以放心地给资源加长缓存（`max-age=86400, immutable`），
    而 HTML 本身用 `no-cache`（每次校验，避免刷新后仍看到旧页面）；
-3. 页面渲染只做一件事：把 `{{ASSET_V}}` 替换成当前版本号。
+3. 页面渲染注入资源版本和 ASGI 挂载路径。
 """
 from __future__ import annotations
 
 import hashlib
+from html import escape
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse, HTMLResponse
 
 from app.api.errors import ApiError
+from app.shared.config import settings
 from app.shared.utils.paths import PROJECT_ROOT
 
 _RESOURCES = PROJECT_ROOT / "app" / "resources"
@@ -24,6 +26,7 @@ _ASSETS: dict[str, tuple[str, str]] = {
     "app.css": ("css/app.css", "text/css"),
     "app.js": ("js/app.js", "text/javascript"),
     "chat.css": ("css/chat.css", "text/css"),
+    "chat-commerce.js": ("js/chat-commerce.js", "text/javascript"),
     "chat.js": ("js/chat.js", "text/javascript"),
     "approval.css": ("css/approval.css", "text/css"),
     "approval.js": ("js/approval.js", "text/javascript"),
@@ -60,14 +63,18 @@ def asset_version() -> str:
     return str(_version_cache["value"])
 
 
-def render_page(name: str) -> HTMLResponse:
-    """读取页面模板并把资源版本号注入 `?v=`，避免刷新后仍命中旧静态资源。"""
+def render_page(name: str, request: Request | None = None) -> HTMLResponse:
+    """读取页面模板并注入资源版本和挂载路径。"""
     relative = _PAGES.get(name)
     if relative is None:
         raise ApiError("page_not_found", "页面不存在", status_code=404)
     html = (_RESOURCES / relative).read_text(encoding="utf-8")
+    root_path = request.scope.get("root_path", "") if request is not None else ""
+    commerce_enabled = "true" if settings.commerce.enabled else "false"
     return HTMLResponse(
-        html.replace("{{ASSET_V}}", asset_version()),
+        html.replace("{{ASSET_V}}", asset_version())
+        .replace("{{ROOT_PATH}}", escape(root_path.rstrip("/"), quote=True))
+        .replace("{{COMMERCE_ENABLED}}", commerce_enabled),
         headers={"Cache-Control": "no-cache"},
     )
 
@@ -95,23 +102,23 @@ def static_asset(asset_name: str) -> FileResponse:
 
 
 @query_pages_router.get("/", include_in_schema=False)
-def chat_page() -> HTMLResponse:
+def chat_page(request: Request) -> HTMLResponse:
     """客服对话页。"""
-    return render_page("chat")
+    return render_page("chat", request)
 
 
 @query_pages_router.get("/approval", include_in_schema=False)
-def approval_page() -> HTMLResponse:
+def approval_page(request: Request) -> HTMLResponse:
     """自进化候选审批后台。"""
-    return render_page("approval")
+    return render_page("approval", request)
 
 
 @query_pages_router.get("/workflows", include_in_schema=False)
-def workflows_page() -> HTMLResponse:
-    return render_page("workflows")
+def workflows_page(request: Request) -> HTMLResponse:
+    return render_page("workflows", request)
 
 
 @import_pages_router.get("/import", include_in_schema=False)
-def import_page() -> HTMLResponse:
+def import_page(request: Request) -> HTMLResponse:
     """知识库文件导入页。"""
-    return render_page("import")
+    return render_page("import", request)

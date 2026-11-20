@@ -13,6 +13,10 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from app.api.routers import pages
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PAGES_DIR = PROJECT_ROOT / "app" / "resources" / "html"
@@ -21,7 +25,7 @@ CSS_DIR = PROJECT_ROOT / "app" / "resources" / "css"
 PROMPT_DIR = PROJECT_ROOT / "app" / "resources" / "prompts"
 
 PAGE_ASSETS = {
-    "chat.html": ("app.css", "chat.css", "app.js", "chat.js"),
+    "chat.html": ("app.css", "chat.css", "app.js", "chat-commerce.js", "chat.js"),
     "approval.html": ("app.css", "approval.css", "app.js", "approval.js"),
     "import.html": ("app.css", "import.css", "app.js", "import.js"),
     "workflows.html": (
@@ -70,6 +74,28 @@ def test_page_is_markup_only(page_name: str):
     assert "<script src=" in source and "app.js" in source
 
 
+@pytest.mark.parametrize("prefix", ["", "/support"])
+def test_pages_link_to_assets_and_navigation_under_the_mount(prefix: str):
+    app = FastAPI(root_path=prefix)
+    app.include_router(pages.query_pages_router)
+    app.include_router(pages.import_pages_router)
+    app.include_router(pages.static_router)
+    client = TestClient(app, root_path=prefix)
+
+    for path, page_name in (("/", "chat.html"), ("/approval", "approval.html"),
+                            ("/workflows", "workflows.html"), ("/import", "import.html")):
+        response = client.get(prefix + path)
+        assert response.status_code == 200
+        assert f'data-root-path="{prefix}"' in response.text
+        urls = re.findall(r'(?:href|src)="(/[^"]+)"', response.text)
+        assert urls
+        for asset in PAGE_ASSETS[page_name]:
+            assert any(url.startswith(f"{prefix}/static/{asset}?v=") for url in urls)
+        for url in urls:
+            assert url.startswith(prefix + "/")
+            assert client.get(url).status_code == 200
+
+
 @pytest.mark.parametrize("script_name", sorted(p.name for p in JS_DIR.glob("*.js")))
 def test_scripts_generate_no_inline_style_attributes(script_name: str):
     """脚本拼出的 DOM 也不得带行内 style 属性（运行时 `el.style.x=` 不受限于此）。"""
@@ -81,7 +107,7 @@ def test_scripts_generate_no_inline_style_attributes(script_name: str):
 def test_page_references_versioned_whitelisted_assets(page_name: str, assets: tuple[str, ...]):
     """页面引用的静态资源必须存在，且带上内容指纹参数（否则长缓存会锁死旧版本）。"""
     source = (PAGES_DIR / page_name).read_text(encoding="utf-8")
-    refs = re.findall(r'(?:href|src)="/static/([^"?]+)(\?v=\{\{ASSET_V\}\})?"', source)
+    refs = re.findall(r'(?:href|src)="\{\{ROOT_PATH\}\}/static/([^"?]+)(\?v=\{\{ASSET_V\}\})?"', source)
     assert refs, f"{page_name} 没有引用任何静态资源"
     referenced = [name for name, _ in refs]
     assert sorted(referenced) == sorted(assets), f"{page_name} 资源集合不符：{referenced}"
@@ -295,8 +321,8 @@ def test_on_send_discards_non_string_hint():
     assert re.search(r"typeof\s+rewriteHint\s*===\s*'string'", body.group(0)), (
         "onSend 未做类型过滤，事件对象等非字符串会污染 rewrite_hint"
     )
-    assert "submitQuery(text, hint)" in body.group(0), (
-        "onSend 未把过滤后的 hint 交给 submitQuery"
+    assert "sendKnowledge(botMsgEl, text, hint)" in body.group(0), (
+        "onSend 未把过滤后的 hint 交给知识问答"
     )
 
 
@@ -372,7 +398,9 @@ def test_query_status_path_registered_in_shared_library():
 def test_init_uses_restore_session_not_bare_load_history():
     """守卫：页面初始化必须走恢复流程，不能只回显历史。"""
     source = (JS_DIR / "chat.js").read_text(encoding="utf-8")
-    assert re.search(r"^\s*restoreSession\(\);", source, flags=re.MULTILINE), (
+    assert re.search(
+        r"^  (?:const \w+ = )?restoreSession\(\)", source, flags=re.MULTILINE
+    ), (
         "初始化未调用 restoreSession，刷新后无法接管进行中的查询"
     )
 

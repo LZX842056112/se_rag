@@ -56,7 +56,7 @@
   /** 同源部署时直接用当前源；单独打开页面（file://）时回退到指定默认端口 */
   function resolveBase(fallbackPort) {
     return location.origin.indexOf('http') === 0
-      ? location.origin
+      ? location.origin + (document.documentElement.dataset.rootPath || '')
       : 'http://127.0.0.1:' + (fallbackPort || 8001);
   }
 

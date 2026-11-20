@@ -22,6 +22,14 @@ body{
   display:flex;
   flex-direction:column;
 }
+.chat-layout,.chat-conversation{
+  display:flex;
+  flex:1;
+  min-width:0;
+  min-height:0;
+}
+.chat-layout{flex-direction:row-reverse}
+.chat-conversation{flex-direction:column}
 .chat{
   flex:1;
   overflow:auto;
@@ -41,6 +49,7 @@ body{
   margin:14px 0;
   align-items:flex-end;
 }
+.msg[hidden]{display:none}
 .msg.user{justify-content:flex-end}
 /* 只让消息内容容器可伸缩，避免被压成单字宽 */
 .msg > div:not(.avatar){
@@ -259,6 +268,7 @@ body{
 }
 .composer textarea{
   flex:1;
+  min-width:0;
   resize:none;
   min-height:48px;
   max-height:140px;
@@ -319,12 +329,150 @@ body{
   border:1px solid var(--border);
 }
 
+[data-commerce-enabled="true"]:not([data-root-path=""]) .chat-workflow-link{display:none}
+[data-commerce-enabled="true"] .app{max-width:1240px}
+
+.commerce-workspace{
+  flex:0 0 320px;
+  min-width:0;
+  overflow:auto;
+  border-inline-start:1px solid var(--border);
+  scrollbar-gutter:stable;
+}
+.commerce-workspace > summary{
+  padding:16px;
+  font-size:14px;
+  font-weight:600;
+  cursor:pointer;
+  overflow-wrap:anywhere;
+}
+.commerce-workspace-state{
+  margin-inline-start:5px;
+  font-size:12px;
+  font-weight:500;
+  color:var(--brand-text);
+}
+.commerce-workspace-body,.commerce-workspace-objects,.commerce-workspace-tasks{
+  display:grid;
+  gap:12px;
+}
+.commerce-workspace-body{padding:0 16px 16px}
+.commerce-workspace-actions{display:flex;flex-wrap:wrap;gap:6px}
+.commerce-workspace-actions .btn{min-height:36px}
+.commerce-workspace [hidden],.commerce-panel [hidden]{display:none}
+.commerce-workspace-status:empty,.commerce-workspace-tasks:empty,.commerce-workspace-objects:empty{display:none}
+.commerce-object-group h2{margin-bottom:6px;font-size:13px}
+.commerce-object-list{
+  display:grid;
+  gap:6px;
+  padding:0;
+  margin:0;
+  list-style:none;
+}
+.commerce-object{
+  appearance:none;
+  display:flex;
+  align-items:center;
+  gap:8px;
+  width:100%;
+  min-height:44px;
+  padding:8px;
+  border:1px solid var(--border);
+  border-radius:var(--radius);
+  background:var(--panel-soft);
+  color:var(--text);
+  text-align:start;
+  cursor:pointer;
+  overflow-wrap:anywhere;
+}
+.commerce-object:hover{border-color:var(--brand)}
+.commerce-object[aria-pressed="true"]{
+  border-color:var(--brand);
+  background:var(--brand-soft);
+}
+.commerce-object:focus-visible,.commerce-workspace > summary:focus-visible{
+  outline:2px solid var(--brand-strong);
+  outline-offset:-2px;
+}
+.commerce-object .commerce-cover{width:42px;height:42px;flex:none}
+.commerce-object-text{display:grid;gap:2px;min-width:0}
+.commerce-object-text strong{font-size:13px}
+.commerce-object-text span{font-size:12px;color:var(--muted)}
+.commerce-task h2{font-size:13px}
+.commerce-task p{margin:0}
+
+.bubble:has(.commerce-panel){
+  width:min(560px, 100%);
+  max-width:100%;
+}
+.commerce-panel,.commerce-card,.commerce-target-form{
+  display:grid;
+  gap:8px;
+  min-width:0;
+  overflow-wrap:anywhere;
+}
+.commerce-title{font-size:15px}
+.commerce-card{
+  border:1px solid var(--border);
+  border-radius:12px;
+  padding:10px 12px;
+  background:var(--panel-soft);
+}
+.commerce-card h3{font-size:14px;margin:0}
+.commerce-values{
+  display:grid;
+  grid-template-columns:minmax(70px, max-content) minmax(0, 1fr);
+  gap:4px 12px;
+  margin:0;
+}
+.commerce-values dt,.commerce-note{color:var(--muted);font-size:12px}
+.commerce-values dd,.commerce-note{margin:0;white-space:pre-wrap}
+.commerce-items{margin:0;padding-inline-start:20px}
+.commerce-items li + li{margin-top:6px}
+.commerce-cover{
+  width:96px;
+  height:96px;
+  object-fit:contain;
+  border:1px solid var(--border);
+  border-radius:8px;
+  background:var(--panel);
+}
+.commerce-button{
+  justify-self:start;
+  max-width:100%;
+  min-height:36px;
+  white-space:normal;
+  text-align:left;
+}
+.commerce-field{display:grid;gap:4px}
+.commerce-field input,.commerce-field textarea{
+  width:100%;
+  padding:8px;
+  font:inherit;
+  color:var(--text);
+  background:var(--panel);
+  border:1px solid var(--border-strong);
+  border-radius:8px;
+}
+.commerce-field textarea{resize:vertical;min-height:60px}
+
+@media (max-width:820px){
+  .chat-layout{flex-direction:column}
+  .commerce-workspace{
+    flex:none;
+    max-height:42dvh;
+    border-inline-start:0;
+    border-bottom:1px solid var(--border);
+    scrollbar-gutter:auto;
+  }
+}
+
 /* 小屏：弹层占满、气泡放宽、顶栏紧凑 */
 @media (max-width:720px){
-  body{padding:0}
+  body{height:100dvh;min-height:0;padding:0}
   .app{
     max-width:none;
-    height:100vh;
+    height:100dvh;
     border:0;
     border-radius:0;
     box-shadow:none;

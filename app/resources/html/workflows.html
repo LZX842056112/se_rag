@@ -1,11 +1,11 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-root-path="{{ROOT_PATH}}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1.0">
   <title>知汇 · 流程监控</title>
-  <link rel="stylesheet" href="/static/app.css?v={{ASSET_V}}">
-  <link rel="stylesheet" href="/static/workflows.css?v={{ASSET_V}}">
+  <link rel="stylesheet" href="{{ROOT_PATH}}/static/app.css?v={{ASSET_V}}">
+  <link rel="stylesheet" href="{{ROOT_PATH}}/static/workflows.css?v={{ASSET_V}}">
 </head>
 <body class="workflow-body">
   <main class="workflow-page">
@@ -15,8 +15,8 @@
         <div><strong>知汇</strong><span>运行中心</span></div>
       </div>
       <nav class="workflow-nav" aria-label="业务页面">
-        <a href="/">返回对话</a>
-        <a href="/approval">自进化审批</a>
+        <a href="{{ROOT_PATH}}/">返回对话</a>
+        <a href="{{ROOT_PATH}}/approval">自进化审批</a>
       </nav>
     </header>
 
@@ -96,9 +96,9 @@
       </section>
     </div>
   </main>
-  <script src="/static/app.js?v={{ASSET_V}}"></script>
-  <script src="/static/workflow-scene-config.js?v={{ASSET_V}}"></script>
-  <script src="/static/workflow-scene.js?v={{ASSET_V}}"></script>
-  <script src="/static/workflows.js?v={{ASSET_V}}"></script>
+  <script src="{{ROOT_PATH}}/static/app.js?v={{ASSET_V}}"></script>
+  <script src="{{ROOT_PATH}}/static/workflow-scene-config.js?v={{ASSET_V}}"></script>
+  <script src="{{ROOT_PATH}}/static/workflow-scene.js?v={{ASSET_V}}"></script>
+  <script src="{{ROOT_PATH}}/static/workflows.js?v={{ASSET_V}}"></script>
 </body>
 </html>

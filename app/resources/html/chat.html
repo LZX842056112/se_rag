@@ -1,12 +1,12 @@
 <!-- 客服对话页：普通问答 + 流式输出 + 引用/置信度 + 点赞点踩 + 会话历史。 -->
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-root-path="{{ROOT_PATH}}" data-commerce-enabled="{{COMMERCE_ENABLED}}">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1.0" />
   <title>知汇 · 企业知识问答</title>
-  <link rel="stylesheet" href="/static/app.css?v={{ASSET_V}}" />
-  <link rel="stylesheet" href="/static/chat.css?v={{ASSET_V}}" />
+  <link rel="stylesheet" href="{{ROOT_PATH}}/static/app.css?v={{ASSET_V}}" />
+  <link rel="stylesheet" href="{{ROOT_PATH}}/static/chat.css?v={{ASSET_V}}" />
 </head>
 <body>
   <div class="app">
@@ -19,7 +19,7 @@
         </div>
       </div>
       <div class="top-actions">
-        <a class="btn plain" href="/workflows?view=query">流程监控</a>
+        <a class="btn plain chat-workflow-link" href="{{ROOT_PATH}}/workflows?view=query">流程监控</a>
         <label class="stream-toggle">
           <input type="checkbox" id="streamToggle" checked> 流式输出
         </label>
@@ -29,25 +29,55 @@
       </div>
     </div>
 
-    <div class="chat" id="chat">
-      <div class="dayline">今天</div>
-      <div class="msg bot">
-        <div class="avatar bot">知</div>
-        <div>
-          <div class="bubble">你好，我是知汇知识助手。你可以直接提问，我会在“阶段进度”里展示处理过程。</div>
-          <div class="meta">提示：可以问“如何使用万用表测量电压？”</div>
+    <div class="chat-layout">
+      <details id="commerceWorkspace" class="commerce-workspace" hidden open>
+        <summary>商城工作台 <span class="commerce-workspace-state"></span></summary>
+        <div class="commerce-workspace-body">
+          <div class="commerce-workspace-actions">
+            <button type="button" class="btn plain commerce-reload">刷新</button>
+            <button type="button" class="btn plain commerce-clear-selection" hidden>清除选择</button>
+            <button type="button" class="btn plain commerce-logout" hidden>退出商城</button>
+          </div>
+          <p class="commerce-workspace-status commerce-note" role="status"></p>
+          <form class="commerce-target-form commerce-login-form" method="post" hidden>
+            <label class="commerce-field">
+              商城账号
+              <input class="commerce-account-id" name="user_id" autocomplete="username" maxlength="64" required>
+            </label>
+            <label class="commerce-field">
+              密码
+              <input class="commerce-account-password" name="password" type="password" autocomplete="current-password" maxlength="128" required>
+            </label>
+            <button type="submit" class="btn commerce-button commerce-login-submit">登录商城</button>
+          </form>
+          <div class="commerce-workspace-tasks" aria-live="polite"></div>
+          <div class="commerce-workspace-objects"></div>
         </div>
+      </details>
+
+      <div class="chat-conversation">
+        <div class="chat" id="chat">
+          <div class="dayline">今天</div>
+          <div class="msg bot">
+            <div class="avatar bot">知</div>
+            <div>
+              <div class="bubble" id="chatWelcome">你好，我是知汇知识助手。你可以直接提问，我会在“阶段进度”里展示处理过程。</div>
+              <div class="meta" id="chatWelcomeHint">提示：可以问“如何使用万用表测量电压？”</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="composer">
+          <textarea id="input" aria-label="对话输入" placeholder="请输入问题（Enter 发送，Shift+Enter 换行）"></textarea>
+          <button class="send" id="send">发送</button>
+        </div>
+        <div class="hint">快捷键：<span class="kbd">Enter</span> 发送，<span class="kbd">Shift</span>+<span class="kbd">Enter</span> 换行</div>
       </div>
     </div>
-
-    <div class="composer">
-      <textarea id="input" placeholder="请输入问题（Enter 发送，Shift+Enter 换行）"></textarea>
-      <button class="send" id="send">发送</button>
-    </div>
-    <div class="hint">快捷键：<span class="kbd">Enter</span> 发送，<span class="kbd">Shift</span>+<span class="kbd">Enter</span> 换行</div>
   </div>
 
-  <script src="/static/app.js?v={{ASSET_V}}"></script>
-  <script src="/static/chat.js?v={{ASSET_V}}"></script>
+  <script src="{{ROOT_PATH}}/static/app.js?v={{ASSET_V}}"></script>
+  <script src="{{ROOT_PATH}}/static/chat-commerce.js?v={{ASSET_V}}"></script>
+  <script src="{{ROOT_PATH}}/static/chat.js?v={{ASSET_V}}"></script>
 </body>
 </html>

@@ -1,12 +1,12 @@
 <!-- 自进化候选审批后台：状态筛选 + 人工编辑 + 通过/驳回（写操作需 X-Internal-Token）。 -->
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-root-path="{{ROOT_PATH}}">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1.0" />
   <title>知汇 · 自进化审批</title>
-  <link rel="stylesheet" href="/static/app.css?v={{ASSET_V}}" />
-  <link rel="stylesheet" href="/static/approval.css?v={{ASSET_V}}" />
+  <link rel="stylesheet" href="{{ROOT_PATH}}/static/app.css?v={{ASSET_V}}" />
+  <link rel="stylesheet" href="{{ROOT_PATH}}/static/approval.css?v={{ASSET_V}}" />
 </head>
 <body>
   <div class="page">
@@ -19,7 +19,7 @@
         </div>
       </div>
       <div class="filters">
-        <a class="btn plain" href="/workflows?view=evolution-cycle">流程监控</a>
+        <a class="btn plain" href="{{ROOT_PATH}}/workflows?view=evolution-cycle">流程监控</a>
         <select id="statusFilter">
           <option value="">全部状态</option>
           <option value="draft">待审批（draft）</option>
@@ -78,7 +78,7 @@
     </section>
   </div>
 
-  <script src="/static/app.js?v={{ASSET_V}}"></script>
-  <script src="/static/approval.js?v={{ASSET_V}}"></script>
+  <script src="{{ROOT_PATH}}/static/app.js?v={{ASSET_V}}"></script>
+  <script src="{{ROOT_PATH}}/static/approval.js?v={{ASSET_V}}"></script>
 </body>
 </html>
