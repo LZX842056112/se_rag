@@ -316,7 +316,7 @@ def test_send_button_click_does_not_pass_event_as_hint():
 def test_on_send_discards_non_string_hint():
     """守卫：onSend 必须过滤非字符串入参，非字符串一律按「无 hint」处理。"""
     source = (JS_DIR / "chat.js").read_text(encoding="utf-8")
-    body = re.search(r"async function onSend\(rewriteHint\)[\s\S]*?\n  \}", source)
+    body = re.search(r"async function onSend\(rewriteHint, quickQuestion\)[\s\S]*?\n  \}", source)
     assert body, "未找到 onSend"
     assert re.search(r"typeof\s+rewriteHint\s*===\s*'string'", body.group(0)), (
         "onSend 未做类型过滤，事件对象等非字符串会污染 rewrite_hint"
@@ -486,7 +486,7 @@ def test_resolve_send_hint_prefers_click_then_pending():
 def test_on_send_consumes_pending_subject_ask_once():
     """守卫：挂起反问必须在 onSend 里无条件消费掉，避免残留影响后续提问。"""
     source = (JS_DIR / "chat.js").read_text(encoding="utf-8")
-    body = re.search(r"async function onSend\(rewriteHint\)[\s\S]*?\n  \}", source)
+    body = re.search(r"async function onSend\(rewriteHint, quickQuestion\)[\s\S]*?\n  \}", source)
     assert body, "未找到 onSend"
     text = body.group(0)
     assert "pendingSubjectAsk = null" in text, "onSend 未消费挂起的反问"

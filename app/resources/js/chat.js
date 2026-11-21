@@ -48,15 +48,29 @@
   }
 
   const commerceEnabled = document.documentElement.dataset.commerceEnabled === 'true';
+  const composerContext = document.getElementById('commerceContext');
+  const contextText = document.getElementById('commerceContextText');
+  const contextDetails = document.getElementById('commerceContextDetails');
+  let contextQuestion = '';
   if (commerceEnabled) {
-    document.getElementById('chatWelcome').textContent = '你好，我是知汇助手。你可以查订单、物流，也可以问产品使用问题。';
-    document.getElementById('chatWelcomeHint').textContent = '可以问“帮我查最近一笔订单的物流”。';
+    document.getElementById('chatWelcomeHint').textContent = '查订单、咨询商品，或直接提出你的问题。';
+    inputEl.placeholder = '输入问题，例如「我的快递到哪了？」';
   }
   const commerce = window.createCommerceChat({
     enabled: commerceEnabled,
     sessionId,
     workspace: document.getElementById('commerceWorkspace'),
     addMessage: addBotMsgSkeleton,
+    onSelectionChange(resource) {
+      const isOrder = resource?.field === 'order_id';
+      const type = isOrder ? '订单' : '商品';
+      contextQuestion = resource ? (isOrder ? '查看这笔订单的详情' : '查看这件商品的详情') : '';
+      contextText.textContent = resource
+        ? [`${type} ${resource.id}`, resource.title !== resource.id ? resource.title : ''].filter(Boolean).join(' · ')
+        : '';
+      contextText.title = contextText.textContent;
+      composerContext.hidden = !resource;
+    },
     askKnowledge(query) {
       if (sendBtn.disabled) {
         showToast('请等待当前问答完成。');
@@ -352,12 +366,14 @@
       // 服务端资源版本变了 → 说明后端已部署新前端，提示刷新（长开页面不会自动换脚本）
       if (App.checkFreshness) App.checkFreshness(health);
       healthFails = 0;
-      apiPill.textContent = 'API: 已连接';
-      apiPill.style.cursor = 'default';
+      apiPill.textContent = '服务在线';
+      apiPill.dataset.state = 'online';
+      apiPill.disabled = true;
     } catch (_) {
       healthFails += 1;
-      apiPill.textContent = healthFails >= 3 ? 'API: 未连接（点此重连）' : 'API: 未连接';
-      apiPill.style.cursor = healthFails >= 3 ? 'pointer' : 'default';
+      apiPill.textContent = healthFails >= 3 ? '点此重连' : '连接中';
+      apiPill.dataset.state = healthFails >= 3 ? 'offline' : 'connecting';
+      apiPill.disabled = healthFails < 3;
     }
   }
   apiPill.addEventListener('click', () => { if (healthFails >= 3) apiHealth(); });
@@ -374,8 +390,7 @@
       const data = await App.fetchJson(App.PATHS.history(sessionId));
       const items = Array.isArray(data.items) ? data.items : [];
       if (!items.length) return { lastRole: '', lastUserText: '', lastTurnId: '', lastUserTurnId: '' };
-      // 保留首条欢迎消息，其余先清空再按时间正序渲染
-      Array.from(chatEl.querySelectorAll('.msg')).slice(1).forEach(node => node.remove());
+      chatEl.querySelectorAll('.msg').forEach(node => node.remove());
       items.reverse();
       let lastUserQuery = '';
       let lastUserTurnId = '';
@@ -608,22 +623,23 @@
    *   只有点了主体选项才传；手动输入时为空，但若上一轮有挂起的反问、且本轮输入
    *   正是候选主体，则补上反问的来源问句（见 resolveSendHint），使手输与点选等价。
    *   非字符串入参（如 click 事件对象）会被丢弃。
+   * @param {string} [quickQuestion] 快捷入口发送的文本。输入框保留原有草稿。
    */
-  async function onSend(rewriteHint) {
+  async function onSend(rewriteHint, quickQuestion) {
     if (commerceEnabled) await chatReady;
     if (sendBtn.disabled) return; // 按钮禁用时拦截重复提交（含 Enter 快捷键）
     if (commerce.isBusy()) {
       showToast('请等待当前商城请求完成。');
       return;
     }
-    const text = (inputEl.value || '').trim();
+    const text = (quickQuestion ?? inputEl.value).trim();
     if (!text) return;
     // 挂起的反问只服务一次发送：命中与否都作废，避免残留影响后续提问
     const pending = pendingSubjectAsk;
     pendingSubjectAsk = null;
     // 只接受字符串：非字符串（如 click 事件对象）一律丢弃，避免污染请求体
     const hint = resolveSendHint(typeof rewriteHint === 'string', rewriteHint, text, pending);
-    inputEl.value = '';
+    if (quickQuestion === undefined) inputEl.value = '';
     const userMsgEl = addUserMsg(text);
     const botMsgEl = addBotMsgSkeleton();
     sendBtn.disabled = true;
@@ -710,14 +726,23 @@
   // 不能直接绑 onSend：浏览器会把 MouseEvent 当作第一个实参传进来，
   // 它会被误当成 rewrite_hint 发给服务端，触发参数校验失败。
   sendBtn.addEventListener('click', () => onSend());
+  chatEl.querySelectorAll('[data-chat-question]').forEach(button => {
+    button.addEventListener('click', () => onSend(undefined, button.dataset.chatQuestion));
+  });
+  contextDetails.addEventListener('click', () => onSend(undefined, contextQuestion));
+  document.getElementById('commerceContextRemove').addEventListener('click', () => {
+    commerce.clearSelection();
+    inputEl.focus();
+  });
   inputEl.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
       onSend();
     }
   });
 
   btnClear.addEventListener('click', async () => {
+    btnClear.closest('details').open = false;
     const ok = await App.confirm('确定要清空当前会话的历史记录吗？这将无法恢复。',
                                 { confirmText: '清空', danger: true });
     if (!ok) return;
@@ -726,8 +751,7 @@
     } catch (_) {
       showToast('服务端清空失败，仅清空本地显示');
     }
-    // 清空除首条欢迎消息外的内容
-    Array.from(chatEl.querySelectorAll('.msg')).slice(1).forEach(node => node.remove());
+    chatEl.querySelectorAll('.msg').forEach(node => node.remove());
     pendingSubjectAsk = null; // 选项栏已被清掉，挂起的反问随之作废
     commerce.clearConversation();
     scrollToBottom();
@@ -737,5 +761,4 @@
   setInterval(apiHealth, 5000);
   // 不能只调 loadHistory：刷新时后台查询可能仍在跑，需先读任务快照再决定是否重新接管
   const chatReady = restoreSession().then(commerce.restore);
-  setTimeout(() => inputEl.focus(), 200);
 })();

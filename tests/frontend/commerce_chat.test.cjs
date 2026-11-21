@@ -64,7 +64,6 @@ function harness(respond, { enabled = true, stored = null, withWorkspace = false
     logout.hidden = true;
     body.append(
       element('button', 'commerce-reload', '刷新'),
-      element('button', 'commerce-clear-selection', '清除选择'),
       logout,
       loginForm,
       element('p', 'commerce-workspace-status'),
@@ -106,10 +105,12 @@ function harness(respond, { enabled = true, stored = null, withWorkspace = false
     return message;
   }
   const knowledge = [];
+  const selectionChanges = [];
   const commerce = sandbox.window.createCommerceChat({
-    enabled, sessionId, workspace, addMessage, askKnowledge: query => Boolean(knowledge.push(query)), scrollToBottom() {}
+    enabled, sessionId, workspace, addMessage, askKnowledge: query => Boolean(knowledge.push(query)), scrollToBottom() {},
+    onSelectionChange: selection => selectionChanges.push(selection)
   });
-  return { commerce, calls, messages, addMessage, storage, knowledge, workspace, listeners };
+  return { commerce, calls, messages, addMessage, storage, knowledge, workspace, listeners, selectionChanges };
 }
 
 const postBodies = h => h.calls.filter(call => call.method === 'POST').map(call => call.body);
@@ -295,7 +296,7 @@ test('a selected order supplies a missing target only after commerce identifies 
   const message = h.addMessage();
   await h.commerce.assist(message, '帮我查物流');
   assert.match(textOf(message), new RegExp(orderId));
-  await findButton(h.workspace, '清除选择').listeners.click();
+  h.commerce.clearSelection();
   assert.equal(order.attributes['aria-pressed'], 'false');
   await h.commerce.assist(h.addMessage(), '帮我查物流');
   assert.deepEqual(postBodies(h), [
@@ -307,6 +308,41 @@ test('a selected order supplies a missing target only after commerce identifies 
     { query: '帮我查物流', session_id: sessionId },
   ]);
   assert.deepEqual([...h.storage], []);
+});
+
+test('object tabs show one list and send only the current verified selection to the composer', async () => {
+  let session = scope;
+  const h = harness(({ path }) => {
+    if (path.includes('/session?')) return { authenticated: Boolean(session), account_scope: session };
+  }, { withWorkspace: true });
+  await h.commerce.restore();
+  const groups = h.workspace.querySelectorAll('.commerce-object-group');
+  const tabs = h.workspace.querySelectorAll('.commerce-object-tab');
+  assert.equal(tabs.length, 2);
+  assert.equal(tabs[0].attributes['aria-pressed'], 'true');
+  assert.equal(tabs[1].attributes['aria-pressed'], 'false');
+  assert.equal(groups[0].hidden, false);
+  assert.equal(groups[1].hidden, true);
+
+  await tabs[1].listeners.click();
+  assert.equal(tabs[1].attributes['aria-pressed'], 'true');
+  assert.equal(groups[0].hidden, true);
+  assert.equal(groups[1].hidden, false);
+  await findButton(groups[1], productId).listeners.click();
+  const selected = h.selectionChanges.at(-1);
+  assert.equal(selected.field, 'product_id');
+  assert.equal(selected.id, productId);
+  assert.equal(selected.title, '电源适配器');
+  h.commerce.clearSelection();
+  assert.equal(h.selectionChanges.at(-1), null);
+
+  await findButton(groups[1], productId).listeners.click();
+  session = '';
+  h.listeners.blur();
+  await h.listeners.focus();
+  assert.equal(h.selectionChanges.at(-1), null);
+  assert.equal(h.workspace.querySelectorAll('.commerce-object').length, 0);
+  assert.ok(h.calls.every(call => call.method === 'GET'));
 });
 
 test('account reload replaces private objects and clears the prior selection', async () => {
@@ -327,6 +363,7 @@ test('account reload replaces private objects and clears the prior selection', a
   assert.ok(h.calls.every(call => !call.path.endsWith('/objects')));
   account = scope;
   await findButton(h.workspace, '刷新').listeners.click();
+  await findButton(h.workspace, '商品').listeners.click();
   await findButton(h.workspace, productId).listeners.click();
   const message = h.addMessage();
   const userMessage = element('div', 'msg user', '查商品 P17');
@@ -344,7 +381,7 @@ test('account reload replaces private objects and clears the prior selection', a
   await refresh;
   assert.doesNotMatch(textOf(h.workspace), /电源适配器|伺服电机/);
   assert.match(textOf(h.workspace), /暂无订单/);
-  assert.equal(findButton(h.workspace, '清除选择').hidden, true);
+  assert.equal(h.selectionChanges.at(-1), null);
   assert.equal(message.hidden, true);
   assert.equal(userMessage.hidden, true);
 });

@@ -1,41 +1,81 @@
-<!-- 客服对话页：普通问答 + 流式输出 + 引用/置信度 + 点赞点踩 + 会话历史。 -->
 <!DOCTYPE html>
 <html lang="zh-CN" data-root-path="{{ROOT_PATH}}" data-commerce-enabled="{{COMMERCE_ENABLED}}">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1.0" />
-  <title>知汇 · 企业知识问答</title>
+  <title>知汇 · 在线客服</title>
   <link rel="stylesheet" href="{{ROOT_PATH}}/static/app.css?v={{ASSET_V}}" />
   <link rel="stylesheet" href="{{ROOT_PATH}}/static/chat.css?v={{ASSET_V}}" />
 </head>
-<body>
+<body class="support-page">
   <div class="app">
-    <div class="topbar attached">
+    <header class="support-header">
       <div class="brand">
-        <div class="logo" aria-hidden="true">知</div>
-        <div class="title">
-          <strong>知汇</strong>
-          <span id="subTitle">企业知识问答 · 有据可查</span>
-        </div>
+        <div class="support-mark" aria-hidden="true">知</div>
+        <h1>知汇客服</h1>
       </div>
       <div class="top-actions">
-        <a class="btn plain chat-workflow-link" href="{{ROOT_PATH}}/workflows?view=query">流程监控</a>
-        <label class="stream-toggle">
-          <input type="checkbox" id="streamToggle" checked> 流式输出
-        </label>
-        <span class="pill" id="apiPill">API: 未连接</span>
-        <button class="btn" id="btnNew">新建会话</button>
-        <button class="btn plain" id="btnClear">清空对话</button>
+        <button type="button" class="service-status" id="apiPill" data-state="connecting" aria-live="polite" disabled>连接中</button>
+        <button type="button" class="btn plain" id="btnNew"><span aria-hidden="true">＋</span> 新对话</button>
+        <details class="chat-settings">
+          <summary class="btn plain">设置</summary>
+          <div class="chat-settings-menu">
+            <label class="stream-toggle"><input type="checkbox" id="streamToggle" checked> 流式输出</label>
+            <a class="btn plain chat-workflow-link" href="{{ROOT_PATH}}/workflows?view=query">流程监控</a>
+            <button type="button" class="btn plain" id="btnClear">清空对话</button>
+          </div>
+        </details>
       </div>
-    </div>
+    </header>
 
     <div class="chat-layout">
+      <main class="chat-conversation" aria-label="客服对话">
+        <div class="chat" id="chat" role="log" aria-label="对话消息">
+          <div class="dayline">对话记录</div>
+          <section class="chat-welcome">
+            <div class="welcome-mark" aria-hidden="true"><span></span></div>
+            <h2>你好，有什么可以帮你？</h2>
+            <p id="chatWelcomeHint">可以问产品用法，也可以和我聊聊。</p>
+            <div class="chat-shortcuts" role="group" aria-label="快捷问题">
+              <button type="button" class="chat-shortcut" data-requires-commerce data-chat-question="查看我的订单">
+                <span class="shortcut-icon" data-icon="order" aria-hidden="true"></span>
+                <span><strong>查订单</strong><small>查看我的订单</small></span>
+              </button>
+              <button type="button" class="chat-shortcut" data-requires-commerce data-chat-question="查询商品详情">
+                <span class="shortcut-icon" data-icon="product" aria-hidden="true"></span>
+                <span><strong>查商品</strong><small>查询商品价格和库存</small></span>
+              </button>
+              <button type="button" class="chat-shortcut" data-chat-question="如何使用万用表测量电压？">
+                <span class="shortcut-icon" data-icon="knowledge" aria-hidden="true"></span>
+                <span><strong>问知识库</strong><small>例如如何用万用表测电压</small></span>
+              </button>
+              <button type="button" class="chat-shortcut" data-chat-question="你好">
+                <span class="shortcut-icon" data-icon="chat" aria-hidden="true"></span>
+                <span><strong>聊一聊</strong><small>先打个招呼</small></span>
+              </button>
+            </div>
+          </section>
+        </div>
+
+        <div class="composer-area">
+          <div class="composer-context" id="commerceContext" hidden>
+            <span class="composer-context-text" id="commerceContextText" aria-live="polite"></span>
+            <button type="button" class="context-action" id="commerceContextDetails">查看详情</button>
+            <button type="button" class="context-action context-remove" id="commerceContextRemove" aria-label="移除所选对象">×</button>
+          </div>
+          <div class="composer">
+            <textarea id="input" rows="2" aria-label="对话输入" placeholder="输入问题"></textarea>
+            <button type="button" class="send" id="send">发送 <span aria-hidden="true">↑</span></button>
+          </div>
+          <p class="hint">Enter 发送 <span aria-hidden="true">·</span> Shift + Enter 换行</p>
+        </div>
+      </main>
+
       <details id="commerceWorkspace" class="commerce-workspace" hidden open>
-        <summary>商城工作台 <span class="commerce-workspace-state"></span></summary>
+        <summary><span>业务对象</span><span class="commerce-workspace-state"></span></summary>
         <div class="commerce-workspace-body">
           <div class="commerce-workspace-actions">
             <button type="button" class="btn plain commerce-reload">刷新</button>
-            <button type="button" class="btn plain commerce-clear-selection" hidden>清除选择</button>
             <button type="button" class="btn plain commerce-logout" hidden>退出商城</button>
           </div>
           <p class="commerce-workspace-status commerce-note" role="status"></p>
@@ -54,25 +94,6 @@
           <div class="commerce-workspace-objects"></div>
         </div>
       </details>
-
-      <div class="chat-conversation">
-        <div class="chat" id="chat">
-          <div class="dayline">今天</div>
-          <div class="msg bot">
-            <div class="avatar bot">知</div>
-            <div>
-              <div class="bubble" id="chatWelcome">你好，我是知汇知识助手。你可以直接提问，我会在“阶段进度”里展示处理过程。</div>
-              <div class="meta" id="chatWelcomeHint">提示：可以问“如何使用万用表测量电压？”</div>
-            </div>
-          </div>
-        </div>
-
-        <div class="composer">
-          <textarea id="input" aria-label="对话输入" placeholder="请输入问题（Enter 发送，Shift+Enter 换行）"></textarea>
-          <button class="send" id="send">发送</button>
-        </div>
-        <div class="hint">快捷键：<span class="kbd">Enter</span> 发送，<span class="kbd">Shift</span>+<span class="kbd">Enter</span> 换行</div>
-      </div>
     </div>
   </div>
 

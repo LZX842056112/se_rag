@@ -124,20 +124,24 @@
     return result;
   }
 
-  window.createCommerceChat = function ({ enabled, sessionId, workspace, addMessage, askKnowledge, scrollToBottom }) {
-    if (!enabled) return { assist: () => false, restore() {}, clearConversation() {}, isBusy: () => false };
+  window.createCommerceChat = function ({
+    enabled, sessionId, workspace, addMessage, askKnowledge, scrollToBottom, onSelectionChange = () => {}
+  }) {
+    if (!enabled) return {
+      assist: () => false, restore() {}, clearSelection() {}, clearConversation() {}, isBusy: () => false
+    };
 
     const workspaceState = workspace?.querySelector('.commerce-workspace-state');
     const workspaceStatus = workspace?.querySelector('.commerce-workspace-status');
     const workspaceTasks = workspace?.querySelector('.commerce-workspace-tasks');
     const workspaceObjects = workspace?.querySelector('.commerce-workspace-objects');
     const reloadButton = workspace?.querySelector('.commerce-reload');
-    const clearButton = workspace?.querySelector('.commerce-clear-selection');
     const loginForm = workspace?.querySelector('.commerce-login-form');
     const accountInput = loginForm?.querySelector('.commerce-account-id');
     const passwordInput = loginForm?.querySelector('.commerce-account-password');
     const loginButton = loginForm?.querySelector('.commerce-login-submit');
     const logoutButton = workspace?.querySelector('.commerce-logout');
+    const mobile = window.matchMedia?.('(max-width: 820px)');
     const privateMessages = new Set();
     const objectButtons = new Map();
     const confirmationStates = new Map();
@@ -150,6 +154,7 @@
     let busy = false;
     let verifying = false;
     let selection = null;
+    let objectTab = 'order_id';
     let active = null;
     let paused = null;
     let expectStaleTask = false;
@@ -191,6 +196,7 @@
       if (account === nextAccount) return;
       account = nextAccount;
       accountRevision += 1;
+      objectTab = 'order_id';
       expectStaleTask ||= Boolean(active);
       active = paused = null;
       for (const message of privateMessages) message.remove();
@@ -225,15 +231,14 @@
     }
 
     function updateWorkspaceState() {
+      onSelectionChange(verifying ? null : selection);
       if (!workspaceState) return;
       const items = [];
       if (!verifying) {
         if (active) items.push(TASK_LABELS[active.operation]);
         if (paused) items.push('有暂停的任务');
-        if (selection) items.push(selection.field === 'order_id' ? '已选订单' : '已选商品');
       }
       workspaceState.textContent = items.filter(Boolean).join(' · ');
-      clearButton.hidden = !selection || verifying;
     }
 
     function setSelection(nextSelection) {
@@ -248,15 +253,37 @@
       if (!Array.isArray(data.orders) || !Array.isArray(data.products)) throw new Error('无效的商城列表');
       workspaceObjects.replaceChildren();
       objectButtons.clear();
-      for (const [title, empty, field, objects] of [
-        ['最近订单', '暂无订单。', 'order_id', data.orders],
-        ['最近购买的商品', '暂无商品。', 'product_id', data.products]
+      const tabs = App.create('div', 'commerce-object-tabs');
+      tabs.setAttribute('role', 'group');
+      tabs.setAttribute('aria-label', '业务对象类型');
+      workspaceObjects.append(tabs);
+      const views = [];
+
+      function selectTab(field) {
+        objectTab = field;
+        for (const view of views) {
+          const selected = view.field === field;
+          view.tab.setAttribute('aria-pressed', selected);
+          view.section.hidden = !selected;
+        }
+      }
+
+      for (const [label, title, field, objects, icon] of [
+        ['订单', '最近订单', 'order_id', data.orders, 'order'],
+        ['商品', '最近购买的商品', 'product_id', data.products, 'product']
       ]) {
         const section = App.create('section', 'commerce-object-group');
-        section.append(App.create('h2', null, title));
+        section.id = 'commerce-objects-' + icon;
+        section.setAttribute('aria-label', title);
+        const tab = App.create('button', 'commerce-object-tab', label);
+        tab.type = 'button';
+        tab.setAttribute('aria-controls', section.id);
+        tab.addEventListener('click', () => selectTab(field));
+        tabs.append(tab);
+        views.push({ field, tab, section });
         workspaceObjects.append(section);
         if (!objects.length) {
-          section.append(App.create('p', 'commerce-note', empty));
+          section.append(App.create('p', 'commerce-object-empty', `暂无${label}。`));
           continue;
         }
         const list = App.create('ul', 'commerce-object-list');
@@ -267,19 +294,33 @@
           const row = App.create('li');
           const control = App.create('button', 'commerce-object');
           control.type = 'button';
-          cover(control, item.cover_url);
+          const thumb = App.create('span', 'shortcut-icon commerce-object-thumb');
+          thumb.dataset.icon = icon;
+          thumb.setAttribute('aria-hidden', 'true');
+          cover(thumb, item.cover_url);
           const text = App.create('span', 'commerce-object-text');
-          text.append(App.create('strong', null, item.title || id), App.create('span', null, id));
-          const detail = field === 'order_id' ? [status(item), money(item.amount)] : [money(item.price)];
-          text.append(App.create('span', null, detail.filter(Boolean).join(' · ')));
-          control.append(text);
-          const resource = { field, id };
+          const title = item.title || id;
+          text.append(App.create('strong', null, title), App.create('span', 'commerce-object-id', id));
+          const detail = App.create('span', 'commerce-object-meta');
+          if (field === 'order_id' && status(item)) detail.append(App.create('span', 'commerce-object-status', status(item)));
+          const price = money(field === 'order_id' ? item.amount : item.price);
+          if (price) detail.append(App.create('span', 'commerce-object-price', price));
+          text.append(detail);
+          control.append(thumb, text);
+          const resource = { field, id, title };
           objectButtons.set(control, resource);
-          control.addEventListener('click', () => setSelection(selection === resource ? null : resource));
+          control.addEventListener('click', () => {
+            setSelection(selection === resource ? null : resource);
+            if (selection && mobile?.matches) {
+              workspace.open = false;
+              workspace.querySelector('summary').focus();
+            }
+          });
           row.append(control);
           list.append(row);
         }
       }
+      selectTab(objectTab);
       const available = [...objectButtons.values()].find(item => item.field === selection?.field && item.id === selection.id);
       setSelection(available || null);
     }
@@ -754,8 +795,8 @@
     }
 
     if (workspace) {
-      const mobile = window.matchMedia?.('(max-width: 820px)');
       if (mobile?.matches) workspace.open = false;
+      mobile?.addEventListener?.('change', event => { workspace.open = !event.matches; });
       workspace.hidden = false;
       reloadButton.addEventListener('click', () => { if (!accountPending) return refreshWorkspace(); });
       loginForm?.addEventListener('submit', event => {
@@ -765,11 +806,6 @@
         return changeAccount('/login', credentials);
       });
       logoutButton?.addEventListener('click', () => changeAccount('/logout', {}));
-      clearButton.addEventListener('click', () => {
-        const selectedControl = [...objectButtons].find(([, resource]) => resource === selection)?.[0];
-        setSelection(null);
-        (selectedControl || workspace.querySelector('summary')).focus();
-      });
       let inactive = Boolean(document.hidden);
       const reactivate = () => {
         if (!inactive || document.hidden || accountPending) return;
@@ -800,6 +836,7 @@
         return handled;
       },
       restore: refreshWorkspace,
+      clearSelection: () => setSelection(null),
       clearConversation() {
         privateMessages.clear();
         confirmationViews.clear();
