@@ -23,6 +23,7 @@ from app.rag.query.business import classify_business
 from app.shared.config import settings
 from app.shared.clients.mongo import ensure_gap_feedback_index
 from app.shared.runtime.logger import logger
+from app.shared.runtime.workflow_monitor import candidate_changed, node_status
 
 # 聚类窗口内视为同一缺口（秒）
 _DEDUP_WINDOW = 3600
@@ -80,9 +81,25 @@ def _feedback_gap_id(event: dict) -> ObjectId:
 
 
 def _acknowledge(event: dict, *, gap_id: str = "", issue_id: str = "") -> None:
-    evolution_repo.fb_events.update_one({"_id": event["_id"], "ts": event["ts"]}, {"$set": {
+    result = evolution_repo.fb_events.update_one({"_id": event["_id"], "ts": event["ts"]}, {"$set": {
         "gap_scanned_at": time.time(), "gap_scan_id": gap_id, "gap_scan_issue_id": issue_id,
     }})
+    if result.matched_count:
+        candidate_changed()
+
+
+def _record_scan_outcome(event: dict, outcome: str) -> None:
+    """Record display data for paths that do not create or merge a gap."""
+    try:
+        result = evolution_repo.fb_events.update_one(
+            {"_id": event["_id"], "ts": event["ts"], "workflow_outcome_for": {"$ne": event["ts"]}},
+            {"$set": {"workflow_scan_outcome": outcome, "workflow_outcome_for": event["ts"],
+                      "workflow_outcome_at": time.time()}},
+        )
+        if result.matched_count:
+            candidate_changed()
+    except Exception as exc:
+        logger.warning(f"记录反馈判定结果失败：{type(exc).__name__}")
 
 
 def grade_signals(signals: GapSignal) -> tuple[str, float]:
@@ -163,8 +180,10 @@ def scan_unresolved_feedbacks(batch: int = 50) -> list[KnowledgeGap]:
             last_id = doc["_id"]
             # 兼容修复前误写入的闲聊信号。保留原事件，不制造知识缺口。
             if doc.get("intent") == "chitchat" or is_plain_greeting(doc.get("query", "")):
+                _record_scan_outcome(doc, "ignored")
                 continue
             if context_key(doc) in decisions:
+                _record_scan_outcome(doc, "ignored")
                 continue
             current = evolution_repo.fb_events.find_one({"_id": doc["_id"]})
             if not current or not is_unresolved(current):
@@ -216,6 +235,8 @@ def scan_unresolved_feedbacks(batch: int = 50) -> list[KnowledgeGap]:
                 if inserted.upserted_id is not None:
                     gap.gap_id = str(oid)
                     gaps.append(gap)
+            else:
+                _record_scan_outcome(doc, "weak")
         # 扫到东西 → 游标前进；窗口内已无更新信号 → 归零，下一轮从窗口起点复扫
         _cursor = (last_ts, last_id) if scanned else (0.0, None)
         logger.info(
@@ -224,6 +245,7 @@ def scan_unresolved_feedbacks(batch: int = 50) -> list[KnowledgeGap]:
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning(f"缺口扫描失败：{exc}")
+        node_status("scan", "failed")
     return gaps
 
 

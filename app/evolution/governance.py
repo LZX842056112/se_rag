@@ -14,6 +14,7 @@ from app.evolution.gap.registration import mark_source_gap
 from app.evolution.models import KnowledgeCandidate
 from app.evolution.quality import looks_like_non_answer
 from app.evolution.repositories import evolution_repo
+from app.shared.runtime.workflow_monitor import candidate_changed
 
 INDEX_VERSION = "faq-v1"
 GAP_KINDS = {"retrieval_miss", "reading_miss", "generation_error", "knowledge_missing"}
@@ -129,6 +130,14 @@ def content_hash(doc: dict) -> str:
     return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
+def publication_key(candidate_id: str, version: int, digest: str) -> str:
+    return f"{candidate_id}:{version}:{digest}:{INDEX_VERSION}"
+
+
+def revocation_key(evo_doc_id: str) -> str:
+    return f"revoke:{evo_doc_id}"
+
+
 def queue_publication(candidate_id: str) -> str:
     """把候选入队到发布任务（幂等，返回任务键）。"""
     cid = ObjectId(candidate_id)
@@ -136,12 +145,14 @@ def queue_publication(candidate_id: str) -> str:
     if not doc:
         raise ValueError("候选不存在")
     digest = content_hash(doc)
-    key = f"{candidate_id}:{doc.get('content_version', 1)}:{digest}:{INDEX_VERSION}"
-    evolution_repo.publication_tasks.update_one({"_id": key}, {"$setOnInsert": {
+    key = publication_key(candidate_id, doc.get("content_version", 1), digest)
+    inserted = evolution_repo.publication_tasks.update_one({"_id": key}, {"$setOnInsert": {
         "candidate_id": cid, "content_version": doc.get("content_version", 1),
         "digest": digest, "index_version": INDEX_VERSION, "state": "pending",
         "lease_until": 0, "attempts": 0, "next_retry": 0, "created_at": time.time(),
     }}, upsert=True)
+    if inserted.upserted_id is not None:
+        candidate_changed()
     return key
 
 
@@ -183,6 +194,7 @@ def approve_candidate(candidate_id: str, reason: str = "") -> tuple[bool, str]:
              "publication_status": doc.get("publication_status")}, {"$set": patch})
         if not result.matched_count:
             return False, "候选已变化，请重试"
+        candidate_changed()
         key = queue_publication(candidate_id)
         run_publication_tasks(limit=1, task_key=key)
         current = evolution_repo.k_candidates.find_one({"_id": cid})
@@ -215,9 +227,11 @@ def run_publication_tasks(limit: int = 20, *, task_key: str | None = None) -> di
         else:
             query["next_retry"] = {"$lte": now}
         task = tasks.find_one_and_update(query, {"$set": {"state": "running", "lease_until": now + 120,
-            "lease_token": token}, "$inc": {"attempts": 1}}, return_document=ReturnDocument.AFTER)
+            "lease_token": token, "workflow_updated_at": now}, "$inc": {"attempts": 1}},
+            return_document=ReturnDocument.AFTER)
         if not task:
             break
+        candidate_changed()
         try:
             doc = evolution_repo.k_candidates.find_one({"_id": task["candidate_id"]})
             if task.get("action") == "revoke":
@@ -227,6 +241,7 @@ def run_publication_tasks(limit: int = 20, *, task_key: str | None = None) -> di
                 if (not doc or doc.get('status') not in {'draft', 'active'} or
                         doc.get("publication_status") != "indexing" or content_hash(doc) != task["digest"]):
                     tasks.update_one({"_id": task["_id"], "lease_token": token}, {"$set": {"state": "cancelled"}})
+                    candidate_changed()
                     continue
                 validate_sources(doc, check_support=False, require_approval=True)
                 evo_id = "evo_" + hashlib.sha256(task["_id"].encode()).hexdigest()[:32]
@@ -255,7 +270,8 @@ def run_publication_tasks(limit: int = 20, *, task_key: str | None = None) -> di
                     {"_id": doc["_id"], 'status': doc['status'],
                      "publication_status": "indexing", "content_version": task["content_version"]},
                     {"$set": {"status": "active", "publication_status": "active", "evo_doc_id": evo_id,
-                              "index_version": INDEX_VERSION, "content_sha256": task["digest"]}})
+                              "index_version": INDEX_VERSION, "content_sha256": task["digest"],
+                              "workflow_updated_at": time.time()}})
                 if not updated.matched_count:
                     current = evolution_repo.k_candidates.find_one({'_id': doc['_id']}) or {}
                     if current.get('evo_doc_id') != evo_id or current.get('publication_status') != 'active':
@@ -264,11 +280,14 @@ def run_publication_tasks(limit: int = 20, *, task_key: str | None = None) -> di
                 mark_source_gap(doc.get("gap_id"), "resolved")
             tasks.update_one({"_id": task["_id"], "lease_token": token}, {"$set": {
                 "state": "completed", "lease_until": 0, "completed_at": time.time(), "last_error": ""}})
+            candidate_changed()
             result["completed"] += 1
         except Exception as exc:
+            failed_at = time.time()
             tasks.update_one({"_id": task["_id"], "lease_token": token}, {"$set": {
-                "state": "retry", "lease_until": 0, "next_retry": time.time() + min(3600, 2 ** min(task["attempts"], 11)),
-                "last_error": str(exc)}})
+                "state": "retry", "lease_until": 0, "next_retry": failed_at + min(3600, 2 ** min(task["attempts"], 11)),
+                "last_error": str(exc), "workflow_updated_at": failed_at}})
+            candidate_changed()
             result["failed"] += 1
             if task_key:
                 break
@@ -292,10 +311,12 @@ def is_retrievable(doc: dict | None, *, source_resolver=None) -> bool:
 
 def _queue_revocation(doc: dict) -> str:
     """把撤销入队到发布任务（幂等，返回任务键）。"""
-    key = f"revoke:{doc['evo_doc_id']}"
-    evolution_repo.publication_tasks.update_one({"_id": key}, {"$setOnInsert": {
+    key = revocation_key(doc["evo_doc_id"])
+    inserted = evolution_repo.publication_tasks.update_one({"_id": key}, {"$setOnInsert": {
         "action": "revoke", "candidate_id": doc["_id"], "evo_doc_id": doc["evo_doc_id"],
-        "state": "pending", "lease_until": 0, "next_retry": 0, "attempts": 0}}, upsert=True)
+        "state": "pending", "lease_until": 0, "next_retry": 0, "attempts": 0, "created_at": time.time()}}, upsert=True)
+    if inserted.upserted_id is not None:
+        candidate_changed()
     return key
 
 
@@ -305,9 +326,11 @@ def revoke_candidate(candidate_id: str, reason: str = "revoked", *, process_task
         return False
     cid = ObjectId(candidate_id)
     doc = evolution_repo.k_candidates.find_one_and_update({"_id": cid}, {"$set": {
-        "status": "deprecated", "publication_status": "revoked", "reason": reason}}, return_document=ReturnDocument.AFTER)
+        "status": "deprecated", "publication_status": "revoked", "reason": reason,
+        "workflow_updated_at": time.time()}}, return_document=ReturnDocument.AFTER)
     if not doc:
         return False
+    candidate_changed()
     if doc.get("evo_doc_id"):
         key = _queue_revocation(doc)
         if process_task:

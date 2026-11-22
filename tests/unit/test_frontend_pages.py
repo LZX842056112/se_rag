@@ -24,6 +24,9 @@ PAGE_ASSETS = {
     "chat.html": ("app.css", "chat.css", "app.js", "chat.js"),
     "approval.html": ("app.css", "approval.css", "app.js", "approval.js"),
     "import.html": ("app.css", "import.css", "app.js", "import.js"),
+    "workflows.html": (
+        "app.css", "workflows.css", "app.js", "workflow-scene-config.js", "workflow-scene.js", "workflows.js",
+    ),
 }
 
 # 页面/脚本里可能以短名使用的公共函数；只要裸调用，就必须别名到 App.*

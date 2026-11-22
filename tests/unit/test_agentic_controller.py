@@ -208,6 +208,30 @@ def test_empty_evidence_and_invalid_actions_terminate():
     assert result['handoff_required'] is True
 
 
+@pytest.mark.parametrize(("max_tokens", "expected"), [(1000, "answered"), (100, "context_budget")])
+def test_oversized_candidate_does_not_discard_evidence_that_fits(max_tokens, expected):
+    good = evidence()
+    large = {**good, 'evidence_id': 'b', 'chunk_id': 'b', 'text': '手册正文' * 800}
+    budget = Budget(max_tokens=max_tokens)
+
+    def model(kind, payload, _timeout):
+        if kind == 'assess':
+            assert [row['evidence_id'] for row in payload['evidence']] == ['a']
+            return {'coverage': 'supported', 'evidence_ids': ['a']}
+        if kind == 'draft':
+            return {'answer': good['text']}
+        assert kind == 'verify'
+        return {'supported': True, 'evidence_ids': ['a']}
+
+    state = {'item_names': ['HAK180'], 'rewritten_query': '工作温度是多少？'}
+    result = run_agentic(state, tools=Tools([good, large]), model=model, budget=budget, persist=False)
+
+    assert result['agentic_stop_reason'] == expected
+    assert result['agentic_metrics']['tool_output_tokens'] <= max_tokens
+    if expected == 'answered':
+        assert result['answer'] == good['text']
+
+
 def test_invalid_action_retry_receives_validation_feedback():
     calls = {'assess':0, 'select':0}
     def model(kind, payload, timeout):

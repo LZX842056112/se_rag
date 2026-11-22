@@ -29,6 +29,10 @@ _ASSETS: dict[str, tuple[str, str]] = {
     "approval.js": ("js/approval.js", "text/javascript"),
     "import.css": ("css/import.css", "text/css"),
     "import.js": ("js/import.js", "text/javascript"),
+    "workflows.css": ("css/workflows.css", "text/css"),
+    "workflow-scene-config.js": ("js/workflow-scene-config.js", "text/javascript"),
+    "workflow-scene.js": ("js/workflow-scene.js", "text/javascript"),
+    "workflows.js": ("js/workflows.js", "text/javascript"),
 }
 
 # 页面白名单：页面名 -> html 相对路径
@@ -36,6 +40,7 @@ _PAGES: dict[str, str] = {
     "chat": "html/chat.html",
     "approval": "html/approval.html",
     "import": "html/import.html",
+    "workflows": "html/workflows.html",
 }
 
 # 资源版本号缓存：内容或 mtime 变化时重算（避免每次请求都读全部静态文件）
@@ -99,6 +104,11 @@ def chat_page() -> HTMLResponse:
 def approval_page() -> HTMLResponse:
     """自进化候选审批后台。"""
     return render_page("approval")
+
+
+@query_pages_router.get("/workflows", include_in_schema=False)
+def workflows_page() -> HTMLResponse:
+    return render_page("workflows")
 
 
 @import_pages_router.get("/import", include_in_schema=False)

@@ -30,6 +30,32 @@ METRIC_NAMES: tuple[str, ...] = (
     "context_recall",
 )
 
+ZERO_SCORE_REASONS = {
+    "no_generated_question": "评审未生成反向问题",
+    "all_noncommittal": "评审将所有有效反向问题标为含糊",
+}
+
+
+class _RelevancyJudgeTrace:
+    """只记录此题有效反向问题的标记。底层评审和打分保持不变。"""
+
+    def __init__(self, llm):
+        self.llm = llm
+        self.flags: list[int] = []
+
+    async def agenerate(self, *args, **kwargs):
+        result = await self.llm.agenerate(*args, **kwargs)
+        if result.question:
+            self.flags.append(result.noncommittal)
+        return result
+
+    def zero_reason(self) -> str | None:
+        if not self.flags:
+            return "no_generated_question"
+        if all(self.flags):
+            return "all_noncommittal"
+        return None
+
 
 class RagasUnavailable(RuntimeError):
     """未安装 RAGAS 或版本不匹配。"""
@@ -155,13 +181,14 @@ class RagasScorer:
         scores: dict = {}
         errors: dict[str, str] = {}
         retries: list[dict] = []
+        zero_score_reasons: dict[str, str] = {}
         # 逐项评分：四项同时发请求会放大云端 judge 的连接抖动
         for key, kwargs in inputs.items():
             metric = getattr(self, key)
             retry = None
             try:
                 try:
-                    result = await metric.ascore(**kwargs)
+                    result, trace = await self._score_metric(key, metric, kwargs)
                 except Exception as exc:
                     if not _output_was_truncated(exc):
                         raise
@@ -175,7 +202,7 @@ class RagasScorer:
                     # 并发题目继续使用原评分器的 token 上限。
                     retry_metric = copy(metric)
                     retry_metric.llm = self._retry_llm
-                    result = await retry_metric.ascore(**kwargs)
+                    result, trace = await self._score_metric(key, retry_metric, kwargs)
             except Exception as exc:  # noqa: BLE001 - 单指标失败不影响其余指标
                 scores[key] = None
                 errors[key] = str(exc) or exc.__class__.__name__
@@ -183,6 +210,8 @@ class RagasScorer:
             value = getattr(result, "value", result)
             if finite_score(value):
                 scores[key] = round(float(value), 4)
+                if value == 0 and trace is not None and (reason := trace.zero_reason()):
+                    zero_score_reasons[key] = reason
                 if retry is not None:
                     retry["status"] = "scored"
             else:
@@ -192,7 +221,18 @@ class RagasScorer:
             scores["error"] = "; ".join(f"{key}: {message}" for key, message in errors.items())
         if retries:
             scores["retries"] = retries
+        if zero_score_reasons:
+            scores["zero_score_reasons"] = zero_score_reasons
         return scores
+
+    @staticmethod
+    async def _score_metric(key, metric, kwargs):
+        if key != "answer_relevancy":
+            return await metric.ascore(**kwargs), None
+        # 并行评分时，每题使用独立副本，不能覆写共享评分器的 LLM。
+        traced_metric = copy(metric)
+        traced_metric.llm = trace = _RelevancyJudgeTrace(metric.llm)
+        return await traced_metric.ascore(**kwargs), trace
 
     def close(self) -> None:
         """关闭 judge 客户端。"""

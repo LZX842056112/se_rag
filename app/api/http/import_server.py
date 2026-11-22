@@ -15,6 +15,7 @@ from app.api.errors import install_error_handlers
 from app.api.routers import import_ as import_router
 from app.api.routers import health as health_router
 from app.api.routers import pages as pages_router
+from app.api.routers import workflows as workflows_router
 from app.shared.clients.mongo import ensure_indexes
 from app.shared.config import settings
 
@@ -42,6 +43,7 @@ app.add_middleware(
 install_error_handlers(app)
 
 app.include_router(import_router.router)
+app.include_router(workflows_router.import_router)
 app.include_router(health_router.router)
 app.include_router(pages_router.import_pages_router)
 app.include_router(pages_router.static_router)

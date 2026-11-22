@@ -8,11 +8,13 @@ from __future__ import annotations
 import time
 from types import SimpleNamespace
 
+import httpx
 import pytest
 
 from app.rag.query import rerank_service
 from app.shared.models import llm_providers
 from app.shared.runtime.deadline import query_deadline
+from app.shared.runtime.query_metrics import QueryMetrics, current_metrics
 
 
 class _FakeTokenizer:
@@ -191,6 +193,129 @@ def test_invalid_manual_ranks_use_bounded_bge_fallback(monkeypatch):
     result = rerank_service.rerank_documents(state)
     assert len(scored) == 7
     assert result['reranked_chunk_ids'] == ['0', '1', '2', '3', '4', '5', '6']
+
+
+def test_short_manual_ranking_keeps_model_choice_and_fills_in_fusion_order(monkeypatch):
+    # 旧代码丢弃了模型给出的唯一合法结果。补齐后也只记录模型实际排过的切片。
+    monkeypatch.setattr(llm_providers, "chat", lambda **kwargs: SimpleNamespace(
+        invoke=lambda _messages: SimpleNamespace(content='{"ranks":[7]}')))
+    monkeypatch.setattr(llm_providers, "reranker_model",
+                        lambda: pytest.fail("有效的部分排序不需要本地重排"))
+    state = {"rewritten_query": "产品会立即生效吗？",
+             "rrf_chunks": [_kb_chunk(str(i)) for i in range(1, 9)], "web_search_docs": []}
+
+    result = rerank_service.rerank_documents(state)
+
+    assert result["reranked_chunk_ids"] == ["7"]
+    assert [doc["chunk_id"] for doc in result["reranked_docs"]] == ["7", "1", "2", "3", "4"]
+
+
+@pytest.mark.parametrize(("reply", "reason"), [
+    ("非 JSON 内容", "invalid_json"), (None, "timeout"),
+])
+def test_manual_ranking_distinguishes_invalid_json_from_provider_timeout(monkeypatch, reply, reason):
+    def invoke(_messages):
+        if reply is None:
+            raise TimeoutError()
+        return SimpleNamespace(content=reply)
+
+    monkeypatch.setattr(llm_providers, "chat", lambda **_kwargs: SimpleNamespace(invoke=invoke))
+    monkeypatch.setattr(llm_providers, "reranker_model", lambda: pytest.fail("关键词候选可支持融合降级"))
+    candidates = [_kb_chunk(str(i)) for i in range(1, 8)]
+    state = {"rewritten_query": "产品配置", "rrf_chunks": candidates, "web_search_docs": [],
+             "keyword_chunks": candidates[:1]}
+    metrics = QueryMetrics("s", "t")
+    token = current_metrics.set(metrics)
+    try:
+        result = rerank_service.rerank_documents(state)
+    finally:
+        current_metrics.reset(token)
+
+    assert [doc["chunk_id"] for doc in result["reranked_docs"]] == ["1", "2", "3", "4", "5"]
+    assert metrics.stage_outcomes == {"manual_evidence_rerank": "failed"}
+    assert f"manual_evidence_rerank_{reason}" in metrics.degraded_reasons
+
+
+@pytest.mark.parametrize(("question", "section", "passage"), [
+    ("Brother HL-3040CN 和 HL-3070CW 在 Windows 7 上通过有线以太网连接时，是否支持使用 BRAdmin Light 配置网络设置？",
+     "概述", "| 功能 | Windows® 7 |\n| 有线以太网 (TCP/IP) | √ |\n| BRAdmin Light | √ |"),
+    ("Brother HL-3040CN 和 HL-3070CW 通过有线 TCP/IP 进行网络打印时，手册列出哪些 Windows 和 Mac OS X 版本？",
+     "网络打印", "打印服务器支持使用 TCP/IP 的 Windows 2000/XP、Windows Vista、Windows 7 和 Mac OS X 10.3.9 或更高版本。"),
+])
+def test_manual_fallback_recovers_shared_evidence_from_later_candidates(monkeypatch, question, section, passage):
+    def unavailable(_messages):
+        raise httpx.ConnectError("rerank provider unavailable")
+
+    monkeypatch.setattr(llm_providers, "chat", lambda **_: SimpleNamespace(invoke=unavailable))
+    monkeypatch.setattr(llm_providers, "reranker_model", lambda: pytest.fail("降级保留现有候选，不增加模型调用"))
+    product = "Brother HL-3040CN / HL-3070CW 网络打印服务器"
+    candidates = [
+        dict(_kb_chunk(f"single-{i}", question), item_name=product,
+             heading_path="无线配置（适用于 HL-3070CW） / TCP/IP")
+        for i in range(5)
+    ] + [
+        dict(_kb_chunk("contents", question), item_name=product, heading_path="网络使用说明书 / 目录"),
+        dict(_kb_chunk("shared", passage), item_name=product, heading_path=f"网络使用说明书 / {section}"),
+    ]
+    state = {"original_query": question, "rewritten_query": question, "item_names": [product, product],
+             "rrf_chunks": candidates, "keyword_chunks": candidates[:5], "web_search_docs": []}
+
+    result = rerank_service.rerank_documents(state)
+    shared = next((doc for doc in result["reranked_docs"] if doc["chunk_id"] == "shared"), None)
+
+    assert shared is not None and shared["text"] == passage
+    assert "contents" not in [doc["chunk_id"] for doc in result["reranked_docs"]]
+
+
+def test_shared_manual_fallback_prefers_configuration_conditions_over_a_heading_alias(monkeypatch):
+    monkeypatch.setattr(llm_providers, "chat", lambda **_: SimpleNamespace(
+        invoke=lambda _messages: SimpleNamespace(content='{"ranks":[]}')))
+    product = "Brother HL-3040CN / HL-3070CW 网络打印服务器"
+    question = "Brother HL-3040CN 和 HL-3070CW 打印服务器在 TCP/IP 网络中使用时，必须配置哪些网络参数？"
+    requirement = "TCP/IP 网络中必须配置 IP 地址和子网掩码。设备与主机处于不同逻辑网络时，必须配置网关。"
+    candidates = [
+        dict(_kb_chunk(f"single-{i}", "在控制面板中配置 TCP/IP 网络参数。"), item_name=product,
+             heading_path="无线配置（适用于 HL-3070CW） / 控制面板")
+        for i in range(5)
+    ] + [
+        dict(_kb_chunk("unrelated", "无法访问打印服务器时，请检查浏览器的代理服务器。"), item_name=product,
+             heading_path="故障排除 / 浏览器代理设置 (TCP/IP)"),
+        dict(_kb_chunk("one-model-table", "功能表和出厂默认设置\n\n(HL-3040CN)\n\n| TCP/IP | 网关 |"),
+             item_name=product, heading_path="打印服务器规格 / 功能表和出厂默认设置"),
+        dict(_kb_chunk("requirements", requirement), item_name=product,
+             heading_path="网络使用说明书 / IP 地址、子网掩码和网关"),
+    ]
+    state = {"rewritten_query": question, "item_names": [product], "rrf_chunks": candidates,
+             "keyword_chunks": candidates[:5], "web_search_docs": []}
+
+    result = rerank_service.rerank_documents(state)
+
+    assert result["reranked_docs"][0]["chunk_id"] == "requirements"
+    assert result["reranked_docs"][0]["text"] == requirement
+    assert all(doc["chunk_id"] != "one-model-table" for doc in result["reranked_docs"])
+
+
+@pytest.mark.parametrize("question", [
+    "HL-3070CW 的无线配置步骤是什么？",
+    "HL-3040CN 和 HL-3070CW 分别支持哪些网络设置？",
+])
+def test_manual_fallback_keeps_model_specific_evidence_for_single_model_and_comparison(monkeypatch, question):
+    monkeypatch.setattr(llm_providers, "chat", lambda **_: SimpleNamespace(
+        invoke=lambda _messages: SimpleNamespace(content='{"ranks":[]}')))
+    product = "Brother HL-3040CN / HL-3070CW 网络打印服务器"
+    candidates = [
+        dict(_kb_chunk(f"single-{i}", "操作面板的网络设置"), item_name=product,
+             heading_path="无线配置（适用于 HL-3070CW） / TCP/IP")
+        for i in range(5)
+    ] + [
+        dict(_kb_chunk("shared", "打印服务器支持 TCP/IP 网络设置。"), item_name=product, heading_path="网络使用说明书")
+    ]
+    state = {"rewritten_query": question, "item_names": [product],
+             "rrf_chunks": candidates, "keyword_chunks": candidates[:5], "web_search_docs": []}
+
+    result = rerank_service.rerank_documents(state)
+
+    assert [doc["chunk_id"] for doc in result["reranked_docs"]] == [f"single-{i}" for i in range(5)]
 
 
 @pytest.mark.parametrize(("named_section", "last_index"), [(False, 6), (True, 4)])

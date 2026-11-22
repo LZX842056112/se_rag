@@ -81,6 +81,89 @@ def test_source_dependents_are_revoked_before_replacement(monkeypatch):
     assert state['document_version']
 
 
+@pytest.mark.parametrize("backend", ["memory", "redis"])
+def test_import_revocation_pushes_lease_and_completion_to_candidate_feed(backend, monkeypatch):
+    import asyncio
+    import json
+    import threading
+    import time
+
+    import fakeredis
+    import httpx
+    import mongomock
+    from fastapi.testclient import TestClient
+
+    from app.api.http.query_server import app
+    from app.api.routers.workflows import _events
+    from app.evolution import governance, repositories
+    from app.evolution.workflow_candidates import list_candidate_runs
+    from app.shared.clients import redis_gateway
+    from app.shared.config import settings
+    from app.shared.runtime.workflow_monitor import CANDIDATE
+
+    invalidate = governance.invalidate_document
+    _patch(monkeypatch, _FakeMilvus())
+    monkeypatch.setattr(governance, "invalidate_document", invalidate)
+    monkeypatch.setattr(settings.evolution, "write_enabled", True)
+    monkeypatch.setattr(settings.runtime, "state_backend", backend)
+    monkeypatch.setattr(settings.api, "workflow_query_origin", "http://query.monitor.test")
+    monkeypatch.setattr(settings.import_, "admin_token", "test-token")
+    db = mongomock.MongoClient().test
+    monkeypatch.setattr(repositories, "get_collection", lambda name: db[name])
+    repo = repositories.evolution_repo
+    repo.k_candidates.insert_one({"status": "active", "publication_status": "active", "evo_doc_id": "faq-d1",
+                                  "ts": time.time(), "source_versions": [{"doc_id": "d1"}]})
+
+    forwarded = []
+    if backend == "memory":
+        local = TestClient(app)
+        client = httpx.Client
+
+        def forward(request):
+            forwarded.append(str(request.url))
+            assert request.headers["X-Internal-Token"] == "test-token"
+            result = local.post(request.url.path, headers=request.headers)
+            return httpx.Response(result.status_code)
+
+        monkeypatch.setattr(httpx, "Client", lambda **opts: client(transport=httpx.MockTransport(forward), **opts))
+    else:
+        redis = fakeredis.FakeRedis(decode_responses=True)
+        monkeypatch.setattr(redis_gateway, "get_redis_client", lambda: redis)
+        monkeypatch.setattr(httpx, "Client", lambda **_: pytest.fail("Redis shares the event stream"))
+
+    release = threading.Event()
+
+    def deactivate(_evo_id):
+        return release.wait(5)
+
+    monkeypatch.setattr(governance, "index_deactivate", deactivate)
+
+    async def check():
+        stream = _events(CANDIDATE, CANDIDATE, list_candidate_runs)
+        assert (await anext(stream)).startswith("event: snapshot")
+        operation = asyncio.create_task(asyncio.to_thread(
+            index_service.index_chunks, {"embeddings_content": [_row("a")], "parent_chunks": []},
+        ))
+        try:
+            for state in ("running", "completed"):
+                while True:
+                    update = await asyncio.wait_for(anext(stream), 3)
+                    assert update.startswith("event: run")
+                    row = json.loads(update.split("data: ", 1)[1])
+                    if row["nodes"].get("withdraw", {}).get("status") == state:
+                        break
+                release.set()
+            assert row["status"] == "withdrawn"
+        finally:
+            release.set()
+            await operation
+            await stream.aclose()
+
+    asyncio.run(check())
+    if backend == "memory":
+        assert set(forwarded) == {"http://query.monitor.test/api/workflows/internal/candidate-refresh"}
+
+
 def test_writes_new_before_deleting_old(monkeypatch):
     """写入必须先于删除，避免「删成功、插失败」的数据空窗。"""
     client = _FakeMilvus(existing_ids=("keep", "stale1"))

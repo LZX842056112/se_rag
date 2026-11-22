@@ -5,7 +5,9 @@ from collections import Counter
 import json
 import re
 
+import httpx
 from langchain_core.messages import HumanMessage
+from openai import APITimeoutError
 
 from app.rag.query.chunk_search import SEARCH_TOP_K
 from app.rag.query.config import LEGACY_ANSWER_RESERVE_SECONDS
@@ -15,7 +17,7 @@ from app.shared.models import llm_providers
 from app.shared.runtime.deadline import bounded_timeout
 from app.shared.runtime.logger import logger
 from app.shared.runtime.prompts import load_prompt
-from app.shared.runtime.query_metrics import mark_degraded, measure_stage
+from app.shared.runtime.query_metrics import mark_degraded, mark_stage_outcome, measure_stage
 from app.shared.utils.json_utils import parse_json_object
 
 
@@ -24,6 +26,7 @@ _MAX_PASSAGE_CHARS = 1600
 _LINK = re.compile(r"!?\[([^\]]*)\]\(https?://[^)]*\)")
 _PROCEDURE = re.compile(r"怎么|怎样|如何|步骤|操作|配置|设置")
 _NOTE_HEADINGS = {"注释", "备注", "注意", "警告"}
+_STAGE = "manual_evidence_rerank"
 
 
 def _page_key(doc: dict) -> tuple | None:
@@ -155,6 +158,7 @@ def rank_manual_evidence(state: dict, docs: list[dict], limit: int) -> list[dict
     try:
         timeout = bounded_timeout(8.0, reserve_seconds=LEGACY_ANSWER_RESERVE_SECONDS)
     except TimeoutError:
+        mark_stage_outcome(_STAGE, "skipped")
         mark_degraded("manual_evidence_rerank_budget")
         return None
 
@@ -177,19 +181,36 @@ def rank_manual_evidence(state: dict, docs: list[dict], limit: int) -> list[dict
         payload["rewritten_question"] = rewritten
     prompt = load_prompt("manual_evidence_rerank", limit=limit, payload=json.dumps(payload, ensure_ascii=False))
 
-    try:
-        with measure_stage("manual_evidence_rerank"):
+    with measure_stage(_STAGE):
+        try:
             client = llm_providers.chat(json_mode=True, timeout_seconds=timeout, max_retries=0)
             response = client.invoke([HumanMessage(content=prompt)])
+        except (TimeoutError, APITimeoutError, httpx.TimeoutException) as exc:
+            return _failed_ranking("timeout", type(exc).__name__)
+        except Exception as exc:
+            return _failed_ranking("provider_error", type(exc).__name__)
+        if (getattr(response, "response_metadata", None) or {}).get("finish_reason") == "length":
+            return _failed_ranking("truncated")
+        try:
             order = parse_json_object(response.content).get("ranks")
-            if not isinstance(order, list) or len(order) != limit:
-                raise ValueError("排序条数不符合要求")
-            if any(type(index) is not int or not 1 <= index <= len(docs) for index in order):
-                raise ValueError("排序序号超出候选范围")
-            if len(set(order)) != limit:
-                raise ValueError("排序序号重复")
-    except Exception as exc:
-        mark_degraded("manual_evidence_rerank_error")
-        logger.warning(f"手册证据排序失败：{type(exc).__name__}")
-        return None
+        except ValueError:
+            return _failed_ranking("invalid_json")
+        if not isinstance(order, list) or len(order) > limit:
+            return _failed_ranking("invalid_count")
+        if not order:
+            mark_stage_outcome(_STAGE, "empty")
+            return None
+        if any(type(index) is not int or not 1 <= index <= len(docs) for index in order):
+            return _failed_ranking("invalid_index")
+        if len(set(order)) != len(order):
+            return _failed_ranking("duplicate_index")
+    mark_stage_outcome(_STAGE, "succeeded" if len(order) == limit else "partial")
     return [dict(docs[index - 1], score=None) for index in order]
+
+
+def _failed_ranking(reason: str, error_type: str = "") -> None:
+    mark_stage_outcome(_STAGE, "failed")
+    mark_degraded("manual_evidence_rerank_error")
+    mark_degraded(f"{_STAGE}_{reason}")
+    logger.warning("手册证据排序失败：{} {}", reason, error_type)
+    return None

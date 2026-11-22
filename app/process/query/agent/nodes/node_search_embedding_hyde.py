@@ -1,6 +1,6 @@
 """查询图节点：HyDE 假设性文档检索。"""
 from app.rag.query.hyde_search_service import search_by_hyde
-from app.shared.runtime.query_metrics import mark_degraded
+from app.shared.runtime.query_metrics import mark_degraded, mark_stage_outcome
 from app.shared.runtime.logger import logger, node_log
 from app.shared.utils.task_state import track_node_task
 
@@ -16,9 +16,12 @@ def node_search_embedding_hyde(state):
     try:
         chunks = search_by_hyde(state)
     except Exception as exc:
-        mark_degraded("hyde_error")  # noqa: BLE001 - HyDE 失败降级为空，由 zero_hit 信号体现
+        mark_stage_outcome("hyde", "failed")
+        mark_degraded("hyde_error")
         logger.warning(f"HyDE 检索失败，降级为该路空结果：{exc}")
         chunks = []
+    else:
+        mark_stage_outcome("hyde", "succeeded" if chunks else ("empty" if state.get("hyde_executed") else "skipped"))
     result = {"hyde_embedding_chunks": chunks}
     if state.get("hyde_executed"):
         result["hyde_executed"] = True

@@ -20,6 +20,7 @@ from functools import wraps
 from typing import Dict, List
 
 from app.shared.config import settings
+from app.shared.runtime.workflow_monitor import observe
 from app.shared.utils.sse_broker import SSEEvent, publish
 
 # 任务整体状态枚举：与前端展示联动，node 的 done/running 是进度明细，状态是粗粒度汇总
@@ -351,7 +352,7 @@ def get_task_error(task_id: str) -> tuple[str, str]:
         return record.error_code, record.message
 
 
-def snapshot(task_id: str) -> dict:
+def snapshot(task_id: str, *, include_updated_at: bool = False) -> dict:
     """返回任务状态的只读快照（用于落盘与「刷新后重建进度」，避免在锁内做 IO）。
 
     读取前先回收超期记录：否则服务重启前遗留的 processing 记录会被当成
@@ -370,6 +371,7 @@ def snapshot(task_id: str) -> dict:
             "message": _redis_field(record, _F_MESSAGE),
             "query": _redis_field(record, _F_QUERY),
             "turn_id": _redis_field(record, _F_TURN),
+            **({"updated_at": float(_redis_field(record, _F_UPDATED, "0"))} if include_updated_at else {}),
         }
 
     with _lock:
@@ -386,6 +388,7 @@ def snapshot(task_id: str) -> dict:
             "message": record.message,
             "query": record.query,
             "turn_id": record.turn_id,
+            **({"updated_at": record.updated_at} if include_updated_at else {}),
         }
 
 
@@ -404,7 +407,8 @@ def track_node_task(node_name: str, id_key: str = "session_id", stream_key: str 
             is_stream = state.get(stream_key, False)
             add_running_task(task_id, node_name, is_stream)
             try:
-                return func(state, *args, **kwargs)
+                with observe(node_name):
+                    return func(state, *args, **kwargs)
             finally:
                 add_done_task(task_id, node_name, is_stream)
         return wrapper

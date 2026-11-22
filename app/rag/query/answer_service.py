@@ -16,6 +16,9 @@ from app.rag.query.answer_images import select_answer_images
 from app.rag.query.citations import build_citations, build_doc_meta, split_cited
 from app.rag.query.history_utils import build_history_context
 from app.rag.query.business import apply_business_policy
+from app.rag.query.restart_timing import (
+    QUOTE_INSTRUCTIONS, needs_restart_timing_quotes, render_restart_timing_answer, restart_timing_has_explicit_effect,
+)
 from app.shared.clients.history_repository import history_repository
 from app.shared.config import settings
 from app.shared.models import llm_providers
@@ -23,6 +26,7 @@ from app.shared.runtime.logger import logger
 from app.shared.runtime.prompts import load_prompt
 from app.shared.runtime.query_metrics import measure_stage
 from app.shared.utils.answer import NO_ANSWER_REPLY, is_no_answer
+from app.shared.utils.json_utils import parse_json_object
 from app.shared.utils.sse_broker import SSEEvent, publish
 
 
@@ -154,6 +158,21 @@ def _answer_chunks(contents: Iterable[str]) -> Iterator[str]:
 def call_llm_deal_answer(state: QueryGraphState, answer_prompt_text: str) -> None:
     """调用 LLM 生成答案；流式模式下逐段推送到 SSE。"""
     session_id = state.get("session_id")
+    if needs_restart_timing_quotes(state):
+        # 核对后才能发送。普通问答仍按原方式逐段发送。
+        messages = [HumanMessage(content=answer_prompt_text + "\n" + QUOTE_INSTRUCTIONS)]
+        quotes = {}
+        if restart_timing_has_explicit_effect(state):
+            response = llm_providers.chat(json_mode=True).invoke(messages)
+            try:
+                quotes = parse_json_object(response.content)
+            except ValueError:
+                pass
+        answer = render_restart_timing_answer(state, quotes)
+        state["answer"] = "".join(_answer_chunks([answer]))
+        if state.get("is_stream", False):
+            publish(session_id, SSEEvent.DELTA, {"delta": state["answer"]})
+        return
     messages = [HumanMessage(content=answer_prompt_text)]
     if state.get("is_stream", False):
         answer = []

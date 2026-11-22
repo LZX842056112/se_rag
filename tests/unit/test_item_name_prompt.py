@@ -18,7 +18,7 @@ PROMPT_NAME = "rewritten_query_and_itemnames"
 def test_prompt_renders_placeholders_without_keyerror():
     """JSON 结构示例的花括号必须转义，否则 .format() 会抛 KeyError。"""
     rendered = load_prompt(
-        PROMPT_NAME, query="示例问题Q", history_text="示例历史H"
+        PROMPT_NAME, query="示例问题Q", history_text="示例历史H", scope_rule="", scope_field=""
     )
     assert "示例问题Q" in rendered
     assert "示例历史H" in rendered
@@ -27,13 +27,13 @@ def test_prompt_renders_placeholders_without_keyerror():
 
 def test_prompt_forbids_history_subject_override():
     """必须显式声明：当前问题已出现主体时，不得用历史会话主体替换。"""
-    rendered = load_prompt(PROMPT_NAME, query="Q", history_text="H")
+    rendered = load_prompt(PROMPT_NAME, query="Q", history_text="H", scope_rule="", scope_field="")
     assert "以当前问题为准" in rendered
     assert "绝不允许用" in rendered
 
 
 def test_prompt_examples_do_not_reuse_real_subject_names():
     """示例型号名不得复用库内真实主体名（此前用 HAK180 做示例，直接诱导模型照抄）。"""
-    rendered = load_prompt(PROMPT_NAME, query="Q", history_text="H")
+    rendered = load_prompt(PROMPT_NAME, query="Q", history_text="H", scope_rule="", scope_field="")
     assert "HAK180" not in rendered
     assert "HAK 180" not in rendered

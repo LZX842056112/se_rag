@@ -10,6 +10,7 @@ from app.evolution.quality import looks_like_non_answer
 from app.evolution.repositories import evolution_repo
 from app.evolution.gap.registration import VISIBLE_REGISTRATION, mark_source_gap
 from app.shared.runtime.logger import logger
+from app.shared.runtime.workflow_monitor import candidate_changed
 
 
 def list_candidates(status: str | None = None, limit: int = 100) -> list[dict]:
@@ -53,8 +54,9 @@ def reject(candidate_id: str, reason: str = "") -> bool:
             return False
         evolution_repo.k_candidates.update_one(
             {"_id": object_id, 'publication_status': 'revoked'},
-            {"$set": {"status": "rejected", "reason": reason}}
+            {"$set": {"status": "rejected", "reason": reason, "workflow_updated_at": time.time()}}
         )
+        candidate_changed()
         mark_source_gap(current.get("gap_id"), "rejected")
         return True
     except Exception as exc:  # noqa: BLE001
@@ -113,6 +115,7 @@ def edit(candidate_id: str, *, faq_question: str | None = None, faq_answer: str 
         if current.get("evo_doc_id"):
             revoke_candidate(candidate_id, "content edited")
         patch.update({"publication_status": "draft", "content_version": int(current.get("content_version", 0)) + 1,
+                      "workflow_updated_at": time.time(),
                       "approved_at": None, "approved_content_sha256": "",
                       "status": "draft" if current.get("status") != "need_info" else "need_info"})
         if current.get("status") == "need_info":
@@ -120,7 +123,9 @@ def edit(candidate_id: str, *, faq_question: str | None = None, faq_answer: str 
             if merged_answer and not looks_like_non_answer(merged_answer):
                 patch["status"] = "draft"
                 patch["reason"] = ""
+                patch["workflow_supplemented_at"] = patch["workflow_updated_at"]
         evolution_repo.k_candidates.update_one({"_id": object_id}, {"$set": patch})
+        candidate_changed()
         return True
     except Exception as exc:  # noqa: BLE001
         logger.warning(f"编辑候选失败：{exc}")

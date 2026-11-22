@@ -15,6 +15,15 @@ from app.shared.config import settings
 _COOKIE = "kb_owner"
 
 
+def session_owner_hash(request: Request | None) -> str:
+    if request is None or not settings.api.session_ownership_enabled:
+        return ""
+    token = getattr(request.state, "owner_token", "")
+    if not token:
+        raise ApiError("session_not_found", "会话不可访问，请新建会话", 404)
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
 def install_session_cookie(app):
     @app.middleware("http")
     async def owner_cookie(request: Request, call_next):
@@ -37,12 +46,7 @@ def authorize_session(request: Request | None, session_id: str, *, create: bool 
     # 未提供请求上下文，或归属校验特性被关闭时，直接放行（跳过归属管理）。
     if request is None or not settings.api.session_ownership_enabled:
         return
-    # 从请求中取得由 install_session_cookie 中间件写入的归属令牌（owner_token）。
-    token = getattr(request.state, "owner_token", "")
-    if not token:
-        raise ApiError("session_not_found", "会话不可访问，请新建会话", 404)
-    # 对令牌做哈希，形成不可逆的 owner_hash，避免在存储中暴露 Cookie 原值。
-    owner = hashlib.sha256(token.encode()).hexdigest()
+    owner = session_owner_hash(request)
     try:
         sessions = get_collection(settings.mongo.query_sessions_collection)
         doc = sessions.find_one({"_id": session_id})

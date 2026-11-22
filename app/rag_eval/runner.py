@@ -21,7 +21,8 @@ RECALL_TARGET = 0.8
 MUST_HIT_TARGET = 1.0
 _SERVER_TIMING_FIELDS = ("duration_ms", "first_token_ms", "classification_ms", "queue_ms")
 _SERVER_METRIC_FIELDS = (
-    *_SERVER_TIMING_FIELDS, "stage_ms", "degraded", "degraded_reasons", "rerank_pairs", "rerank_input_tokens",
+    *_SERVER_TIMING_FIELDS, "stage_ms", "stage_outcomes", "degraded", "degraded_reasons",
+    "rerank_pairs", "rerank_input_tokens", "agentic",
 )
 
 
@@ -200,6 +201,8 @@ def _score_cases(cases: list[EvalCase], rows: list[dict], say: Progress) -> dict
             row["ragas"] = clean_scores
             if scores.get("retries"):
                 row["ragas_retries"] = scores["retries"]
+            if scores.get("zero_score_reasons"):
+                row["ragas_zero_score_reasons"] = scores["zero_score_reasons"]
             if missing:
                 row["ragas"]["error"] = scores.get("error") or f"缺少有效分数 {', '.join(missing)}"
             row["scoring_status"] = "scorer_failed" if missing else "scored"
@@ -249,6 +252,7 @@ def _build_report(
         "outcomes": dict(Counter(row["outcome"] or "unknown" for row in successful)),
         "scoring_statuses": dict(Counter(row["scoring_status"] for row in rows)),
         "degradation": _degradation_summary(successful),
+        "stage_outcomes": _stage_outcomes(successful),
         "retrieval": retrieval,
         "latency_ms": _latency_summary([row["latency_ms"] for row in successful]),
         "server_timing_ms": _server_timing(successful),
@@ -375,6 +379,17 @@ def _degradation_summary(rows: list[dict]) -> dict:
         if isinstance(reported, list):
             reasons.update({reason for reason in reported if isinstance(reason, str) and reason})
     return {"reported": len(flags), "degraded": len(degraded), "by_reason": dict(sorted(reasons.items()))}
+
+
+def _stage_outcomes(rows: list[dict]) -> dict[str, dict[str, int]]:
+    counts: dict[str, Counter[str]] = {}
+    for row in rows:
+        outcomes = row["server_metrics"].get("stage_outcomes")
+        if isinstance(outcomes, dict):
+            for name, outcome in outcomes.items():
+                if isinstance(outcome, str) and outcome in ("skipped", "failed", "empty", "partial", "succeeded"):
+                    counts.setdefault(name, Counter())[outcome] += 1
+    return {name: dict(outcomes) for name, outcomes in sorted(counts.items())}
 
 
 def timed_run(config: EvalConfig, progress: Progress | None = None) -> dict:

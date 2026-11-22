@@ -32,14 +32,17 @@ def get_history_messages_and_context(session_id: str) -> str:
 def call_llm_item_name_and_rewritten(history_text: str, original_query: str, *, check_scope: bool = False) -> dict:
     """调用模型识别主体名并改写问题（历史上下文放在规则之后，避免干扰规则读取）。"""
     json_llm_client = llm_providers.chat(json_mode=True)
-    history_prompt_text = load_prompt(
-        "rewritten_query_and_itemnames", query=original_query, history_text=history_text
+    scope_rule = (
+        "\n【判断请求是否超范围】\n"
+        '必须返回布尔字段 "out_of_scope"。仅当当前请求明确与产品、设备和售后无关时，返回 true。'
+        "例如代写邀请函或查询行政报销流程。此时 item_names 返回空列表，rewritten_query 保留原句。"
+        "缺少型号、问题含糊或可能在询问产品时，返回 false。\n"
+        if check_scope else ""
     )
-    if check_scope:
-        history_prompt_text = (
-            '在 JSON 中额外返回布尔字段 "out_of_scope"。只有请求明确与产品、使用或售后无关时才返回 true。'
-            '缺少型号、表述含糊或可能是产品追问时返回 false。\n\n' + history_prompt_text
-        )
+    history_prompt_text = load_prompt(
+        "rewritten_query_and_itemnames", query=original_query, history_text=history_text,
+        scope_rule=scope_rule, scope_field=',\n    "out_of_scope": false' if check_scope else "",
+    )
     response = json_llm_client.invoke([HumanMessage(content=history_prompt_text)])
     result_dict = parse_json_object(response.content)
     # 参数校验赋予默认值：模型可能只返回其中一个字段

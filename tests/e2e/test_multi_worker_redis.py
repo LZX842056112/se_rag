@@ -88,14 +88,16 @@ def _run_worker(redis_url, prefix, snapshot_dir, run_scheduler, port_sender, sto
         leader_task = None
         tick_client = None
         if run_scheduler:
-            from app.evolution import governance, leader, scheduler
+            from app.evolution import leader, scheduler
 
             # Record cycles even when the scheduler's lease connection is down.
             tick_client = Redis.from_url(os.environ["MULTI_WORKER_REDIS_URL"], socket_timeout=3)
-            governance.run_publication_tasks = lambda: None
-            scheduler.run_evolution_cycle_once = lambda: tick_client.rpush(
-                f"{prefix}:ticks", str(os.getpid())
-            )
+
+            async def run_test_cycle():
+                await asyncio.to_thread(tick_client.rpush, f"{prefix}:ticks", str(os.getpid()))
+                return {"completed": True}
+
+            scheduler.run_scheduled_cycle = run_test_cycle
             leader_task = asyncio.create_task(leader.scheduler_leader_loop(0.15))
 
         try:
@@ -162,9 +164,21 @@ def redis_db():
         try:
             yield client, prefix
         finally:
+            from app.shared.runtime.workflow_events import _keys
+            from app.shared.runtime.workflow_monitor import IMPORT, query_scope
+
             keys = list(client.scan_iter(match=f"*{prefix}*"))
+            sessions = {prefix, f"{prefix}-retry"}
+            sessions.update(key.removeprefix("task:state:") for key in keys if key.startswith("task:state:"))
+            for session in sessions:
+                keys.extend(_keys(query_scope(session, "")))
+            import_keys = _keys(IMPORT)
+            import_ids = client.hkeys(import_keys[0])
+            if import_ids and all(task_id.startswith(f"{prefix}-") for task_id in import_ids):
+                keys.extend(import_keys)
             client.zrem("import:slots", f"{prefix}-held", f"{prefix}-busy", f"{prefix}-retry")
             client.delete(_TEST_LOCK, _LEADER_KEY, *keys)
+            assert client.dbsize() == 0, "The test left Redis keys behind"
 
 
 @pytest.fixture

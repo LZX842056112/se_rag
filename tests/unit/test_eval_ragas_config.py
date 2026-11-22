@@ -108,6 +108,7 @@ def test_scorer_retries_only_output_truncation_with_same_inputs(monkeypatch, jud
 
     assert scores["faithfulness"] == expected_score
     assert scores["answer_relevancy"] == 0.0
+    assert scores["zero_score_reasons"] == {"answer_relevancy": "no_generated_question"}
     assert scores["context_precision"] == scores["context_recall"] == 1.0
     assert all(body["model"] == "judge-model" for _, body in requests)
     if judge_result == "invalid_request":

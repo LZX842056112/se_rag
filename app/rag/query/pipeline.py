@@ -10,6 +10,7 @@ from app.rag.query.errors import classify_query_error
 from app.rag.query.lifecycle import reserve_query, release_query
 from app.shared.clients.history_repository import history_repository
 from app.shared.runtime.logger import logger
+from app.shared.runtime.workflow_monitor import Run, query_scope
 from app.shared.runtime.query_metrics import QueryMetrics, current_metrics, record_query
 from app.rag.agentic.deadline import bounded_query
 from app.shared.utils.sse_broker import SSEEvent, publish
@@ -30,6 +31,7 @@ def invoke_query_graph(
     rewrite_hint: str | None = None,
     turn_id: str | None = None,
     queued_at: float | None = None,
+    monitor: Run | None = None,
 ) -> QueryGraphState | None:
     """执行一次查询：清空旧进度 → 跑图 → 推送最终事件 → 写入未解决信号。
 
@@ -39,6 +41,9 @@ def invoke_query_graph(
     只有通道里留有本轮事件，前端才能在刷新后重新接管这一轮问答。
     """
     turn_id = turn_id or reserve_query(session_id, original_query)
+    if monitor is None:
+        monitor = Run(query_scope(session_id, ""), turn_id)
+        monitor.begin("pending", "问答")
     metrics = QueryMetrics(session_id, turn_id, queued_at=queued_at)
     metrics_token = current_metrics.set(metrics)
     final_state = {}
@@ -46,6 +51,7 @@ def invoke_query_graph(
     error_details = None
     try:
         update_task_status(session_id, TASK_STATUS_PROCESSING, push_queue=is_stream)
+        monitor.status("processing")
 
         query_state = create_query_default_state(
             session_id=session_id,
@@ -54,7 +60,9 @@ def invoke_query_graph(
             is_stream=is_stream,
             rewrite_hint=rewrite_hint or "",
         )
-        result_state = query_app.invoke(query_state)
+        monitor.node("__start__", "completed")
+        with monitor.activate():
+            result_state = query_app.invoke(query_state)
         result_state["issue_id"] = register_unresolved(result_state)
         if result_state["issue_id"] and result_state.get("answer_id"):
             history_repository.attach_issue(session_id, result_state["answer_id"], result_state["issue_id"], bool(result_state.get("handoff_required")))
@@ -66,6 +74,7 @@ def invoke_query_graph(
         if result_state.get('agentic_metrics'):
             result_state['metrics']['agentic'] = result_state['agentic_metrics']
         update_task_status(session_id, TASK_STATUS_COMPLETED, push_queue=is_stream)
+        monitor.status("completed")
 
         # 收尾事件不分流式与否：非流式页面刷新后同样靠通道里的 final 续上答案
         publish(session_id, SSEEvent.FINAL, {
@@ -102,6 +111,7 @@ def invoke_query_graph(
             error_details["upstream_code"] = upstream_code
         update_task_status(session_id, TASK_STATUS_FAILED, push_queue=is_stream)
         set_task_error(session_id, code, message)
+        monitor.status("failed", error_code=code)
         publish(session_id, SSEEvent.ERROR, {
             "code": code,
             "message": f"{session_id} 业务失败，原因：{message}",

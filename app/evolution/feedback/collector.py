@@ -14,6 +14,7 @@ from app.evolution.feedback.state import is_unresolved
 from app.rag.query.business import classify_business
 from app.shared.clients.history_repository import history_repository
 from app.shared.runtime.logger import logger
+from app.shared.runtime.workflow_monitor import candidate_changed
 from app.shared.utils.answer import is_no_answer
 
 # 幂等窗口：同一 session/query/thumbs/source 在该窗口内不重复落库，防信号放大
@@ -74,19 +75,31 @@ def _emit(event: FeedbackEvent, *, explicit: bool = False) -> None:
         _upsert_answer_feedback(evolution_repo.fb_events,
             {"session_id": event.session_id, "answer_id": event.answer_id},
             payload, event.session_id, event.answer_id, initial=initial)
-        return
-    evolution_repo.fb_events.update_one(
-        {
+        selector = {"session_id": event.session_id, "answer_id": event.answer_id}
+    else:
+        selector = {
             "session_id": event.session_id,
             "answer_id": event.answer_id,
             "query": event.query,
             "thumbs": event.thumbs,
             "source": event.source,
             "ts": {"$gte": now - _DEDUP_WINDOW_SECONDS},
-        },
-        {"$setOnInsert": event.model_dump()},
-        upsert=True,
-    )
+        }
+        evolution_repo.fb_events.update_one(selector, {"$setOnInsert": event.model_dump()}, upsert=True)
+    _notify_feedback_change(selector, now)
+
+
+def _notify_feedback_change(selector: dict, now: float) -> None:
+    from app.evolution.feedback.state import unresolved_filter
+
+    try:
+        evolution_repo.fb_events.update_one(
+            {"$and": [selector, unresolved_filter(), {"workflow_entered_at": {"$exists": False}}]},
+            {"$set": {"workflow_entered_at": now}},
+        )
+    except Exception as exc:
+        logger.warning(f"记录反馈进入流程的时间失败：{type(exc).__name__}")
+    candidate_changed()
 
 
 def record_feedback(event: FeedbackEvent) -> None:

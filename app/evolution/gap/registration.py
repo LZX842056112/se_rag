@@ -10,6 +10,7 @@ from bson import ObjectId
 from app.evolution.repositories import evolution_repo
 from app.shared.config import settings
 from app.shared.runtime.logger import logger
+from app.shared.runtime.workflow_monitor import candidate_changed
 
 _CLAIM: ContextVar[dict | None] = ContextVar("gap_registration_claim", default=None)
 VISIBLE_REGISTRATION = {"$or": [{"registration_status": {"$exists": False}}, {"registration_status": "ready"}]}
@@ -21,6 +22,7 @@ def mark_source_gap(gap_id: str | None, status: str) -> None:
         return
     try:
         evolution_repo.k_gaps.update_one({"_id": ObjectId(gap_id)}, {"$set": {"status": status}})
+        candidate_changed()
     except Exception as exc:
         logger.warning(f"回写缺口状态失败：{gap_id} -> {status}（{exc}）")
 
@@ -74,9 +76,11 @@ def activate_gap_registrations(gap: dict) -> None:
         return
     for collection, link in _collections():
         if gap.get(link):
-            collection.update_one({"_id": ObjectId(gap[link]), "gap_id": str(gap["_id"]),
+            updated = collection.update_one({"_id": ObjectId(gap[link]), "gap_id": str(gap["_id"]),
                                    "registration_status": "staged"},
                                   {"$set": {"registration_status": "ready"}})
+            if updated.modified_count:
+                candidate_changed()
 
 
 def reconcile_registrations(limit: int) -> None:

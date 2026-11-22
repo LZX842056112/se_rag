@@ -96,6 +96,7 @@ def test_report_summarizes_degradation_and_actual_http_attempts(tmp_path, monkey
                 "metrics": {
                     "degraded": True, "degraded_reasons": ["web_timeout", "web_timeout", "intent_timeout"],
                     "rerank_pairs": 7, "rerank_input_tokens": 1234,
+                    "stage_outcomes": {"hyde": "skipped", "manual_evidence_rerank": "partial"},
                 },
             })
 
@@ -118,6 +119,7 @@ def test_report_summarizes_degradation_and_actual_http_attempts(tmp_path, monkey
     assert succeeded["server_metrics"] == {
         "degraded": True, "degraded_reasons": ["web_timeout", "web_timeout", "intent_timeout"],
         "rerank_pairs": 7, "rerank_input_tokens": 1234,
+        "stage_outcomes": {"hyde": "skipped", "manual_evidence_rerank": "partial"},
     }
     assert report["summary"]["http_attempts"] == {
         "total": 4, "retried_cases": 2, "failed_attempts_by_reason": {"http_503": 1, "timeout": 2},
@@ -126,10 +128,12 @@ def test_report_summarizes_degradation_and_actual_http_attempts(tmp_path, monkey
         "reported": 1, "degraded": 1, "by_reason": {"web_timeout": 1, "intent_timeout": 1},
     }
     assert report["summary"]["server_timing_ms"] == {}
+    assert report["summary"]["stage_outcomes"] == {"hyde": {"skipped": 1}, "manual_evidence_rerank": {"partial": 1}}
     assert report["meta"]["server"]["service_source_sha256"] == "abc"
     markdown = render_markdown(report)
     assert "HTTP 请求共 4 次" in markdown
     assert "`web_timeout` 1 题" in markdown
+    assert "| hyde | 0 | 0 | 0 | 1 | 0 |" in markdown
 
 
 def test_unannotated_cases_mark_conclusion_inconclusive(tmp_path, monkeypatch):
@@ -227,7 +231,8 @@ def test_scores_actual_contexts_and_reports_server_provenance(tmp_path, monkeypa
         def score(self, *, contexts, **_args):
             return {
                 "faithfulness": 1.0 if contexts == ["父块正文"] else 0.0,
-                "answer_relevancy": 1.0, "context_precision": 1.0, "context_recall": 1.0,
+                "answer_relevancy": 0.0, "context_precision": 1.0, "context_recall": 1.0,
+                "zero_score_reasons": {"answer_relevancy": "all_noncommittal"},
                 "retries": [{"metric": "faithfulness", "max_tokens": 8192, "previous_error": "max_tokens",
                              "status": "scored"}],
             }
@@ -256,7 +261,11 @@ def test_scores_actual_contexts_and_reports_server_provenance(tmp_path, monkeypa
         {"metric": "faithfulness", "max_tokens": 8192, "previous_error": "max_tokens", "status": "scored"},
     ]
     assert report["summary"]["ragas_retries"] == {"faithfulness": 1}
-    assert "faithfulness 以 8192 token 重试成功" in render_markdown(report)
+    assert report["cases"][0]["ragas"]["answer_relevancy"] == 0
+    assert report["cases"][0]["ragas_zero_score_reasons"] == {"answer_relevancy": "all_noncommittal"}
+    markdown = render_markdown(report)
+    assert "faithfulness 以 8192 token 重试成功" in markdown
+    assert "评审将所有有效反向问题标为含糊：1 题" in markdown
 
 
 @pytest.mark.parametrize(("answer", "outcome", "status"), [

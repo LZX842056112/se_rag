@@ -14,7 +14,7 @@ from app.shared.config import settings
 from app.shared.runtime.deadline import bounded_timeout
 from app.shared.runtime.logger import logger
 from app.shared.runtime.query_metrics import mark_degraded
-from app.shared.utils.text import product_model_tokens
+from app.shared.utils.text import normalize_item_name, product_model_tokens
 
 
 KEYWORD_CANDIDATE_LIMIT = 12
@@ -25,6 +25,10 @@ _LETTER_NUMBER = re.compile(r"[a-z]{2,}\d+[a-z0-9]*")
 _MENU_PHRASE = re.compile(r"[a-z][a-z0-9]*(?:[ \t]+[a-z0-9]+)+")
 _BRADMIN_ALIAS = re.compile(r"\bbraadmin\b")
 _HEADING_ALIAS = re.compile(r"\(([^\s()]{2,12})\)(?=\s*(?:/|$))")
+_MODEL_COMPARISON = re.compile(r"分别|各自|区别|差异|不同|相比|对比|\b(?:respectively|difference|compare|versus|vs)\b", re.I)
+_MODEL_LABEL = re.compile(r"^[ \t]*[(（]([a-z0-9][a-z0-9/, \t-]*)[)）][ \t\r]*$", re.I | re.M)
+_IMAGE = re.compile(r"!\[[^\]\n]*\]\([^\n)]*\)")
+_CONTENTS_HEADINGS = {"目录", "contents", "table of contents"}
 
 
 def _terms(text: str):
@@ -44,22 +48,25 @@ def _terms(text: str):
                     yield token[start:start + size]
 
 
-def _outside_model_scope(row: dict, heading: str, requested: set[str]) -> bool:
+def _outside_model_scope(row: dict, heading: str, requested: set[str], *, require_all: bool = False) -> bool:
     name_models = product_model_tokens(str(row.get("item_name") or ""))
     selected = name_models & requested
     if len(name_models) < 2 or not selected:
         return False
     for section in heading.split(" / "):
         scope_models = product_model_tokens(section.partition("适用于")[2]) & name_models
-        if scope_models and not selected & scope_models:
+        if not scope_models:
+            continue
+        matches = selected & scope_models
+        if not matches or (require_all and matches != selected):
             return True
     return False
 
 
-def _heading_match_length(heading: str, terms: set[str], query: str) -> int:
+def _heading_match_length(heading: str, terms: set[str], query: str, *, match_parenthetical_aliases: bool) -> int:
     title = _BRADMIN_ALIAS.sub("bradmin", normalize("NFKC", heading).casefold())
     leaf = title.rsplit(" / ", 1)[-1].strip()
-    aliases = _HEADING_ALIAS.findall(title)
+    aliases = _HEADING_ALIAS.findall(title) if match_parenthetical_aliases else []
     if _IDENTIFIER.fullmatch(leaf) or _MENU_PHRASE.fullmatch(leaf) or _LETTER_NUMBER.fullmatch(leaf):
         aliases.append(leaf)
     return max((len(alias) for alias in aliases if alias in terms and alias in query), default=0)
@@ -92,7 +99,9 @@ def _bm25(terms: set[str], texts: list[str]) -> list[float]:
     return scores
 
 
-def rank_manual_keywords(rows: list[dict], question: str, *, limit: int = KEYWORD_CANDIDATE_LIMIT) -> list[dict]:
+def rank_manual_keywords(
+    rows: list[dict], question: str, *, limit: int = KEYWORD_CANDIDATE_LIMIT, match_parenthetical_aliases: bool = True,
+) -> list[dict]:
     """交替取正文和标题排名靠前的切片。标题内的模式别名也可参与匹配。"""
     terms = set(_terms(question))
     if not rows or not terms or limit <= 0:
@@ -102,7 +111,8 @@ def rank_manual_keywords(rows: list[dict], question: str, *, limit: int = KEYWOR
     body_scores = _bm25(terms, [str(row.get("content") or "") for row in rows])
     title_scores = _bm25(terms, headings)
     query = _BRADMIN_ALIAS.sub("bradmin", normalize("NFKC", question).casefold())
-    aliases = [_heading_match_length(heading, terms, query) for heading in headings]
+    aliases = [_heading_match_length(heading, terms, query, match_parenthetical_aliases=match_parenthetical_aliases)
+               for heading in headings]
     requested = product_model_tokens(question)
     outside = [_outside_model_scope(row, heading, requested) for row, heading in zip(rows, headings)]
 
@@ -124,6 +134,43 @@ def rank_manual_keywords(rows: list[dict], question: str, *, limit: int = KEYWOR
             if len(ranked) == limit:
                 return ranked
     return ranked
+
+
+def rank_shared_manual_fallback(
+    docs: list[dict], question: str, item_names: list[str], *, limit: int,
+) -> list[dict]:
+    """同一手册的多个型号共用一项功能时，降级也优先选适用于所有被问型号的正文。"""
+    items = {normalize_item_name(name): name for name in item_names if name}
+    if len(items) != 1 or _MODEL_COMPARISON.search(question):
+        return []
+    item = next(iter(items.values()))
+    if "/" not in item and "／" not in item:
+        return []
+    variants = [product_model_tokens(part) for part in normalize("NFKC", item).split("/")]
+    if any(len(models) != 1 for models in variants):
+        return []
+    requested = set.union(*variants) & product_model_tokens(question)
+    if len(requested) < 2:
+        return []
+
+    originals = {}
+    rank_input = []
+    for doc in docs:
+        heading = doc.get("heading_path") or doc.get("title") or ""
+        if not requested <= product_model_tokens(doc.get("item_name") or ""):
+            continue
+        if _outside_model_scope(doc, heading, requested, require_all=True):
+            continue
+        if any(part.strip().casefold() in _CONTENTS_HEADINGS for part in heading.split(" / ")):
+            continue
+        body = _IMAGE.sub(" ", doc.get("text") or "")
+        labels = (product_model_tokens(label) & requested for label in _MODEL_LABEL.findall(body))
+        if any(models and models != requested for models in labels):
+            continue
+        originals[doc["chunk_id"]] = doc
+        rank_input.append(dict(doc, content=body))
+    ranked = rank_manual_keywords(rank_input, question, limit=limit, match_parenthetical_aliases=False)
+    return [originals[doc["chunk_id"]] for doc in ranked]
 
 
 def search_manual_keywords(item_names: list[str], question: str, heading_path: str = "") -> list[dict] | None:

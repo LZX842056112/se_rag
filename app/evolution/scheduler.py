@@ -33,6 +33,7 @@ from app.rag.query.embedding_search_service import search_by_milvus
 from app.rag.query.greetings import is_plain_greeting
 from app.shared.config import settings
 from app.shared.runtime.logger import logger
+from app.shared.runtime.workflow_monitor import CYCLE, Run, candidate_changed, node_status, observe
 
 # 周期任务的最近执行时间（进程内；重启后视为「已到点」，当轮即执行一次）
 _LAST_METRIC_TS = 0.0
@@ -47,11 +48,14 @@ def _claim_gap(doc: dict) -> dict | None:
         match.update(lease_until={"$lte": now}, processing_owner=doc.get("processing_owner"))
     # 覆盖候选生成的两次尝试和 SDK 内部的有界重试。
     lease = max(120, settings.import_.llm_timeout_seconds * (settings.import_.llm_max_retries + 1) * 2 + 60)
-    return evolution_repo.k_gaps.find_one_and_update(match, {"$set": {
+    claimed = evolution_repo.k_gaps.find_one_and_update(match, {"$set": {
         "status": "processing", "resume_status": doc.get("resume_status") or doc["status"],
         "processing_owner": uuid.uuid4().hex, "lease_until": now + lease,
         "last_attempt_at": now, "processing_reason": "后台处理中，请稍后刷新",
     }}, return_document=ReturnDocument.AFTER)
+    if claimed:
+        candidate_changed()
+    return claimed
 
 
 def _finish_gap(doc: dict, patch: dict) -> None:
@@ -63,6 +67,7 @@ def _finish_gap(doc: dict, patch: dict) -> None:
     if not result.matched_count:
         raise GapClaimLost("缺口领取已失效，未提交处理结果")
     activate_gap_registrations(evolution_repo.k_gaps.find_one({"_id": doc["_id"]}) or {})
+    candidate_changed()
 
 
 def _build_context(query: str, item_names: list[str] | None = None) -> list[dict[str, str]]:
@@ -139,10 +144,14 @@ def run_scan_and_generate_once() -> dict[str, int]:
     # 只读/导入进程不执行（写开关关闭时直接返回零统计）。
     if not writes_enabled():
         return result
+    scanning = True
     try:
         # 先对账注册，再扫描未解决反馈：把新出现的持续信号物化为候选/待处理缺口。
-        reconcile_registrations(settings.evolution.scan_batch)
-        scan_unresolved_feedbacks(batch=settings.evolution.scan_batch)
+        with observe("scan"):
+            reconcile_registrations(settings.evolution.scan_batch)
+            scan_unresolved_feedbacks(batch=settings.evolution.scan_batch)
+        scanning = False
+        node_status("gaps", "running")
         # 拉取待处理缺口：待生成 review/candidate，以及脱租（lease 过期）的 processing。
         # 同时过滤仍在退避期内（next_retry_at 未到）的条目，避免过早重试。
         pending = evolution_repo.k_gaps.find({"$and": [
@@ -177,9 +186,12 @@ def run_scan_and_generate_once() -> dict[str, int]:
                     except GapClaimLost:
                         pass
                 result["failed"] += 1
+        node_status("gaps", "failed" if result["failed"] else "completed")
     except Exception as exc:  # noqa: BLE001
         # 框架级异常（如查询本身失败）：记录后返回，不中断外层调度循环。
         logger.exception(f"调度单轮执行失败：{exc}")
+        if not scanning:
+            node_status("gaps", "failed")
     return result
 
 
@@ -199,11 +211,17 @@ def run_metrics_and_tuning_once() -> dict[str, object]:
     if not writes_enabled():
         return {"recorded": False, "tuned": False}
     # 计算一次快照并落库（采纳率、缺口率等指标）。
-    snapshot = compute_snapshot()
-    record_metric(snapshot)
+    with observe("metrics"):
+        snapshot = compute_snapshot()
+        record_metric(snapshot)
     try:
         # 用同一份快照驱动参数自调；自调属增强项，失败只降级不影响主链路。
-        tuned = adjust_step(snapshot)
+        if settings.evolution.auto_tune_enabled:
+            with observe("tuning"):
+                tuned = adjust_step(snapshot)
+        else:
+            node_status("tuning", "skipped")
+            tuned = False
     except Exception as exc:  # noqa: BLE001 - 自调属增强项，失败不影响主链路
         logger.warning(f"参数自调失败：{exc}")
         tuned = False
@@ -256,12 +274,22 @@ def run_evolution_cycle_once(*, now: float | None = None, force: bool = False) -
     if force or _due(_LAST_METRIC_TS, metric_interval, now):
         result["metrics"] = run_metrics_and_tuning_once()
         _LAST_METRIC_TS = now
+    else:
+        node_status("metrics", "skipped")
+        node_status("tuning", "skipped")
 
     # 阶段三：回测止损。到点（或 force）才执行，同样推进回测游标。
     backtest_interval = max(cfg.backtest_interval_hours, 0) * 3600
     if force or _due(_LAST_BACKTEST_TS, backtest_interval, now):
-        result["backtest"] = run_backtest_once()
+        if cfg.backtest_enabled and writes_enabled():
+            with observe("backtest"):
+                result["backtest"] = run_backtest_once()
+        else:
+            node_status("backtest", "skipped")
+            result["backtest"] = run_backtest_once()
         _LAST_BACKTEST_TS = now
+    else:
+        node_status("backtest", "skipped")
     return result
 
 
@@ -279,16 +307,45 @@ def loop_status() -> dict[str, object]:
     }
 
 
+def _begin_cycle() -> Run:
+    monitor = Run(CYCLE, uuid.uuid4().hex)
+    monitor.begin("processing", "调度轮次")
+    monitor.node("__start__", "completed")
+    return monitor
+
+
+def _publish_for_cycle() -> None:
+    from app.evolution.governance import run_publication_tasks
+
+    with observe("publication"):
+        if run_publication_tasks()["failed"]:
+            node_status("publication", "failed")
+
+
+async def run_scheduled_cycle() -> dict[str, object]:
+    monitor = await asyncio.to_thread(_begin_cycle)
+    try:
+        with monitor.activate():
+            await asyncio.to_thread(_publish_for_cycle)
+            result = await asyncio.to_thread(run_evolution_cycle_once)
+    except asyncio.CancelledError:
+        await asyncio.to_thread(monitor.status, "interrupted")
+        raise
+    except Exception:
+        await asyncio.to_thread(monitor.status, "failed", error_code="scheduler_error")
+        raise
+    failed = any(node["status"] == "failed" for node in monitor.data["nodes"].values())
+    await asyncio.to_thread(monitor.status, "failed" if failed else "completed",
+                            error_code="scheduler_stage_error" if failed else None)
+    return result
+
+
 async def evolution_scheduler_loop(interval_seconds: float) -> None:
     """后台循环：按间隔执行单轮扫描+生成；被取消时正常结束。"""
     while True:
         # 函数内部延迟导入，避免模块级循环依赖；阻塞调用放入线程池，避免阻塞事件循环。
         try:
-            from app.evolution.governance import run_publication_tasks
-            # 先消费发布队列：把已审批候选/撤销任务落地到在线索引。
-            await asyncio.to_thread(run_publication_tasks)
-            # 再执行一轮完整闭环：扫描缺口→生成候选→（按周期）指标自调/回测止损。
-            result = await asyncio.to_thread(run_evolution_cycle_once)
+            result = await run_scheduled_cycle()
             logger.info(f"调度执行完成：{result}")
         except Exception as exc:  # noqa: BLE001
             # 单轮异常不影响循环存活：记录堆栈后进入下一轮。

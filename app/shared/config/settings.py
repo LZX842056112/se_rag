@@ -140,6 +140,8 @@ class ApiSettings:
     session_ownership_enabled: bool = True  # 是否启用会话属主校验（SESSION_OWNERSHIP_ENABLED）
     query_workers: int = 2  # 查询服务 worker 数（QUERY_APP_WORKERS），需 Redis
     import_workers: int = 2  # 导入服务 worker 数（IMPORT_APP_WORKERS），需 Redis
+    workflow_import_origin: str = ""  # 问答服务到导入服务的内部地址
+    workflow_query_origin: str = ""  # 导入服务到问答服务的内部地址
 
 
 @dataclass
@@ -334,6 +336,8 @@ def _build_settings() -> Settings:
             parent_chunks_collection=env_str("PARENT_CHUNKS_COLLECTION", "kb_parent_chunks"),  # 章节父块集合，默认 kb_parent_chunks
         ),
         api=ApiSettings(
+            workflow_import_origin=env_str("WORKFLOW_IMPORT_ORIGIN", ""),
+            workflow_query_origin=env_str("WORKFLOW_QUERY_ORIGIN", ""),
             session_ownership_enabled=env_bool("SESSION_OWNERSHIP_ENABLED", True),  # 会话属主校验，默认开启
             import_app_name=env_str("IMPORT_APP_NAME", "知汇导入服务"),  # 导入服务名，默认 "知汇导入服务"
             query_app_name=env_str("QUERY_APP_NAME", "知汇问答服务"),  # 问答服务名，默认 "知汇问答服务"

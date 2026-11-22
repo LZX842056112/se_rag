@@ -13,6 +13,7 @@ from app.evolution.models import KnowledgeCandidate
 from app.evolution.repositories import evolution_repo
 from app.rag.query.greetings import is_plain_greeting
 from app.shared.runtime.logger import logger
+from app.shared.runtime.workflow_monitor import candidate_changed
 
 
 def list_gaps(limit: int = 100) -> list[dict]:
@@ -48,6 +49,7 @@ def finish_gap_review(gap: dict) -> str:
     if not result.matched_count and current.get("candidate_id") != candidate_id:
         raise GapClaimLost("缺口复核状态已变化")
     activate_gap_registrations(current)
+    candidate_changed()
     return candidate_id
 
 
@@ -84,6 +86,7 @@ def review_gap(gap_id: str, *, disposition: str, reason: str) -> tuple[bool, str
             if disposition == "knowledge_missing" and current.get("status") == "reviewing":
                 return True, finish_gap_review(current)
             return False, "缺口状态已变化，请刷新后重试"
+        candidate_changed()
         return (True, finish_gap_review(reviewed)) if status == "reviewing" else (True, "已忽略")
     except GapClaimLost:
         try:

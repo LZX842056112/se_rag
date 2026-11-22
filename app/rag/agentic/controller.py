@@ -14,8 +14,17 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.rag.agentic.budget import Budget, StopRun, local_tokenizer
 from app.rag.query.eval_evidence import chunk_ids
+from app.rag.query.restart_timing import (
+    QUOTE_INSTRUCTIONS,
+    QUOTE_SCHEMA,
+    needs_restart_timing_quotes,
+    render_restart_timing_answer,
+    restart_timing_has_explicit_effect,
+)
 from app.shared.config import settings
 from app.shared.runtime.query_metrics import measure_stage
+from app.shared.runtime.workflow_monitor import node_status, observe
+from app.shared.utils.answer import NO_ANSWER_REPLY
 
 
 class Action(BaseModel):
@@ -49,6 +58,8 @@ def _model(kind, payload, timeout):
         'draft': '{"answer":"有证据支持的用户可见答案"}',
         'verify': '{"supported":true,"evidence_ids":["id"],"unsupported":[]}',
     }
+    if kind == 'draft' and payload.get('restart_timing'):
+        schemas['draft'] = QUOTE_SCHEMA
     # 公共提示词：只有受到控数据源直接支持的事实才能判定 supported，
     # 并强制 evidence_ids 逐字复制，杜绝自行缩写或混用 chunk_id。
     prompt = (f'任务:{kind}。只输出JSON，格式:{schemas[kind]}。'
@@ -73,12 +84,20 @@ def _model(kind, payload, timeout):
                    '证据可以给出否定结论。若证据明确说明该型号不具备所问功能、无法执行所问操作，'
                    '或明确否定问题中的前提，这属于对问题的直接回答，应判定supported并引用该证据。'
                    '不要因为缺少操作步骤而判missing；只要结论明确且无相反证据，就按supported处理。')
+        if payload.get('restart_timing'):
+            prompt += ('\n若只缺重启后的生效时效，但证据直接说明如何重启，可以给出部分答案。'
+                       '将覆盖判为 supported，引用重启操作的证据。不要据操作说明推断生效时间。')
     elif kind == 'draft':
-        prompt += '\n按answer_prompt生成答案。引用已另存结构化来源，正文不需要展示内部证据哈希。'
+        if payload.get('restart_timing'):
+            prompt += '\n' + QUOTE_INSTRUCTIONS
+        else:
+            prompt += '\n按answer_prompt生成答案。引用已另存结构化来源，正文不需要展示内部证据哈希。'
     elif kind == 'verify':
         prompt += ('\n逐项检查draft的结论和操作是否由answer_contexts直接支持且回答question。'
                    '其他症状的操作、未经请求且非必要的步骤、遗漏的安全条件或同时作答和拒答都判为不通过。'
                    '来源ID只能从给定evidence_ids中逐字选择。')
+        if payload.get('restart_timing'):
+            prompt += '\n资料未说明重启生效时效时，允许只回答有依据的重启操作，并指出时效未说明。'
     if kind == 'select':
         # 动作选择：输出必须严格命中 Action 的 JSON Schema，不允许多余字段
         prompt += ('\n动作必须符合以下JSON Schema，不得增加reason等字段：' +
@@ -169,6 +188,10 @@ class Run:
             if kind == 'draft':
                 payload['answer_prompt'] = self.state.get('prompt', '')  # 草稿阶段把答案提示词一并传入
                 self.answer_contexts = payload['answer_contexts']
+        if needs_restart_timing_quotes(self.state):
+            payload['question'] = self.state.get('rewrite_hint') or self.state['original_query']
+            if kind in ('assess', 'draft', 'verify'):
+                payload['restart_timing'] = True
         with measure_stage(f"agentic_{kind}"):
             result = self.model(kind, payload, timeout)
         self.budget.remaining()  # 出模型后再查一次时长，防止调用期间超预算
@@ -200,22 +223,32 @@ class Run:
         self.retrieval_chunk_ids.update(dict.fromkeys(chunk_ids(rows)))
         self.budget.remaining()
         new = 0
+        omitted = 0
         ids = []
         for row in rows:
             eid = str(row.get('evidence_id') or '')
             if not eid or not row.get('text'):
                 continue  # 缺 id 或无正文的条目丢弃
-            # 本轮证据进上下文前先扣减预算 token
-            self.budget.consume(json.dumps(_visible_evidence(row), ensure_ascii=False, sort_keys=True))
             previous = self.evidence.get(eid)
             if previous != row:
-                new += 1  # 与既有记录不一致才视为「新证据」
-            self.evidence[eid] = row
+                try:
+                    self.budget.consume(json.dumps(_visible_evidence(row), ensure_ascii=False, sort_keys=True))
+                except StopRun as exc:
+                    if str(exc) != 'context_budget':
+                        raise
+                    omitted += 1
+                    continue
+                self.evidence[eid] = row
+                new += 1
             ids.append(eid)
         self.no_gain = self.no_gain + 1 if not new else 0
         # 记录一次工具执行轨迹（耗时、状态、命中的证据 id）
         self.trace.append({'tool': tool, 'arguments': arguments, 'status': result.get('status'),
                            'evidence_ids': ids, 'elapsed_ms': (time.monotonic()-started)*1000})
+        if omitted:
+            self.trace[-1]['context_omitted'] = omitted
+            if not self.evidence or self.no_gain >= 2:
+                raise StopRun('context_budget')
         if self.no_gain >= 2:
             raise StopRun('no_new_evidence')
 
@@ -268,6 +301,25 @@ class Run:
             self.route = 'draft'
         else:
             self.route = 'select'
+            if self.coverage == 'missing' and needs_restart_timing_quotes(self.state):
+                partial_id = self._partial_restart_evidence()
+                if partial_id:
+                    self.final_ids = [partial_id]
+                    self.trace.append({'stage': 'assess', 'status': 'partial', 'evidence_ids': self.final_ids})
+                    self.route = 'draft'
+
+    def _partial_restart_evidence(self) -> str | None:
+        docs = [_doc(row) for row in self.evidence.values() if row.get('metadata', {}).get('read', True)]
+        quote_state = dict(self.state, reranked_docs=docs)
+        if restart_timing_has_explicit_effect(quote_state):
+            return None
+        answer = render_restart_timing_answer(quote_state, {})
+        if answer == NO_ANSWER_REPLY:
+            return None
+        for doc in docs:
+            if render_restart_timing_answer(dict(quote_state, reranked_docs=[doc]), {}) == answer:
+                return doc['evidence_id']
+        return None
 
     def select(self):
         """决策下一步动作：search/read 继续执行工具；answer 进入生成；clarify/handoff 终结。"""
@@ -314,7 +366,8 @@ class Run:
         # 与实际模型输入相同的内容；不注入参考答案。
         self.state['prompt'] = load_answer_prompt(self.state)
         result = self.call('draft')
-        answer = result.get('answer')
+        answer = (render_restart_timing_answer(self.state, result) if needs_restart_timing_quotes(self.state)
+                  else result.get('answer'))
         if not isinstance(answer, str) or not answer.strip():
             raise ValueError('empty_answer')  # 空答案直接判为失败
         self.answer = answer
@@ -322,8 +375,6 @@ class Run:
 
     def verify(self):
         """核验草稿：所有事实与安全限制都须由最终证据支持，才可作为最终答案。"""
-        from app.rag.query.answer_service import NO_ANSWER_REPLY
-
         if NO_ANSWER_REPLY in self.answer:
             result = {'supported': False, 'unsupported': ['草稿含有固定拒答句']}
         else:
@@ -355,10 +406,17 @@ def _doc(row):
     return evidence_to_doc(row)
 
 
-def _node(stage):
+def _node(name, stage):
     """把 Run 的阶段方法包装成 LangGraph 节点：节点只负责调用并回写 state。"""
     def invoke(state):
-        state['runtime'].step(stage)
+        run = state['runtime']
+        node_id = 'agentic:' + name
+        with observe(node_id):
+            run.step(stage)
+            if run.route == 'finish':
+                if run.trace and run.trace[-1].get('stage') == stage and run.trace[-1].get('error'):
+                    node_status(node_id, 'failed')
+                node_status('agentic:__end__', 'completed')
         return state
     return invoke
 
@@ -374,15 +432,20 @@ def _build_graph():
     # 阶段名 -> Run 上的方法名；execute 方法名与阶段名不一致，故单独映射
     stages = {'bootstrap': 'bootstrap', 'assess': 'assess', 'select': 'select',
               'execute': 'execute_action', 'draft': 'draft', 'verify': 'verify'}
+    routes = {
+        'bootstrap': ('assess',), 'assess': ('draft', 'select'),
+        'select': ('select', 'draft', 'execute'), 'execute': ('assess',),
+        'draft': ('verify',), 'verify': ('draft',),
+    }
     for name, method in stages.items():
         # 每个阶段注册为独立节点，节点执行对应 Run 方法并回写 state
-        graph.add_node(name, _node(method))
+        graph.add_node(name, _node(name, method))
     graph.set_entry_point('bootstrap')  # 从首轮搜索开始
     for name in stages:
         # 条件边：读每个运行实例的 route 字段，跳到同名节点或 finish 结束；
         # 映射表 diff 展开后形如 {bootstrap:.., assess:.., ..., finish:END}
         graph.add_conditional_edges(name, lambda s: s['runtime'].route,
-                                    {**{key: key for key in stages}, 'finish': END})
+                                    {**{key: key for key in routes[name]}, 'finish': END})
     return graph.compile()
 
 
@@ -416,6 +479,7 @@ def run_agentic(state, *, tools=None, model=None, budget=None, persist=True):
         run.halt('business_policy')
     else:
         # 以 Run 实例为图状态运行；最大递归 64 层防止无限循环
+        node_status('agentic:__start__', 'completed')
         _graph.invoke({'runtime': run}, config={'recursion_limit': 64})
     if run.reason == 'answered':
         # 核验通过：采用最终答案并收集证据清单；策略有效性可能在模型请求中变化，故再次应用
@@ -448,6 +512,7 @@ def run_agentic(state, *, tools=None, model=None, budget=None, persist=True):
     state['agentic_metrics'] = {'model_calls': run.model_calls, 'tool_calls': budget.calls,
         'web_calls': budget.web_calls, 'tool_output_tokens': budget.tokens, 'token_counting': budget.counting,
         'elapsed_ms': (budget.clock()-budget.started)*1000, 'repairs': run.repairs,
+        'stop_reason': run.reason,
         'policy_version': cfg.policy_version, 'revalidations': state.get('agentic_revalidation', [])}
     answers.extract_text_image_url(state)
     if persist:
